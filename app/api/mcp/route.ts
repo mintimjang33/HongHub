@@ -174,6 +174,78 @@ const baseHandler = createMcpHandler(
     );
 
     server.registerTool(
+      'list_mcp_connectors',
+      { description: 'Claude에 연결해둔 MCP 커넥터 목록을 조회한다.', inputSchema: z.object({}) },
+      async () => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_mcp_connectors').select('*').order('sort_order').order('created_at');
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message} (hub_mcp_connectors 테이블이 없으면 _migration_6_mcp_connectors.sql 실행 필요)` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'add_mcp_connector',
+      {
+        description: '새 MCP 커넥터 기록을 추가한다.',
+        inputSchema: z.object({
+          name: z.string().describe('커넥터 이름'),
+          tags: urlArg.describe('배지 태그(예: 웹, 데스크톱, 사용자정의)'),
+          connected: z.boolean().optional().describe('기본값 true'),
+          site_id: z.string().optional().describe('관련된 기존 프로젝트의 id(list_sites로 확인, 선택)'),
+          notes: z.string().optional(),
+        }),
+      },
+      async (args) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase
+          .from('hub_mcp_connectors')
+          .insert({ ...args, tags: toUrlArray(args.tags), connected: args.connected !== false })
+          .select()
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'update_mcp_connector',
+      {
+        description: '등록된 MCP 커넥터 기록을 수정한다(id 기준, 넘긴 필드만 갱신).',
+        inputSchema: z.object({
+          id: z.string().describe('수정할 커넥터의 id (list_mcp_connectors로 확인)'),
+          name: z.string().optional(),
+          tags: urlArg,
+          connected: z.boolean().optional(),
+          site_id: z.string().optional(),
+          notes: z.string().optional(),
+        }),
+      },
+      async ({ id, ...fields }) => {
+        const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        for (const [k, v] of Object.entries(fields)) {
+          if (v === undefined) continue;
+          update[k] = k === 'tags' ? toUrlArray(v) : v;
+        }
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_mcp_connectors').update(update).eq('id', id).select().single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'delete_mcp_connector',
+      { description: 'MCP 커넥터 기록을 삭제한다.', inputSchema: z.object({ id: z.string().describe('삭제할 커넥터의 id') }) },
+      async ({ id }) => {
+        const supabase = getSupabaseServerClient();
+        const { error } = await supabase.from('hub_mcp_connectors').delete().eq('id', id);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: '삭제됨' }] };
+      }
+    );
+
+    server.registerTool(
       'list_tables',
       { description: '이 슈퍼베이스 프로젝트(유쓰레드/유쇼츠와 공유)의 public 스키마 테이블 목록을 조회한다.', inputSchema: z.object({}) },
       async () => {

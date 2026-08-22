@@ -221,6 +221,12 @@ export default function Home() {
             >
               🔍 벤치마킹 아이템
             </Link>
+            <Link
+              href="/connectors"
+              className="text-xs font-black px-5 py-3 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+            >
+              🔌 MCP 커넥터
+            </Link>
             <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
               + 사이트 추가
             </button>
