@@ -137,9 +137,17 @@ export default function Home() {
             <h1 className="text-2xl font-black">🏠 HongHub</h1>
             <p className="text-xs text-neutral-400 mt-1">내 사이트/프로젝트 계정을 한눈에 모아보는 관리 허브</p>
           </div>
-          <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
-            + 사이트 추가
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
+              + 사이트 추가
+            </button>
+            <button
+              onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => (window.location.href = '/login'))}
+              className="text-xs text-neutral-400 font-bold px-3 py-3 hover:text-black"
+            >
+              로그아웃
+            </button>
+          </div>
         </div>
 
         {loading ? (
