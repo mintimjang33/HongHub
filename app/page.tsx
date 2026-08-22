@@ -17,6 +17,18 @@ type Site = {
   plan_file_name: string | null;
 };
 
+const KNOWN_EMAILS = [
+  'mintimjang33@gmail.com',
+  'minsiljang0@gmail.com',
+  'minssajang@gmail.com',
+  'minsiljjang@gmail.com',
+  'jiphj0307@gmail.com',
+  'afterschool.rollbook@gmail.com',
+  'ssajuboyz@gmail.com',
+  'poohssam79@gmail.com',
+  'helpfulfood365@gmail.com',
+];
+
 const QUICK_LINKS = [
   { label: '유튜브', icon: '▶️', url: 'https://studio.youtube.com' },
   { label: '인스타그램', icon: '📸', url: 'https://www.instagram.com' },
@@ -138,6 +150,19 @@ export default function Home() {
     load();
   }
 
+  const groups: { email: string; sites: Site[] }[] = [];
+  for (const email of KNOWN_EMAILS) {
+    const matched = sites.filter((s) => s.admin_email === email);
+    if (matched.length > 0) groups.push({ email, sites: matched });
+  }
+  for (const s of sites) {
+    const email = s.admin_email || '';
+    if ((!email || !KNOWN_EMAILS.includes(email)) && !groups.some((g) => g.email === (email || '__unassigned__'))) {
+      const key = email || '__unassigned__';
+      groups.push({ email: key, sites: sites.filter((x) => (x.admin_email || '__unassigned__') === key) });
+    }
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50">
       <div className="max-w-5xl mx-auto px-6 py-10">
@@ -180,49 +205,58 @@ export default function Home() {
             아직 등록된 사이트가 없어요. &quot;+ 사이트 추가&quot;로 시작해보세요.
           </div>
         ) : (
-          <div className="grid md:grid-cols-2 gap-4">
-            {sites.map((s) => (
-              <div key={s.id} className="bg-white border border-neutral-200 rounded-xl p-5 shadow-sm">
-                <div className="flex items-start justify-between mb-3">
-                  <h2 className="font-black text-base">{s.name}</h2>
-                  <div className="flex gap-2 flex-shrink-0">
-                    <button onClick={() => openEdit(s)} className="text-[11px] text-neutral-400 font-bold hover:text-black">
-                      수정
-                    </button>
-                    <button onClick={() => handleDelete(s.id)} className="text-[11px] text-red-400 font-bold hover:text-red-600">
-                      삭제
-                    </button>
-                  </div>
+          <div className="space-y-8">
+            {groups.map((g) => (
+              <div key={g.email}>
+                <h2 className="text-xs font-black text-neutral-400 mb-3 flex items-center gap-2">
+                  {g.email === '__unassigned__' ? '📭 미분류' : `✉️ ${g.email}`}
+                  <span className="font-normal">({g.sites.length})</span>
+                </h2>
+                <div className="grid md:grid-cols-2 gap-4">
+                  {g.sites.map((s) => (
+                    <div key={s.id} className="bg-white border border-neutral-200 rounded-xl p-5 shadow-sm">
+                      <div className="flex items-start justify-between mb-3">
+                        <h3 className="font-black text-base">{s.name}</h3>
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button onClick={() => openEdit(s)} className="text-[11px] text-neutral-400 font-bold hover:text-black">
+                            수정
+                          </button>
+                          <button onClick={() => handleDelete(s.id)} className="text-[11px] text-red-400 font-bold hover:text-red-600">
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 text-[11px] text-neutral-400 mb-3">
+                        {s.start_date && <span>📅 {s.start_date} 시작</span>}
+                        {s.plan_file_url && (
+                          <a href={s.plan_file_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 font-bold hover:underline">
+                            📎 {s.plan_file_name || '계획서'}
+                          </a>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {LINK_FIELDS.map((f) => {
+                          const url = s[f.key] as string | null;
+                          if (!url) return null;
+                          return (
+                            <a
+                              key={f.key}
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-bold bg-neutral-100 hover:bg-neutral-200 px-3 py-1.5 rounded-full"
+                            >
+                              {f.icon} {f.label}
+                            </a>
+                          );
+                        })}
+                      </div>
+                      {s.notes && (
+                        <p className="text-xs text-neutral-500 whitespace-pre-wrap border-t border-neutral-100 pt-3">{s.notes}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
-                <div className="flex flex-wrap gap-x-3 text-[11px] text-neutral-400 mb-3">
-                  {s.admin_email && <span>✉️ {s.admin_email}</span>}
-                  {s.start_date && <span>📅 {s.start_date} 시작</span>}
-                  {s.plan_file_url && (
-                    <a href={s.plan_file_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 font-bold hover:underline">
-                      📎 {s.plan_file_name || '계획서'}
-                    </a>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {LINK_FIELDS.map((f) => {
-                    const url = s[f.key] as string | null;
-                    if (!url) return null;
-                    return (
-                      <a
-                        key={f.key}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[11px] font-bold bg-neutral-100 hover:bg-neutral-200 px-3 py-1.5 rounded-full"
-                      >
-                        {f.icon} {f.label}
-                      </a>
-                    );
-                  })}
-                </div>
-                {s.notes && (
-                  <p className="text-xs text-neutral-500 whitespace-pre-wrap border-t border-neutral-100 pt-3">{s.notes}</p>
-                )}
               </div>
             ))}
           </div>
@@ -244,8 +278,14 @@ export default function Home() {
                 value={form.admin_email}
                 onChange={(e) => setForm((f) => ({ ...f, admin_email: e.target.value }))}
                 placeholder="관리 이메일"
+                list="known-emails"
                 className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
               />
+              <datalist id="known-emails">
+                {KNOWN_EMAILS.map((e) => (
+                  <option key={e} value={e} />
+                ))}
+              </datalist>
               <input
                 value={form.live_url}
                 onChange={(e) => setForm((f) => ({ ...f, live_url: e.target.value }))}
