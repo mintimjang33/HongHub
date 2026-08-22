@@ -236,7 +236,7 @@ export default function Home() {
               <input
                 value={form.supabase_url}
                 onChange={(e) => setForm((f) => ({ ...f, supabase_url: e.target.value }))}
-                placeholder="슈퍼베이스 URL"
+                placeholder="슈퍼베이스 대시보드 URL (supabase.com/dashboard/project/...)"
                 className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
               />
               <input
