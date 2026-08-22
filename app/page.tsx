@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 type Site = {
   id: string;
@@ -214,6 +215,12 @@ export default function Home() {
             <p className="text-xs text-neutral-400 mt-1">내 사이트/프로젝트 계정을 한눈에 모아보는 관리 허브</p>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href="/benchmarks"
+              className="text-xs font-black px-5 py-3 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+            >
+              🔍 벤치마킹 아이템
+            </Link>
             <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
               + 사이트 추가
             </button>

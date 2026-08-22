@@ -101,6 +101,79 @@ const baseHandler = createMcpHandler(
     );
 
     server.registerTool(
+      'list_benchmarks',
+      {
+        description: '벤치마킹할 아이템(깃허브/사이트/노션 등) 목록을 조회한다. 특정 사이트에 종속되지 않은 별도 수집함.',
+        inputSchema: z.object({}),
+      },
+      async () => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_benchmarks').select('*').order('sort_order').order('created_at');
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message} (hub_benchmarks 테이블이 없으면 _migration_5_benchmarks.sql 실행 필요)` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'add_benchmark',
+      {
+        description: '새 벤치마킹 아이템을 등록한다(깃허브 저장소, 사이트, 노션 페이지 등).',
+        inputSchema: z.object({
+          name: z.string().describe('아이템 이름'),
+          url: z.string().describe('URL'),
+          type: z.enum(['github', 'site', 'notion', 'other']).optional().describe('기본값 site'),
+          status: z.string().optional().describe('후보/검토중/클론예정/완료/보류 중 하나, 기본값 후보'),
+          notes: z.string().optional().describe('활용 방안, 눈여겨본 이유 등'),
+          site_id: z.string().optional().describe('관련된 기존 프로젝트의 id(list_sites로 확인, 선택)'),
+        }),
+      },
+      async (args) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_benchmarks').insert(args).select().single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'update_benchmark',
+      {
+        description: '등록된 벤치마킹 아이템을 수정한다(id 기준, 넘긴 필드만 갱신).',
+        inputSchema: z.object({
+          id: z.string().describe('수정할 아이템의 id (list_benchmarks로 확인)'),
+          name: z.string().optional(),
+          url: z.string().optional(),
+          type: z.enum(['github', 'site', 'notion', 'other']).optional(),
+          status: z.string().optional(),
+          notes: z.string().optional(),
+          site_id: z.string().optional(),
+        }),
+      },
+      async ({ id, ...fields }) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase
+          .from('hub_benchmarks')
+          .update({ ...fields, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .select()
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'delete_benchmark',
+      { description: '벤치마킹 아이템을 삭제한다.', inputSchema: z.object({ id: z.string().describe('삭제할 아이템의 id') }) },
+      async ({ id }) => {
+        const supabase = getSupabaseServerClient();
+        const { error } = await supabase.from('hub_benchmarks').delete().eq('id', id);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: '삭제됨' }] };
+      }
+    );
+
+    server.registerTool(
       'list_tables',
       { description: '이 슈퍼베이스 프로젝트(유쓰레드/유쇼츠와 공유)의 public 스키마 테이블 목록을 조회한다.', inputSchema: z.object({}) },
       async () => {
