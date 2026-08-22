@@ -17,6 +17,15 @@ type Site = {
   plan_file_name: string | null;
 };
 
+const QUICK_LINKS = [
+  { label: '유튜브', icon: '▶️', url: 'https://studio.youtube.com' },
+  { label: '인스타그램', icon: '📸', url: 'https://www.instagram.com' },
+  { label: '쓰레드', icon: '🧵', url: 'https://www.threads.com' },
+  { label: '페이스북', icon: '📘', url: 'https://www.facebook.com' },
+  { label: '틱톡', icon: '🎵', url: 'https://www.tiktok.com/upload' },
+  { label: '네이버 블로그', icon: 'N', url: 'https://blog.naver.com' },
+];
+
 const LINK_FIELDS: { key: keyof Site; label: string; icon: string }[] = [
   { key: 'live_url', label: '접속', icon: '🌐' },
   { key: 'github_url', label: '깃허브', icon: '🐙' },
@@ -148,6 +157,20 @@ export default function Home() {
               로그아웃
             </button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-8">
+          {QUICK_LINKS.map((l) => (
+            <a
+              key={l.label}
+              href={l.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs font-bold bg-white border border-neutral-200 hover:border-neutral-400 px-4 py-2.5 rounded-full shadow-sm"
+            >
+              <span>{l.icon}</span> {l.label}
+            </a>
+          ))}
         </div>
 
         {loading ? (
