@@ -38,6 +38,13 @@ const QUICK_LINKS = [
   { label: '네이버 블로그', icon: 'N', url: 'https://blog.naver.com' },
 ];
 
+const GUIDE_DOCS = [
+  { label: '클론 진행 프로세스', desc: '사이트를 클론할 때 거치는 표준 절차', icon: '🧭', url: '/docs/CLONE_PROCESS.md' },
+  { label: 'MCP 만드는 법', desc: '새 프로젝트에 MCP 서버 붙이는 방법', icon: '🔌', url: '/docs/MCP_GUIDE.md' },
+  { label: '크론/예약작업 가이드', desc: '반복 실행 기능 붙일 때 필수 절차', icon: '⏰', url: '/docs/CRON_GUIDE.md' },
+  { label: '계획서 작성 템플릿', desc: '사이트 등록 시 계획서 표준 양식', icon: '📄', url: '/PLAN_TEMPLATE.md' },
+];
+
 const LINK_FIELDS: { key: keyof Site; label: string; icon: string }[] = [
   { key: 'live_url', label: '접속', icon: '🌐' },
   { key: 'github_url', label: '깃허브', icon: '🐙' },
@@ -196,6 +203,25 @@ export default function Home() {
               <span>{l.icon}</span> {l.label}
             </a>
           ))}
+        </div>
+
+        <div className="mb-8">
+          <h2 className="text-xs font-black text-neutral-400 mb-3">📚 가이드 문서</h2>
+          <div className="grid md:grid-cols-4 gap-3">
+            {GUIDE_DOCS.map((d) => (
+              <a
+                key={d.url}
+                href={d.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-white border border-neutral-200 hover:border-neutral-400 rounded-xl p-4 shadow-sm"
+              >
+                <div className="text-xl mb-1">{d.icon}</div>
+                <div className="text-xs font-black mb-1">{d.label}</div>
+                <div className="text-[11px] text-neutral-400">{d.desc}</div>
+              </a>
+            ))}
+          </div>
         </div>
 
         {loading ? (
