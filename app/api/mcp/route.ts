@@ -79,6 +79,66 @@ const baseHandler = createMcpHandler(
         return { content: [{ type: 'text', text: '삭제됨' }] };
       }
     );
+
+    server.registerTool(
+      'list_tables',
+      { description: '이 슈퍼베이스 프로젝트(유쓰레드/유쇼츠와 공유)의 public 스키마 테이블 목록을 조회한다.', inputSchema: z.object({}) },
+      async () => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.rpc('hub_run_sql', {
+          query: "select tablename from pg_tables where schemaname = 'public' order by tablename",
+        });
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message} (hub_run_sql RPC가 DB에 없으면 _migration_3_run_sql.sql 실행 필요)` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'run_sql',
+      {
+        description: 'SELECT 문만 실행 가능한 안전 SQL 실행 도구. 이 슈퍼베이스 프로젝트 전체(hub_sites뿐 아니라 유쓰레드 ut_*, 유쇼츠 테이블도 같은 프로젝트라 조회 가능)를 SELECT로 조회한다.',
+        inputSchema: z.object({ query: z.string().describe('SELECT로 시작하는 SQL 쿼리') }),
+      },
+      async ({ query }) => {
+        const trimmed = query.trim();
+        if (!/^select\s/i.test(trimmed) || /\b(insert|update|delete|drop|alter|truncate|grant|revoke|create)\b/i.test(trimmed)) {
+          return { content: [{ type: 'text', text: 'SELECT 문만 허용됩니다.' }] };
+        }
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.rpc('hub_run_sql', { query: trimmed });
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message} (hub_run_sql RPC가 DB에 없으면 _migration_3_run_sql.sql 실행 필요)` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'list_github_files',
+      {
+        description: 'HongHub GitHub 저장소(mintimjang33/HongHub)의 특정 경로에 어떤 파일·폴더가 있는지 조회한다.',
+        inputSchema: z.object({ path: z.string().optional().describe('비우면 루트') }),
+      },
+      async ({ path }) => {
+        const res = await fetch(`https://api.github.com/repos/mintimjang33/HongHub/contents/${path || ''}`);
+        const json = await res.json();
+        if (!res.ok) return { content: [{ type: 'text', text: `에러: ${JSON.stringify(json)}` }] };
+        const list = (Array.isArray(json) ? json : [json]).map((f: { name: string; type: string; size: number }) => `${f.type === 'dir' ? '📁' : '📄'} ${f.name}${f.type === 'dir' ? '' : ` (${f.size} bytes)`}`);
+        return { content: [{ type: 'text', text: list.join('\n') }] };
+      }
+    );
+
+    server.registerTool(
+      'get_github_file',
+      {
+        description: 'HongHub GitHub 저장소의 특정 파일 내용을 텍스트로 가져온다.',
+        inputSchema: z.object({ path: z.string().describe('예: app/page.tsx') }),
+      },
+      async ({ path }) => {
+        const res = await fetch(`https://raw.githubusercontent.com/mintimjang33/HongHub/main/${path}`);
+        if (!res.ok) return { content: [{ type: 'text', text: `에러: 파일을 찾을 수 없습니다 (${res.status})` }] };
+        const text = await res.text();
+        return { content: [{ type: 'text', text }] };
+      }
+    );
   },
   { verboseLogs: true }
 );
