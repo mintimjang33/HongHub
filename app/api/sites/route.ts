@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../lib/supabase';
 
+function toUrlArray(value: unknown): string[] | null {
+  const arr = Array.isArray(value) ? value : value ? [value] : [];
+  const cleaned = arr.map((v) => String(v).trim()).filter(Boolean);
+  return cleaned.length ? cleaned : null;
+}
+
 export async function GET() {
   const supabase = getSupabaseServerClient();
   const { data, error } = await supabase.from('hub_sites').select('*').order('sort_order').order('created_at');
@@ -18,11 +24,11 @@ export async function POST(request: Request) {
     .insert({
       name: body.name.trim(),
       admin_email: body.admin_email || null,
-      github_url: body.github_url || null,
-      vercel_url: body.vercel_url || null,
-      live_url: body.live_url || null,
-      supabase_url: body.supabase_url || null,
-      benchmark_url: body.benchmark_url || null,
+      github_url: toUrlArray(body.github_url),
+      vercel_url: toUrlArray(body.vercel_url),
+      live_url: toUrlArray(body.live_url),
+      supabase_url: toUrlArray(body.supabase_url),
+      benchmark_url: toUrlArray(body.benchmark_url),
       notes: body.notes || null,
       start_date: body.start_date || null,
       plan_file_url: body.plan_file_url || null,

@@ -2,6 +2,14 @@ import { createMcpHandler } from 'mcp-handler';
 import { z } from 'zod';
 import { getSupabaseServerClient } from '../../../lib/supabase';
 
+const urlArg = z.union([z.string(), z.array(z.string())]).optional().describe('URL 하나 또는 여러 개(배열)');
+
+function toUrlArray(value: unknown): string[] | null {
+  const arr = Array.isArray(value) ? value : value ? [value] : [];
+  const cleaned = arr.map((v) => String(v).trim()).filter(Boolean);
+  return cleaned.length ? cleaned : null;
+}
+
 const baseHandler = createMcpHandler(
   (server) => {
     server.registerTool(
@@ -22,18 +30,29 @@ const baseHandler = createMcpHandler(
         inputSchema: z.object({
           name: z.string().describe('사이트/프로젝트 이름'),
           admin_email: z.string().optional().describe('관리 이메일'),
-          github_url: z.string().optional(),
-          vercel_url: z.string().optional(),
-          live_url: z.string().optional().describe('실제 접속 URL'),
-          supabase_url: z.string().optional(),
-          benchmark_url: z.string().optional().describe('벤치마킹 대상 원본 사이트 URL'),
+          github_url: urlArg,
+          vercel_url: urlArg,
+          live_url: urlArg.describe('실제 접속 URL'),
+          supabase_url: urlArg,
+          benchmark_url: urlArg.describe('벤치마킹 대상 원본 사이트 URL(여러 개 가능)'),
           notes: z.string().optional(),
           start_date: z.string().optional().describe('시작일 (YYYY-MM-DD)'),
         }),
       },
       async (args) => {
         const supabase = getSupabaseServerClient();
-        const { data, error } = await supabase.from('hub_sites').insert(args).select().single();
+        const { data, error } = await supabase
+          .from('hub_sites')
+          .insert({
+            ...args,
+            github_url: toUrlArray(args.github_url),
+            vercel_url: toUrlArray(args.vercel_url),
+            live_url: toUrlArray(args.live_url),
+            supabase_url: toUrlArray(args.supabase_url),
+            benchmark_url: toUrlArray(args.benchmark_url),
+          })
+          .select()
+          .single();
         if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
         return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
       }
@@ -47,23 +66,24 @@ const baseHandler = createMcpHandler(
           id: z.string().describe('수정할 사이트의 id (list_sites로 확인)'),
           name: z.string().optional(),
           admin_email: z.string().optional(),
-          github_url: z.string().optional(),
-          vercel_url: z.string().optional(),
-          live_url: z.string().optional(),
-          supabase_url: z.string().optional(),
-          benchmark_url: z.string().optional(),
+          github_url: urlArg.describe('통째로 교체됨(기존 값에 추가가 아님). 기존 값 유지하려면 list_sites로 먼저 확인 후 합쳐서 넘길 것'),
+          vercel_url: urlArg,
+          live_url: urlArg,
+          supabase_url: urlArg,
+          benchmark_url: urlArg.describe('통째로 교체됨. 여러 벤치마킹 URL을 유지하려면 배열로 전체를 넘길 것'),
           notes: z.string().optional(),
           start_date: z.string().optional(),
         }),
       },
       async ({ id, ...fields }) => {
+        const ARRAY_FIELDS = new Set(['github_url', 'vercel_url', 'live_url', 'supabase_url', 'benchmark_url']);
+        const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        for (const [k, v] of Object.entries(fields)) {
+          if (v === undefined) continue;
+          update[k] = ARRAY_FIELDS.has(k) ? toUrlArray(v) : v;
+        }
         const supabase = getSupabaseServerClient();
-        const { data, error } = await supabase
-          .from('hub_sites')
-          .update({ ...fields, updated_at: new Date().toISOString() })
-          .eq('id', id)
-          .select()
-          .single();
+        const { data, error } = await supabase.from('hub_sites').update(update).eq('id', id).select().single();
         if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
         return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
       }

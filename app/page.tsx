@@ -6,11 +6,11 @@ type Site = {
   id: string;
   name: string;
   admin_email: string | null;
-  github_url: string | null;
-  vercel_url: string | null;
-  live_url: string | null;
-  supabase_url: string | null;
-  benchmark_url: string | null;
+  github_url: string[] | null;
+  vercel_url: string[] | null;
+  live_url: string[] | null;
+  supabase_url: string[] | null;
+  benchmark_url: string[] | null;
   notes: string | null;
   start_date: string | null;
   plan_file_url: string | null;
@@ -58,16 +58,22 @@ const LINK_FIELDS: { key: keyof Site; label: string; icon: string }[] = [
 const EMPTY_FORM = {
   name: '',
   admin_email: '',
-  github_url: '',
-  vercel_url: '',
-  live_url: '',
-  supabase_url: '',
-  benchmark_url: '',
+  github_url: [] as string[],
+  vercel_url: [] as string[],
+  live_url: [] as string[],
+  supabase_url: [] as string[],
+  benchmark_url: [] as string[],
   notes: '',
   start_date: '',
   plan_file_url: '',
   plan_file_name: '',
 };
+
+type ArrayField = 'github_url' | 'vercel_url' | 'live_url' | 'supabase_url' | 'benchmark_url';
+
+function toDisplayArray(v: string[] | null | undefined): string[] {
+  return v && v.length > 0 ? v : [''];
+}
 
 export default function Home() {
   const [sites, setSites] = useState<Site[]>([]);
@@ -100,11 +106,11 @@ export default function Home() {
     setForm({
       name: s.name || '',
       admin_email: s.admin_email || '',
-      github_url: s.github_url || '',
-      vercel_url: s.vercel_url || '',
-      live_url: s.live_url || '',
-      supabase_url: s.supabase_url || '',
-      benchmark_url: s.benchmark_url || '',
+      github_url: s.github_url || [],
+      vercel_url: s.vercel_url || [],
+      live_url: s.live_url || [],
+      supabase_url: s.supabase_url || [],
+      benchmark_url: s.benchmark_url || [],
       notes: s.notes || '',
       start_date: s.start_date || '',
       plan_file_url: s.plan_file_url || '',
@@ -113,21 +119,48 @@ export default function Home() {
     setShowForm(true);
   }
 
+  function setArrayValue(field: ArrayField, index: number, value: string) {
+    setForm((f) => {
+      const arr = f[field].length > 0 ? [...f[field]] : [''];
+      arr[index] = value;
+      return { ...f, [field]: arr };
+    });
+  }
+
+  function addArrayRow(field: ArrayField) {
+    setForm((f) => ({ ...f, [field]: [...(f[field].length > 0 ? f[field] : ['']), ''] }));
+  }
+
+  function removeArrayRow(field: ArrayField, index: number) {
+    setForm((f) => {
+      const arr = f[field].filter((_, i) => i !== index);
+      return { ...f, [field]: arr.length > 0 ? arr : [''] };
+    });
+  }
+
   async function handleSave() {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        github_url: form.github_url.map((v) => v.trim()).filter(Boolean),
+        vercel_url: form.vercel_url.map((v) => v.trim()).filter(Boolean),
+        live_url: form.live_url.map((v) => v.trim()).filter(Boolean),
+        supabase_url: form.supabase_url.map((v) => v.trim()).filter(Boolean),
+        benchmark_url: form.benchmark_url.map((v) => v.trim()).filter(Boolean),
+      };
       if (editingId) {
         await fetch(`/api/sites/${editingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         });
       } else {
         await fetch('/api/sites', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         });
       }
       setShowForm(false);
@@ -264,19 +297,19 @@ export default function Home() {
                       </div>
                       <div className="flex flex-wrap gap-2 mb-3">
                         {LINK_FIELDS.map((f) => {
-                          const url = s[f.key] as string | null;
-                          if (!url) return null;
-                          return (
+                          const urls = (s[f.key] as string[] | null) || [];
+                          return urls.map((url, i) => (
                             <a
-                              key={f.key}
+                              key={`${f.key}-${i}`}
                               href={url}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-[11px] font-bold bg-neutral-100 hover:bg-neutral-200 px-3 py-1.5 rounded-full"
                             >
                               {f.icon} {f.label}
+                              {urls.length > 1 ? ` ${i + 1}` : ''}
                             </a>
-                          );
+                          ));
                         })}
                       </div>
                       {s.notes && (
@@ -296,54 +329,69 @@ export default function Home() {
           <div className="bg-white p-6 max-w-md w-full rounded-xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <h2 className="font-black mb-4">{editingId ? '사이트 수정' : '+ 사이트 추가'}</h2>
             <div className="space-y-3">
-              <input
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="사이트/프로젝트 이름 *"
-                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
-              />
-              <input
-                value={form.admin_email}
-                onChange={(e) => setForm((f) => ({ ...f, admin_email: e.target.value }))}
-                placeholder="관리 이메일"
-                list="known-emails"
-                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
-              />
+              <div>
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">사이트/프로젝트 이름 *</label>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="사이트/프로젝트 이름"
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">관리 이메일</label>
+                <input
+                  value={form.admin_email}
+                  onChange={(e) => setForm((f) => ({ ...f, admin_email: e.target.value }))}
+                  placeholder="관리 이메일"
+                  list="known-emails"
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                />
+              </div>
               <datalist id="known-emails">
                 {KNOWN_EMAILS.map((e) => (
                   <option key={e} value={e} />
                 ))}
               </datalist>
-              <input
-                value={form.live_url}
-                onChange={(e) => setForm((f) => ({ ...f, live_url: e.target.value }))}
-                placeholder="접속 URL (https://...)"
-                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
-              />
-              <input
-                value={form.github_url}
-                onChange={(e) => setForm((f) => ({ ...f, github_url: e.target.value }))}
-                placeholder="깃허브 URL"
-                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
-              />
-              <input
-                value={form.vercel_url}
-                onChange={(e) => setForm((f) => ({ ...f, vercel_url: e.target.value }))}
-                placeholder="배포(Vercel) URL"
-                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
-              />
-              <input
-                value={form.supabase_url}
-                onChange={(e) => setForm((f) => ({ ...f, supabase_url: e.target.value }))}
-                placeholder="슈퍼베이스 대시보드 URL (supabase.com/dashboard/project/...)"
-                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
-              />
-              <input
-                value={form.benchmark_url}
-                onChange={(e) => setForm((f) => ({ ...f, benchmark_url: e.target.value }))}
-                placeholder="벤치마킹 URL"
-                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
-              />
+
+              {LINK_FIELDS.map((lf) => (
+                <div key={lf.key}>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] text-neutral-400 font-bold">
+                      {lf.icon} {lf.label}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => addArrayRow(lf.key as ArrayField)}
+                      className="text-[11px] text-blue-500 font-bold hover:underline"
+                    >
+                      + 추가
+                    </button>
+                  </div>
+                  <div className="space-y-1.5">
+                    {toDisplayArray(form[lf.key as ArrayField]).map((v, i) => (
+                      <div key={i} className="flex gap-1.5">
+                        <input
+                          value={v}
+                          onChange={(e) => setArrayValue(lf.key as ArrayField, i, e.target.value)}
+                          placeholder={`${lf.label} URL`}
+                          className="flex-1 min-w-0 border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                        />
+                        {toDisplayArray(form[lf.key as ArrayField]).length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeArrayRow(lf.key as ArrayField, i)}
+                            className="text-red-400 font-bold px-2 flex-shrink-0"
+                          >
+                            제거
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
               <div>
                 <label className="text-[11px] text-neutral-400 font-bold mb-1 block">시작 날짜</label>
                 <input
@@ -353,13 +401,16 @@ export default function Home() {
                   className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
                 />
               </div>
-              <textarea
-                value={form.notes}
-                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                placeholder="메모"
-                rows={3}
-                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
-              />
+              <div>
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">메모</label>
+                <textarea
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="메모"
+                  rows={3}
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                />
+              </div>
               <div className="border-t border-neutral-100 pt-3">
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[11px] text-neutral-400 font-bold">계획서 파일</label>
