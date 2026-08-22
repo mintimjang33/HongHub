@@ -42,6 +42,8 @@ const GUIDE_DOCS = [
   { label: '클론 진행 프로세스', desc: '사이트를 클론할 때 거치는 표준 절차', icon: '🧭', url: '/docs/CLONE_PROCESS.md' },
   { label: 'MCP 만드는 법', desc: '새 프로젝트에 MCP 서버 붙이는 방법', icon: '🔌', url: '/docs/MCP_GUIDE.md' },
   { label: '크론/예약작업 가이드', desc: '반복 실행 기능 붙일 때 필수 절차', icon: '⏰', url: '/docs/CRON_GUIDE.md' },
+  { label: '네이버/Threads API 가이드', desc: '실제 발급·연동 실전 기록', icon: '🔑', url: '/docs/API_SETUP_GUIDE.md' },
+  { label: '이메일 발송 서비스 가이드', desc: '어떤 서비스를 쓸지 추천(미검증)', icon: '✉️', url: '/docs/EMAIL_GUIDE.md' },
   { label: '계획서 작성 템플릿', desc: '사이트 등록 시 계획서 표준 양식', icon: '📄', url: '/PLAN_TEMPLATE.md' },
 ];
 
@@ -207,7 +209,7 @@ export default function Home() {
 
         <div className="mb-8">
           <h2 className="text-xs font-black text-neutral-400 mb-3">📚 가이드 문서</h2>
-          <div className="grid md:grid-cols-4 gap-3">
+          <div className="grid md:grid-cols-3 gap-3">
             {GUIDE_DOCS.map((d) => (
               <a
                 key={d.url}
