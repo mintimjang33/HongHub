@@ -184,6 +184,76 @@ const baseHandler = createMcpHandler(
     );
 
     server.registerTool(
+      'list_viral_posts',
+      { description: '플랫폼별로 저장해둔 "터진 글"(실제 반응 좋았던 게시물 원문+반응수치+분석) 목록을 조회한다.', inputSchema: z.object({}) },
+      async () => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_viral_posts').select('*').order('sort_order').order('created_at');
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message} (hub_viral_posts 테이블이 없으면 _migration_9_viral_posts.sql 실행 필요)` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'add_viral_post',
+      {
+        description: '실제로 반응 좋았던 게시물을 원문+반응수치+왜 터졌는지 분석과 함께 저장한다.',
+        inputSchema: z.object({
+          platform: z.enum(['threads', 'instagram', 'tiktok', 'youtube']),
+          account_name: z.string().describe('계정 이름/핸들'),
+          post_url: z.string().optional(),
+          content: z.string().describe('게시물 원문 그대로'),
+          engagement: z.string().optional().describe('예: "967 좋아요 · 127댓글 · 45리포스트"'),
+          analysis: z.string().optional().describe('첫 줄 훅 방식, 구조, 감정 트리거 등 왜 터졌는지'),
+        }),
+      },
+      async (args) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_viral_posts').insert(args).select().single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'update_viral_post',
+      {
+        description: '저장된 터진 글 기록을 수정한다(id 기준, 넘긴 필드만 갱신).',
+        inputSchema: z.object({
+          id: z.string().describe('수정할 글의 id (list_viral_posts로 확인)'),
+          platform: z.enum(['threads', 'instagram', 'tiktok', 'youtube']).optional(),
+          account_name: z.string().optional(),
+          post_url: z.string().optional(),
+          content: z.string().optional(),
+          engagement: z.string().optional(),
+          analysis: z.string().optional(),
+        }),
+      },
+      async ({ id, ...fields }) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase
+          .from('hub_viral_posts')
+          .update({ ...fields, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .select()
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'delete_viral_post',
+      { description: '터진 글 기록을 삭제한다.', inputSchema: z.object({ id: z.string().describe('삭제할 글의 id') }) },
+      async ({ id }) => {
+        const supabase = getSupabaseServerClient();
+        const { error } = await supabase.from('hub_viral_posts').delete().eq('id', id);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: '삭제됨' }] };
+      }
+    );
+
+    server.registerTool(
       'list_mcp_connectors',
       { description: 'Claude에 연결해둔 MCP 커넥터 목록을 조회한다.', inputSchema: z.object({}) },
       async () => {

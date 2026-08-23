@@ -135,6 +135,12 @@ export default function BenchmarksPage() {
             >
               👥 계정 모음 보기
             </Link>
+            <Link
+              href="/viral-posts"
+              className="text-xs font-black px-5 py-3 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+            >
+              🔥 터진 글 분석
+            </Link>
             <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
               + 아이템 추가
             </button>
