@@ -23,6 +23,8 @@ export async function POST(request: Request) {
     .from('hub_mcp_connectors')
     .insert({
       name: body.name.trim(),
+      url: body.url?.trim() || null,
+      admin_email: body.admin_email || null,
       tags: toTagArray(body.tags),
       connected: body.connected !== false,
       site_id: body.site_id || null,

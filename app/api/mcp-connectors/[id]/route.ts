@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../../lib/supabase';
 
-const FIELDS = ['name', 'tags', 'connected', 'site_id', 'notes', 'sort_order'];
+const FIELDS = ['name', 'url', 'admin_email', 'tags', 'connected', 'site_id', 'notes', 'sort_order'];
 
 function toTagArray(value: unknown): string[] | null {
   const arr = Array.isArray(value) ? value : value ? [value] : [];

@@ -6,6 +6,8 @@ import Link from 'next/link';
 type Connector = {
   id: string;
   name: string;
+  url: string | null;
+  admin_email: string | null;
   tags: string[] | null;
   connected: boolean;
   site_id: string | null;
@@ -14,7 +16,19 @@ type Connector = {
 
 type Site = { id: string; name: string };
 
-const EMPTY_FORM = { name: '', tags: '', connected: true, site_id: '', notes: '' };
+const KNOWN_EMAILS = [
+  'mintimjang33@gmail.com',
+  'minsiljang0@gmail.com',
+  'minssajang0@gmail.com',
+  'minsiljjang@gmail.com',
+  'jiphj0307@gmail.com',
+  'afterschool.rollbook@gmail.com',
+  'ssajuboyz@gmail.com',
+  'poohssam79@gmail.com',
+  'helpfulfood365@gmail.com',
+];
+
+const EMPTY_FORM = { name: '', url: '', admin_email: '', tags: '', connected: true, site_id: '', notes: '' };
 
 export default function ConnectorsPage() {
   const [items, setItems] = useState<Connector[]>([]);
@@ -51,6 +65,8 @@ export default function ConnectorsPage() {
     setEditingId(c.id);
     setForm({
       name: c.name || '',
+      url: c.url || '',
+      admin_email: c.admin_email || '',
       tags: (c.tags || []).join(', '),
       connected: c.connected,
       site_id: c.site_id || '',
@@ -95,6 +111,19 @@ export default function ConnectorsPage() {
 
   const siteName = (id: string | null) => sites.find((s) => s.id === id)?.name;
 
+  const groups: { email: string; items: Connector[] }[] = [];
+  for (const email of KNOWN_EMAILS) {
+    const matched = items.filter((c) => c.admin_email === email);
+    if (matched.length > 0) groups.push({ email, items: matched });
+  }
+  for (const c of items) {
+    const email = c.admin_email || '';
+    if ((!email || !KNOWN_EMAILS.includes(email)) && !groups.some((g) => g.email === (email || '__unassigned__'))) {
+      const key = email || '__unassigned__';
+      groups.push({ email: key, items: items.filter((x) => (x.admin_email || '__unassigned__') === key) });
+    }
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50">
       <div className="max-w-4xl mx-auto px-6 py-10">
@@ -118,33 +147,53 @@ export default function ConnectorsPage() {
             아직 기록된 커넥터가 없어요. &quot;+ 커넥터 추가&quot;로 시작해보세요.
           </div>
         ) : (
-          <div className="bg-white border border-neutral-200 rounded-xl divide-y divide-neutral-100 shadow-sm">
-            {items.map((c) => (
-              <div key={c.id} className="flex items-center justify-between px-5 py-3.5">
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${c.connected ? 'bg-green-500' : 'bg-neutral-300'}`} />
-                  <div className="min-w-0">
-                    <div className="font-bold text-sm truncate">{c.name}</div>
-                    {(c.notes || (c.site_id && siteName(c.site_id))) && (
-                      <div className="text-[11px] text-neutral-400 truncate">
-                        {c.site_id && siteName(c.site_id) && <span className="text-blue-500 font-bold">🔗 {siteName(c.site_id)} </span>}
-                        {c.notes}
+          <div className="space-y-8">
+            {groups.map((g) => (
+              <div key={g.email}>
+                <h2 className="text-xs font-black text-neutral-400 mb-3 flex items-center gap-2">
+                  {g.email === '__unassigned__' ? '📭 미분류' : `✉️ ${g.email}`}
+                  <span className="font-normal">({g.items.length})</span>
+                </h2>
+                <div className="bg-white border border-neutral-200 rounded-xl divide-y divide-neutral-100 shadow-sm">
+                  {g.items.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between px-5 py-3.5 gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${c.connected ? 'bg-green-500' : 'bg-neutral-300'}`} />
+                        <div className="min-w-0">
+                          <div className="font-bold text-sm truncate">{c.name}</div>
+                          {c.url && (
+                            <a
+                              href={c.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] text-blue-500 font-bold hover:underline truncate block max-w-[420px]"
+                            >
+                              {c.url}
+                            </a>
+                          )}
+                          {(c.notes || (c.site_id && siteName(c.site_id))) && (
+                            <div className="text-[11px] text-neutral-400 truncate">
+                              {c.site_id && siteName(c.site_id) && <span className="text-blue-500 font-bold">🔗 {siteName(c.site_id)} </span>}
+                              {c.notes}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  {(c.tags || []).map((t) => (
-                    <span key={t} className="text-[11px] font-bold bg-neutral-100 text-neutral-500 px-2.5 py-1 rounded-full">
-                      {t}
-                    </span>
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        {(c.tags || []).map((t) => (
+                          <span key={t} className="text-[11px] font-bold bg-neutral-100 text-neutral-500 px-2.5 py-1 rounded-full">
+                            {t}
+                          </span>
+                        ))}
+                        <button onClick={() => openEdit(c)} className="text-[11px] text-neutral-400 font-bold hover:text-black">
+                          수정
+                        </button>
+                        <button onClick={() => handleDelete(c.id)} className="text-[11px] text-red-400 font-bold hover:text-red-600">
+                          삭제
+                        </button>
+                      </div>
+                    </div>
                   ))}
-                  <button onClick={() => openEdit(c)} className="text-[11px] text-neutral-400 font-bold hover:text-black">
-                    수정
-                  </button>
-                  <button onClick={() => handleDelete(c.id)} className="text-[11px] text-red-400 font-bold hover:text-red-600">
-                    삭제
-                  </button>
                 </div>
               </div>
             ))}
@@ -166,6 +215,30 @@ export default function ConnectorsPage() {
                   className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
                 />
               </div>
+              <div>
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">커넥터 주소 (URL, ?key= 포함)</label>
+                <input
+                  value={form.url}
+                  onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+                  placeholder="https://xxx.vercel.app/api/mcp?key=..."
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">관리 이메일</label>
+                <input
+                  value={form.admin_email}
+                  onChange={(e) => setForm((f) => ({ ...f, admin_email: e.target.value }))}
+                  placeholder="관리 이메일"
+                  list="known-emails"
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                />
+              </div>
+              <datalist id="known-emails">
+                {KNOWN_EMAILS.map((e) => (
+                  <option key={e} value={e} />
+                ))}
+              </datalist>
               <div>
                 <label className="text-[11px] text-neutral-400 font-bold mb-1 block">태그 (쉼표로 구분)</label>
                 <input

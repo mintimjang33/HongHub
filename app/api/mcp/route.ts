@@ -190,6 +190,8 @@ const baseHandler = createMcpHandler(
         description: '새 MCP 커넥터 기록을 추가한다.',
         inputSchema: z.object({
           name: z.string().describe('커넥터 이름'),
+          url: z.string().optional().describe('커넥터 접속 주소(?key= 포함)'),
+          admin_email: z.string().optional().describe('관리 이메일(그룹핑용)'),
           tags: urlArg.describe('배지 태그(예: 웹, 데스크톱, 사용자정의)'),
           connected: z.boolean().optional().describe('기본값 true'),
           site_id: z.string().optional().describe('관련된 기존 프로젝트의 id(list_sites로 확인, 선택)'),
@@ -215,6 +217,8 @@ const baseHandler = createMcpHandler(
         inputSchema: z.object({
           id: z.string().describe('수정할 커넥터의 id (list_mcp_connectors로 확인)'),
           name: z.string().optional(),
+          url: z.string().optional(),
+          admin_email: z.string().optional(),
           tags: urlArg,
           connected: z.boolean().optional(),
           site_id: z.string().optional(),
