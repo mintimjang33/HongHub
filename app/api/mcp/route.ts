@@ -125,11 +125,18 @@ const baseHandler = createMcpHandler(
           status: z.string().optional().describe('후보/검토중/클론예정/완료/보류 중 하나, 기본값 후보'),
           notes: z.string().optional().describe('활용 방안, 눈여겨본 이유 등'),
           site_id: z.string().optional().describe('관련된 기존 프로젝트의 id(list_sites로 확인, 선택)'),
+          source_name: z.string().optional().describe('이 아이템을 어디서 찾았는지(예: 유튜브 채널명)'),
+          source_urls: urlArg.describe('출처 링크 하나 또는 여러 개(예: 유튜브 채널 + 블로그)'),
+          kind: z.enum(['item', 'account_collection']).optional().describe('item=개별 아이템(기본), account_collection=실계정 여러 개를 모은 목록(별도 페이지에 표시됨)'),
         }),
       },
       async (args) => {
         const supabase = getSupabaseServerClient();
-        const { data, error } = await supabase.from('hub_benchmarks').insert(args).select().single();
+        const { data, error } = await supabase
+          .from('hub_benchmarks')
+          .insert({ ...args, source_urls: toUrlArray(args.source_urls) })
+          .select()
+          .single();
         if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
         return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
       }
@@ -147,16 +154,19 @@ const baseHandler = createMcpHandler(
           status: z.string().optional(),
           notes: z.string().optional(),
           site_id: z.string().optional(),
+          source_name: z.string().optional(),
+          source_urls: urlArg,
+          kind: z.enum(['item', 'account_collection']).optional(),
         }),
       },
       async ({ id, ...fields }) => {
+        const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        for (const [k, v] of Object.entries(fields)) {
+          if (v === undefined) continue;
+          update[k] = k === 'source_urls' ? toUrlArray(v) : v;
+        }
         const supabase = getSupabaseServerClient();
-        const { data, error } = await supabase
-          .from('hub_benchmarks')
-          .update({ ...fields, updated_at: new Date().toISOString() })
-          .eq('id', id)
-          .select()
-          .single();
+        const { data, error } = await supabase.from('hub_benchmarks').update(update).eq('id', id).select().single();
         if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
         return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
       }

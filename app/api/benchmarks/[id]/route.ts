@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../../lib/supabase';
 
-const FIELDS = ['name', 'url', 'type', 'status', 'notes', 'site_id', 'sort_order'];
+const FIELDS = ['name', 'url', 'type', 'status', 'notes', 'site_id', 'sort_order', 'source_name', 'kind'];
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -10,6 +10,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const f of FIELDS) if (f in body) update[f] = body[f] || null;
+  if ('source_urls' in body) {
+    update.source_urls = Array.isArray(body.source_urls)
+      ? body.source_urls.map((u: string) => String(u).trim()).filter(Boolean)
+      : null;
+  }
 
   const supabase = getSupabaseServerClient();
   const { data, error } = await supabase.from('hub_benchmarks').update(update).eq('id', id).select().single();

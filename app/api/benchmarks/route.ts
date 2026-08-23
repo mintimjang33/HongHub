@@ -23,6 +23,9 @@ export async function POST(request: Request) {
       status: body.status || '후보',
       notes: body.notes || null,
       site_id: body.site_id || null,
+      source_name: body.source_name?.trim() || null,
+      source_urls: Array.isArray(body.source_urls) ? body.source_urls.map((u: string) => u.trim()).filter(Boolean) : null,
+      kind: body.kind === 'account_collection' ? 'account_collection' : 'item',
     })
     .select()
     .single();

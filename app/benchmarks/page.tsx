@@ -11,6 +11,9 @@ type Benchmark = {
   status: string;
   notes: string | null;
   site_id: string | null;
+  source_name: string | null;
+  source_urls: string[] | null;
+  kind: string;
 };
 
 type Site = { id: string; name: string };
@@ -24,7 +27,7 @@ const TYPES = [
 
 const STATUSES = ['후보', '검토중', '클론예정', '완료', '보류'];
 
-const EMPTY_FORM = { name: '', url: '', type: 'site', status: '후보', notes: '', site_id: '' };
+const EMPTY_FORM = { name: '', url: '', type: 'site', status: '후보', notes: '', site_id: '', source_name: '', source_urls: '' };
 
 function typeMeta(type: string) {
   return TYPES.find((t) => t.value === type) || TYPES[3];
@@ -46,7 +49,7 @@ export default function BenchmarksPage() {
       fetch('/api/sites').then((r) => r.json()),
     ])
       .then(([b, s]) => {
-        setItems(b.benchmarks || []);
+        setItems((b.benchmarks || []).filter((x: Benchmark) => x.kind !== 'account_collection'));
         setSites(s.sites || []);
       })
       .finally(() => setLoading(false));
@@ -71,6 +74,8 @@ export default function BenchmarksPage() {
       status: b.status || '후보',
       notes: b.notes || '',
       site_id: b.site_id || '',
+      source_name: b.source_name || '',
+      source_urls: (b.source_urls || []).join('\n'),
     });
     setShowForm(true);
   }
@@ -79,17 +84,21 @@ export default function BenchmarksPage() {
     if (!form.name.trim() || !form.url.trim()) return;
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        source_urls: form.source_urls.split('\n').map((s) => s.trim()).filter(Boolean),
+      };
       if (editingId) {
         await fetch(`/api/benchmarks/${editingId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         });
       } else {
         await fetch('/api/benchmarks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(form),
+          body: JSON.stringify(payload),
         });
       }
       setShowForm(false);
@@ -119,9 +128,17 @@ export default function BenchmarksPage() {
             <h1 className="text-2xl font-black mt-1">🔍 벤치마킹 아이템</h1>
             <p className="text-xs text-neutral-400 mt-1">깃허브/사이트/노션 등 나중에 벤치마킹할 후보를 모아두는 곳</p>
           </div>
-          <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
-            + 아이템 추가
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/benchmarks/accounts"
+              className="text-xs font-black px-5 py-3 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+            >
+              👥 계정 모음 보기
+            </Link>
+            <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
+              + 아이템 추가
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-6">
@@ -178,6 +195,20 @@ export default function BenchmarksPage() {
                 <a href={b.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline break-all">
                   {b.url}
                 </a>
+                {b.source_name && (
+                  <div className="text-[11px] text-neutral-500 mt-2 pt-2 border-t border-neutral-100">
+                    <span className="font-bold">📍 출처: {b.source_name}</span>
+                    {(b.source_urls || []).length > 0 && (
+                      <div className="flex flex-wrap gap-x-2 mt-1">
+                        {(b.source_urls || []).map((u) => (
+                          <a key={u} href={u} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline break-all">
+                            {u}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {b.notes && <p className="text-xs text-neutral-500 whitespace-pre-wrap border-t border-neutral-100 mt-3 pt-3">{b.notes}</p>}
               </div>
             ))}
@@ -252,6 +283,25 @@ export default function BenchmarksPage() {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="border-t border-neutral-100 pt-3">
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">출처 이름 (어디서 찾았는지, 선택)</label>
+                <input
+                  value={form.source_name}
+                  onChange={(e) => setForm((f) => ({ ...f, source_name: e.target.value }))}
+                  placeholder="예: 남다른AI (유튜브 채널명)"
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">출처 링크 (한 줄에 하나씩, 여러 개 가능)</label>
+                <textarea
+                  value={form.source_urls}
+                  onChange={(e) => setForm((f) => ({ ...f, source_urls: e.target.value }))}
+                  placeholder={'https://youtube.com/@...\nhttps://blog...'}
+                  rows={3}
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                />
               </div>
               <div>
                 <label className="text-[11px] text-neutral-400 font-bold mb-1 block">메모</label>
