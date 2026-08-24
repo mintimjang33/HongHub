@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../lib/supabase';
-import { getConfigValue } from '../../../lib/remoteConfig';
+import { callAi } from '../../../lib/aiProviders';
 
 // 플랫폼별 포맷 가이드. 페르소나 톤은 유지하되, 플랫폼 문법(길이/구조)은 여기서 강제한다.
 const PLATFORM_GUIDE: Record<string, string> = {
@@ -30,70 +30,6 @@ const PLATFORM_GUIDE: Record<string, string> = {
 `.trim(),
 };
 
-async function callClaude(systemPrompt: string, userPrompt: string) {
-  const apiKey = await getConfigValue('ANTHROPIC_API_KEY');
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY를 app_config/환경변수에서 찾을 수 없습니다.');
-  const model = (await getConfigValue('ANTHROPIC_MODEL')) || 'claude-sonnet-4-6';
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Claude 요청 실패 (${res.status}): ${errText.slice(0, 300)}`);
-  }
-  const data = await res.json();
-  return (data.content || [])
-    .filter((c: { type: string }) => c.type === 'text')
-    .map((c: { text: string }) => c.text)
-    .join('\n')
-    .trim();
-}
-
-async function callGemini(systemPrompt: string, userPrompt: string) {
-  const apiKey = await getConfigValue('GEMINI_API_KEY');
-  if (!apiKey) throw new Error('GEMINI_API_KEY를 app_config/환경변수에서 찾을 수 없습니다.');
-  const model = (await getConfigValue('GEMINI_MODEL')) || 'gemini-3.6-flash';
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-        generationConfig: { responseMimeType: 'application/json' },
-      }),
-    }
-  );
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Gemini 요청 실패 (${res.status}): ${errText.slice(0, 300)}`);
-  }
-  const data = await res.json();
-  const rawText = (data.candidates?.[0]?.content?.parts || [])
-    .map((p: { text?: string }) => p.text || '')
-    .join('');
-  try {
-    const parsed = JSON.parse(rawText);
-    return (parsed.content || rawText).trim();
-  } catch {
-    return rawText.trim();
-  }
-}
-
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const { source_item_id, persona_id, persona_is_system, target_platform, manual_topic, ai_provider } = body || {};
@@ -105,12 +41,10 @@ export async function POST(request: Request) {
   if (!source_item_id && !manual_topic?.trim()) {
     return NextResponse.json({ error: 'source_item_id 또는 manual_topic 중 하나가 필요합니다.' }, { status: 400 });
   }
-  const provider = ai_provider === 'gemini' ? 'gemini' : 'claude'; // 기본값 claude
+  const provider = ai_provider === 'gemini' ? 'gemini' : 'claude';
 
   const supabase = getSupabaseServerClient();
 
-  // 페르소나 조회. persona_is_system이면 ut_system_personas(prompt 단일 필드),
-  // 아니면 ut_personas(tone_prompt/target_prompt 분리)에서 조회한다.
   let persona: { name: string; tone_prompt: string; target_prompt: string } | null = null;
   if (persona_is_system) {
     const { data, error } = await supabase.from('ut_system_personas').select('*').eq('id', persona_id).single();
@@ -122,7 +56,6 @@ export async function POST(request: Request) {
     persona = { name: data.name, tone_prompt: data.tone_prompt, target_prompt: data.target_prompt };
   }
 
-  // 소재 조회 (있으면)
   let topicText = manual_topic?.trim() || '';
   let sourceItem = null;
   if (source_item_id) {
@@ -158,14 +91,14 @@ ${PLATFORM_GUIDE[target_platform]}
 
   let generatedText = '';
   try {
-    generatedText = provider === 'gemini' ? await callGemini(systemPrompt, userPrompt) : await callClaude(systemPrompt, userPrompt);
+    generatedText = await callAi(provider, systemPrompt, userPrompt);
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
   }
 
-  // Claude는 JSON 강제가 안 걸려있으니, 혹시 JSON으로 왔으면 content만 뽑아준다.
   try {
-    const parsed = JSON.parse(generatedText);
+    const cleaned = generatedText.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+    const parsed = JSON.parse(cleaned);
     if (parsed?.content) generatedText = parsed.content;
   } catch {
     // JSON이 아니면 그냥 텍스트 그대로 사용

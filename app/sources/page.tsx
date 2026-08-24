@@ -65,7 +65,7 @@ const PLATFORMS = [
   { value: 'instagram', label: '📷 인스타' },
 ];
 
-const CHANNEL_PLATFORMS = ['youtube', 'tiktok', 'instagram', 'community'];
+const CHANNEL_PLATFORMS = ['youtube', 'tiktok', 'instagram', 'threads', 'community'];
 
 const TABS = [
   { value: 'channels', label: '1. 소스 채널' },
@@ -109,7 +109,17 @@ export default function SourcesPage() {
           <Link href="/" className="text-xs text-neutral-400 font-bold hover:text-black">
             ← HongHub
           </Link>
-          <h1 className="text-2xl font-black mt-1">🎯 소스 발굴 & 콘텐츠 생성</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-black mt-1">🎯 소스 발굴 & 콘텐츠 생성</h1>
+            <a
+              href="/docs/SOURCE_DISCOVERY_GUIDE.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-black text-blue-500 hover:underline"
+            >
+              📖 운영 가이드 보기
+            </a>
+          </div>
           <p className="text-xs text-neutral-400 mt-1">
             채널을 찾아 분류하고, 소재를 골라 페르소나에 맞는 플랫폼별 콘텐츠로 만든다
           </p>
@@ -416,6 +426,10 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [importUrls, setImportUrls] = useState('');
+  const [importProvider, setImportProvider] = useState<'claude' | 'gemini'>('claude');
+  const [importing, setImporting] = useState(false);
+  const [importLog, setImportLog] = useState<{ url: string; status: 'ok' | 'dup' | 'error'; message: string }[]>([]);
   const [form, setForm] = useState({
     channel_id: '',
     title: '',
@@ -428,6 +442,42 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
 
   function toggleTag(list: string[], value: string, setter: (v: string[]) => void) {
     setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  }
+
+  async function handleImport() {
+    const urls = importUrls
+      .split('\n')
+      .map((u) => u.trim())
+      .filter(Boolean);
+    if (urls.length === 0) return;
+
+    setImporting(true);
+    setImportLog([]);
+    for (const url of urls) {
+      try {
+        const res = await fetch('/api/import-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, ai_provider: importProvider }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setImportLog((log) => [...log, { url, status: 'error', message: data.error || '실패' }]);
+        } else if (data.duplicate) {
+          setImportLog((log) => [...log, { url, status: 'dup', message: `이미 등록됨: ${data.item.title}` }]);
+        } else {
+          setImportLog((log) => [
+            ...log,
+            { url, status: 'ok', message: `등록됨: ${data.item.title} [${CONTENT_TYPE_LABEL[data.item.content_type] || data.item.content_type}]` },
+          ]);
+        }
+      } catch (err) {
+        setImportLog((log) => [...log, { url, status: 'error', message: err instanceof Error ? err.message : String(err) }]);
+      }
+    }
+    setImporting(false);
+    setImportUrls('');
+    onChange();
   }
 
   async function handleSave() {
@@ -468,6 +518,63 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
 
   return (
     <div>
+      <div className="bg-white border border-neutral-200 rounded-xl p-5 mb-4">
+        <h3 className="font-black text-sm mb-1">🔗 링크로 가져오기</h3>
+        <p className="text-[11px] text-neutral-400 mb-3">
+          쓰레드/유튜브/틱톡/인스타 링크를 한 줄에 하나씩 붙여넣으면, 이미 등록된 건 건너뛰고 새 것만 자동 분석해서 등록해요.
+        </p>
+        <textarea
+          value={importUrls}
+          onChange={(e) => setImportUrls(e.target.value)}
+          rows={4}
+          placeholder={'https://www.youtube.com/watch?v=...\nhttps://www.threads.com/@.../post/...'}
+          className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm mb-2 font-mono"
+        />
+        <div className="flex items-center justify-between">
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={() => setImportProvider('claude')}
+              className={`text-[11px] font-black px-3 py-1.5 rounded-full border ${
+                importProvider === 'claude' ? 'bg-black text-white border-black' : 'bg-white border-neutral-200'
+              }`}
+            >
+              🟣 Claude로 분류
+            </button>
+            <button
+              type="button"
+              onClick={() => setImportProvider('gemini')}
+              className={`text-[11px] font-black px-3 py-1.5 rounded-full border ${
+                importProvider === 'gemini' ? 'bg-black text-white border-black' : 'bg-white border-neutral-200'
+              }`}
+            >
+              🔵 Gemini로 분류
+            </button>
+          </div>
+          <button
+            onClick={handleImport}
+            disabled={importing || !importUrls.trim()}
+            className="bg-black text-white text-xs font-black px-5 py-2.5 rounded-lg disabled:opacity-40"
+          >
+            {importing ? '가져오는 중...' : '가져오기'}
+          </button>
+        </div>
+        {importLog.length > 0 && (
+          <div className="mt-3 space-y-1 border-t border-neutral-100 pt-3">
+            {importLog.map((log, i) => (
+              <div
+                key={i}
+                className={`text-[11px] font-bold ${
+                  log.status === 'ok' ? 'text-emerald-600' : log.status === 'dup' ? 'text-neutral-400' : 'text-red-500'
+                }`}
+              >
+                {log.status === 'ok' ? '✅' : log.status === 'dup' ? '⏭️' : '❌'} {log.message}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center justify-between mb-4">
         <div className="flex flex-wrap gap-2">
           <button
@@ -487,7 +594,7 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
           ))}
         </div>
         <button onClick={() => setShowForm(true)} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
-          + 소재 추가
+          + 소재 직접 추가
         </button>
       </div>
 
