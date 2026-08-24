@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../../lib/supabase';
+import { getConfigValue } from '../../../../lib/remoteConfig';
 
 // 플랫폼별 포맷 가이드. 페르소나 톤은 유지하되, 플랫폼 문법(길이/구조)은 여기서 강제한다.
 const PLATFORM_GUIDE: Record<string, string> = {
@@ -29,9 +30,73 @@ const PLATFORM_GUIDE: Record<string, string> = {
 `.trim(),
 };
 
+async function callClaude(systemPrompt: string, userPrompt: string) {
+  const apiKey = await getConfigValue('ANTHROPIC_API_KEY');
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY를 app_config/환경변수에서 찾을 수 없습니다.');
+  const model = (await getConfigValue('ANTHROPIC_MODEL')) || 'claude-sonnet-4-6';
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Claude 요청 실패 (${res.status}): ${errText.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  return (data.content || [])
+    .filter((c: { type: string }) => c.type === 'text')
+    .map((c: { text: string }) => c.text)
+    .join('\n')
+    .trim();
+}
+
+async function callGemini(systemPrompt: string, userPrompt: string) {
+  const apiKey = await getConfigValue('GEMINI_API_KEY');
+  if (!apiKey) throw new Error('GEMINI_API_KEY를 app_config/환경변수에서 찾을 수 없습니다.');
+  const model = (await getConfigValue('GEMINI_MODEL')) || 'gemini-3.6-flash';
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Gemini 요청 실패 (${res.status}): ${errText.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const rawText = (data.candidates?.[0]?.content?.parts || [])
+    .map((p: { text?: string }) => p.text || '')
+    .join('');
+  try {
+    const parsed = JSON.parse(rawText);
+    return (parsed.content || rawText).trim();
+  } catch {
+    return rawText.trim();
+  }
+}
+
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
-  const { source_item_id, persona_id, persona_is_system, target_platform, manual_topic } = body || {};
+  const { source_item_id, persona_id, persona_is_system, target_platform, manual_topic, ai_provider } = body || {};
 
   if (!target_platform || !PLATFORM_GUIDE[target_platform]) {
     return NextResponse.json({ error: 'target_platform이 올바르지 않습니다. (threads / youtube_shorts / tiktok / instagram)' }, { status: 400 });
@@ -40,6 +105,7 @@ export async function POST(request: Request) {
   if (!source_item_id && !manual_topic?.trim()) {
     return NextResponse.json({ error: 'source_item_id 또는 manual_topic 중 하나가 필요합니다.' }, { status: 400 });
   }
+  const provider = ai_provider === 'gemini' ? 'gemini' : 'claude'; // 기본값 claude
 
   const supabase = getSupabaseServerClient();
 
@@ -70,9 +136,6 @@ export async function POST(request: Request) {
     topicText = `제목: ${item.title}\n요약/사실관계: ${item.raw_notes || '(추가 메모 없음, 제목 기반으로 작성)'}`;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: 'ANTHROPIC_API_KEY 환경변수가 설정되어 있지 않습니다.' }, { status: 500 });
-
   const systemPrompt = `
 너는 아래 페르소나로 글을 쓰는 콘텐츠 작가다.
 
@@ -87,37 +150,26 @@ ${PLATFORM_GUIDE[target_platform]}
 [중요 - 저작권 주의]
 - 아래 소재는 사실관계만 참고하고, 원본 영상/기사의 문장을 그대로 옮기지 마라.
 - 완전히 새로운 표현과 구조로 재작성해라.
+
+결과는 JSON으로만 출력해라: {"content": "..."}
 `.trim();
 
-  // 실제 배포 전, 최신 모델 id는 Anthropic 문서에서 확인해서 필요시 교체할 것
-  const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
+  const userPrompt = `다음 소재로 글을 작성해줘.\n\n${topicText}`;
 
-  const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: `다음 소재로 글을 작성해줘.\n\n${topicText}` }],
-    }),
-  });
-
-  if (!aiResponse.ok) {
-    const errText = await aiResponse.text().catch(() => '');
-    return NextResponse.json({ error: `AI 호출 실패: ${errText}` }, { status: 502 });
+  let generatedText = '';
+  try {
+    generatedText = provider === 'gemini' ? await callGemini(systemPrompt, userPrompt) : await callClaude(systemPrompt, userPrompt);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
   }
 
-  const aiData = await aiResponse.json();
-  const generatedText = (aiData.content || [])
-    .filter((c: { type: string }) => c.type === 'text')
-    .map((c: { text: string }) => c.text)
-    .join('\n')
-    .trim();
+  // Claude는 JSON 강제가 안 걸려있으니, 혹시 JSON으로 왔으면 content만 뽑아준다.
+  try {
+    const parsed = JSON.parse(generatedText);
+    if (parsed?.content) generatedText = parsed.content;
+  } catch {
+    // JSON이 아니면 그냥 텍스트 그대로 사용
+  }
 
   const { data: saved, error: saveError } = await supabase
     .from('hub_generated_content')
@@ -126,7 +178,8 @@ ${PLATFORM_GUIDE[target_platform]}
       persona_id,
       persona_name: persona.name,
       target_platform,
-      generated_text: generatedText,
+      ai_provider: provider,
+      generated_text: generatedText.trim(),
       status: 'draft',
     })
     .select()

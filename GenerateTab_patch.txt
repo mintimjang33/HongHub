@@ -1,0 +1,202 @@
+아래는 app/sources/page.tsx 안의 GenerateTab 함수를 통째로 교체하는 코드입니다.
+(같은 파일 안의 다른 부분(ChannelsTab, ItemsTab, 타입 선언, 상수 등)은 그대로 두고,
+"// ============ 탭 3: 생성 ============" 아래 GenerateTab 함수만 이걸로 바꿔주세요.)
+
+---
+
+// ============ 탭 3: 생성 ============
+function GenerateTab({
+  items,
+  personas,
+  contents,
+  onChange,
+}: {
+  items: SourceItem[];
+  personas: Persona[];
+  contents: GeneratedContent[];
+  onChange: () => void;
+}) {
+  const [sourceItemId, setSourceItemId] = useState('');
+  const [manualTopic, setManualTopic] = useState('');
+  const [personaId, setPersonaId] = useState('');
+  const [targetPlatform, setTargetPlatform] = useState('threads');
+  const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('claude');
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleGenerate() {
+    setError('');
+    if (!personaId) return setError('페르소나를 선택하세요.');
+    if (!sourceItemId && !manualTopic.trim()) return setError('소재를 선택하거나 직접 입력하세요.');
+
+    const persona = personas.find((p) => p.id === personaId);
+    setGenerating(true);
+    try {
+      const res = await fetch('/api/generate-content', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_item_id: sourceItemId || null,
+          manual_topic: sourceItemId ? '' : manualTopic,
+          persona_id: personaId,
+          persona_is_system: persona?.is_system || false,
+          target_platform: targetPlatform,
+          ai_provider: aiProvider,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || '생성 실패');
+      } else {
+        onChange();
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  const readyItems = items.filter((i) => i.status !== '발행완료');
+
+  return (
+    <div className="grid md:grid-cols-2 gap-6">
+      <div className="bg-white border border-neutral-200 rounded-xl p-5">
+        <h3 className="font-black text-sm mb-4">생성 설정</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="text-[11px] text-neutral-400 font-bold mb-1 block">AI 엔진</label>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => setAiProvider('claude')}
+                className={`flex-1 text-xs font-black py-2.5 rounded-lg border ${
+                  aiProvider === 'claude' ? 'bg-black text-white border-black' : 'bg-white border-neutral-200'
+                }`}
+              >
+                🟣 Claude
+              </button>
+              <button
+                type="button"
+                onClick={() => setAiProvider('gemini')}
+                className={`flex-1 text-xs font-black py-2.5 rounded-lg border ${
+                  aiProvider === 'gemini' ? 'bg-black text-white border-black' : 'bg-white border-neutral-200'
+                }`}
+              >
+                🔵 Gemini
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="text-[11px] text-neutral-400 font-bold mb-1 block">소재 선택 (또는 아래 직접입력)</label>
+            <select
+              value={sourceItemId}
+              onChange={(e) => setSourceItemId(e.target.value)}
+              className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+            >
+              <option value="">직접 입력</option>
+              {readyItems.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          {!sourceItemId && (
+            <div>
+              <label className="text-[11px] text-neutral-400 font-bold mb-1 block">주제 직접 입력</label>
+              <textarea
+                value={manualTopic}
+                onChange={(e) => setManualTopic(e.target.value)}
+                rows={3}
+                placeholder="어떤 사실/소재로 글을 만들지 적어주세요"
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+              />
+            </div>
+          )}
+          <div>
+            <label className="text-[11px] text-neutral-400 font-bold mb-1 block">페르소나</label>
+            <select
+              value={personaId}
+              onChange={(e) => setPersonaId(e.target.value)}
+              className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+            >
+              <option value="">선택하세요</option>
+              {personas.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-[11px] text-neutral-400 font-bold mb-1 block">타겟 플랫폼</label>
+            <div className="flex flex-wrap gap-1.5">
+              {PLATFORMS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => setTargetPlatform(p.value)}
+                  className={`text-[11px] font-bold px-3 py-1.5 rounded-full border ${
+                    targetPlatform === p.value ? 'bg-black text-white border-black' : 'bg-white border-neutral-200'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-500 font-bold">{error}</p>}
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="w-full bg-black text-white text-xs font-black py-3 rounded-lg disabled:opacity-40"
+          >
+            {generating ? '생성 중...' : '✨ 콘텐츠 생성'}
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="font-black text-sm mb-4">생성된 콘텐츠 ({contents.length})</h3>
+        <div className="space-y-3 max-h-[600px] overflow-y-auto">
+          {contents.length === 0 ? (
+            <div className="border border-dashed border-neutral-300 rounded-xl p-10 text-center text-xs text-neutral-400">
+              아직 생성된 콘텐츠가 없어요.
+            </div>
+          ) : (
+            contents.map((c) => (
+              <div key={c.id} className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[11px] font-bold bg-neutral-100 px-3 py-1 rounded-full">
+                    {PLATFORMS.find((p) => p.value === c.target_platform)?.label}
+                  </span>
+                  <span className="text-[11px] text-neutral-400">{c.persona_name}</span>
+                  {c.ai_provider && (
+                    <span className="text-[11px] font-bold text-neutral-400">
+                      {c.ai_provider === 'gemini' ? '🔵 Gemini' : '🟣 Claude'}
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm whitespace-pre-wrap">{c.generated_text}</p>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+---
+
+그리고 파일 맨 위쪽 GeneratedContent 타입 선언도 아래처럼 ai_provider 필드를 추가해주세요:
+
+type GeneratedContent = {
+  id: string;
+  source_item_id: string | null;
+  persona_name: string;
+  target_platform: string;
+  ai_provider?: string;
+  generated_text: string;
+  status: string;
+  created_at: string;
+};

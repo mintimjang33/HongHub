@@ -1,36 +1,32 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# v4 — 유쇼츠의 app_config 방식 재사용 (환경변수 등록 불필요!)
 
-## Getting Started
+이게 정답이었습니다. 유쇼츠(U-Short)가 이미 같은 Supabase 프로젝트의 `app_config` 테이블에
+`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`를 평문으로 저장해두고 있었고, HongHub도 같은 프로젝트를
+쓰고 있어서 **Vercel 환경변수를 따로 등록할 필요 없이 바로 조회해서 쓸 수 있습니다.**
 
-First, run the development server:
+## 반영 방법
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. **`_migration_11_ai_provider.sql`** → Supabase SQL Editor에서 실행 (컬럼 하나 추가)
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. **`lib/remoteConfig.ts`** → 신규 추가
+   (app_config 테이블을 조회하는 유틸. 유쇼츠의 lib/remoteConfig.js와 같은 아이디어)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. **`app/api/generate-content/route.ts`** → 기존 파일 덮어쓰기
+   (Claude/Gemini 둘 다 지원, 키는 app_config에서 자동으로 가져옴)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. **`app/sources/page.tsx`** → `GenerateTab_수정본.txt` 내용대로 GenerateTab 함수 교체
+   (AI 선택 버튼 추가는 이전과 동일)
 
-## Learn More
+## Vercel 환경변수
+**추가할 필요 없습니다.** app_config 테이블에 이미 키가 있고, 코드가 그걸 자동으로 읽어옵니다.
+(다만 이전 시도들에서 혹시 `ANTHROPIC_API_KEY`, `VAULT_MASTER_KEY` 등을 넣으셨다면
+지워도 되고 남겨둬도 상관없습니다 — `remoteConfig.ts`는 Vercel 환경변수가 있으면 그걸 우선 쓰고,
+없으면 app_config를 조회하는 식으로 되어 있어서 둘 다 있어도 안전합니다.)
 
-To learn more about Next.js, take a look at the following resources:
+## 재배포 후 테스트
+`/sources` → 3번 탭에서 Claude/Gemini 버튼 눌러가며 생성 테스트 해보시면 됩니다.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 왜 이 방식이 제일 좋은가
+- 새 키 발급 불필요 (이미 유쇼츠용으로 등록해두신 키 재사용)
+- Vercel 환경변수 설정 불필요 (DB에서 자동으로 읽어옴)
+- 유쓰레드의 암호화 볼트(VAULT_MASTER_KEY)처럼 복잡한 처리 불필요 (app_config는 평문 저장이라 그냥 select만 하면 됨)
