@@ -2,12 +2,25 @@
 
 > 클론 프로젝트의 마지막 단계(§8, `CLONE_PROCESS.md` 참고)에서 진행. 기능 클론과 실사용 검증이 다 끝난 뒤에 붙인다.
 
+## 🔒 원칙: 새 기능은 웹페이지/API만으로 끝내지 않는다
+
+**어떤 프로젝트든, 새로운 기능(테이블/API 엔드포인트)을 추가하면 그 즉시 대응하는 MCP 도구도 함께 만든다.** 웹 UI로만 끝내고 MCP 도구를 빼먹으면, 다음 대화에서 Claude가 그 기능을 조작하려 할 때 `run_sql`(SELECT 전용, 조회만 가능)로 우회하거나 아예 손을 못 대는 상황이 생긴다.
+
+체크리스트 (기능 하나 추가할 때마다):
+- [ ] 새 테이블/API에 대응하는 **조회(list_*)** 도구가 있는가
+- [ ] **생성(add_*)** 도구가 있는가
+- [ ] **수정(update_*)** 도구가 있는가 (필요한 경우)
+- [ ] **삭제(delete_*)** 도구가 있는가 (필요한 경우)
+- [ ] 그 기능이 외부 API 호출(AI 생성, 스크래핑 등)을 포함한다면, **그 전체 파이프라인을 한 번에 실행하는 도구**도 하나 있는가 (예: `import_source_url`이 og태그 추출+AI분류+DB저장을 한 번에 처리하는 것처럼)
+
+이 원칙을 어기면 "웹사이트에는 있는데 Claude는 못 쓰는 기능"이 계속 쌓이게 된다.
+
 ## 왜 이 구조인가
 
 Claude가 그 프로젝트의 DB/GitHub 코드/도메인 기능을 직접 조작할 수 있게 하려는 목적. 매 프로젝트마다 아래 4가지 조합이 표준 패턴:
 
 1. **Supabase 범용 CRUD 툴**: `list_tables` / `get_rows` / `upsert_row` / `delete_row` / `run_sql`(SELECT 전용)
-2. **도메인 특화 툴**: 그 프로젝트만의 핵심 동작(예: `publish_thread_post`, `search_coupang_products`, 이번 프로젝트의 `add_site`)
+2. **도메인 특화 툴**: 그 프로젝트만의 핵심 동작(예: `publish_thread_post`, `search_coupang_products`, `import_source_url`)
 3. **GitHub 읽기 툴**: `list_github_files` / `get_github_file` — 저장소 코드를 Claude가 언제든 직접 읽게
 4. **공유 비밀키 인증**: `?key=` 쿼리파라미터를 `MCP_SHARED_SECRET` 환경변수와 대조하는 얇은 래퍼
 
@@ -76,3 +89,4 @@ Vercel Production/Preview 둘 다에 등록.
 - [ ] 로컬에서 `list_tables`류 조회 툴 실제 호출해서 실데이터 확인
 - [ ] 잘못된 `key`로 호출 시 401 확인
 - [ ] 쓰기 툴(`add_*`/`upsert_*`)은 실제로 행이 생기는지, 삭제 툴은 실제로 지워지는지 확인 — 스펙만 보고 됐다고 말하지 말 것
+- [ ] **(신규 기능 추가 시) 위 "원칙" 섹션 체크리스트를 통과했는지 확인**
