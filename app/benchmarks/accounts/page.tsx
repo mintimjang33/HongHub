@@ -26,8 +26,8 @@ export default function BenchmarkAccountsPage() {
     <div className="min-h-screen bg-neutral-50">
       <div className="max-w-4xl mx-auto px-6 py-10">
         <div className="mb-8">
-          <Link href="/benchmarks" className="text-xs text-neutral-400 font-bold hover:text-black">
-            ← 벤치마킹 아이템
+          <Link href="/sources" className="text-xs text-neutral-400 font-bold hover:text-black">
+            ← 소스 발굴
           </Link>
           <h1 className="text-2xl font-black mt-1">👥 실계정 모음</h1>
           <p className="text-xs text-neutral-400 mt-1">플랫폼별로 실제 검색·수집한 실계정 리스트(핸들 다수 포함)</p>

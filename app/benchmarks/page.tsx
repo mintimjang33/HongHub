@@ -129,18 +129,6 @@ export default function BenchmarksPage() {
             <p className="text-xs text-neutral-400 mt-1">깃허브/사이트/노션 등 나중에 벤치마킹할 후보를 모아두는 곳</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link
-              href="/benchmarks/accounts"
-              className="text-xs font-black px-5 py-3 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
-            >
-              👥 계정 모음 보기
-            </Link>
-            <Link
-              href="/viral-posts"
-              className="text-xs font-black px-5 py-3 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
-            >
-              🔥 터진 글 분석
-            </Link>
             <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
               + 아이템 추가
             </button>

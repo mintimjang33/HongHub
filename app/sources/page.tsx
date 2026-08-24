@@ -111,14 +111,28 @@ export default function SourcesPage() {
           </Link>
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-black mt-1">🎯 소스 발굴 & 콘텐츠 생성</h1>
-            <a
-              href="/docs/SOURCE_DISCOVERY_GUIDE.md"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[11px] font-black text-blue-500 hover:underline"
-            >
-              📖 운영 가이드 보기
-            </a>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/viral-posts"
+                className="text-xs font-black px-4 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+              >
+                🔥 터진 글 분석
+              </Link>
+              <Link
+                href="/benchmarks/accounts"
+                className="text-xs font-black px-4 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+              >
+                👥 계정 모음
+              </Link>
+              <a
+                href="/docs/SOURCE_DISCOVERY_GUIDE.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] font-black text-blue-500 hover:underline"
+              >
+                📖 운영 가이드 보기
+              </a>
+            </div>
           </div>
           <p className="text-xs text-neutral-400 mt-1">
             채널을 찾아 분류하고, 소재를 골라 페르소나에 맞는 플랫폼별 콘텐츠로 만든다

@@ -102,8 +102,8 @@ export default function ViralPostsPage() {
       <div className="max-w-4xl mx-auto px-6 py-10">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <Link href="/benchmarks" className="text-xs text-neutral-400 font-bold hover:text-black">
-              ← 벤치마킹 아이템
+            <Link href="/sources" className="text-xs text-neutral-400 font-bold hover:text-black">
+              ← 소스 발굴
             </Link>
             <h1 className="text-2xl font-black mt-1">🔥 터진 글 분석</h1>
             <p className="text-xs text-neutral-400 mt-1">플랫폼별로 실제 반응 좋았던 글의 원문·반응수치·왜 터졌는지 분석</p>
