@@ -56,6 +56,26 @@
 
 **쓰레드용 소재는 다른 방식으로 찾아야 한다** (위 원칙 참고): 유튜브 쇼츠 채널을 아무리 뒤져도 쓰레드에 맞는 소재는 잘 안 나온다. 쓰레드는 실제 쓰레드 벤치마크 계정(`ut_benchmark_items`)이나 온라인 커뮤니티의 "나만 그런가" 류 공감 글에서 찾는 게 맞다.
 
+## 유튜브 영상 자막(스크립트) 가져오기
+
+채널의 "훅 공식"을 제목·썸네일만 보고 추측하지 말고, 실제 자막을 읽어야 정확하다. 유튜브 페이지를 브라우저로 열어서 클릭으로 긁는 방식은 불안정하다(타이밍 이슈, 자막 패널 렌더링 지연). **Node.js로 직접 유튜브 API를 호출하는 것도 최근 안티스크래핑 강화로 막혀 있다**(`timedtext` URL이 서명돼있고 세션 종속적이라 빈 응답만 옴, 2026-08-24 직접 확인).
+
+**유일하게 확인된 안정적인 방법**: Python `youtube-transcript-api` 라이브러리.
+
+```bash
+pip install youtube-transcript-api
+```
+
+```python
+from youtube_transcript_api import YouTubeTranscriptApi
+
+api = YouTubeTranscriptApi()
+transcript = api.fetch("영상ID", languages=["ko"])  # 영상ID는 watch?v= 뒤의 값
+full_text = " ".join(seg.text for seg in transcript)
+```
+
+2026-08-24 실제 영상(4EoV0aDqj_0, 19분)으로 검증함 — 496개 구간, 사용자가 직접 유튜브에서 복사한 자막과 글자 그대로 100% 일치. `languages=["ko"]`가 없으면 기본 언어로 가져오니, 한국어 영상은 꼭 지정할 것.
+
 ## 저작권 안전 수칙 (중요)
 
 - 채널/영상에서 가져오는 것은 **사실관계(fact)뿐**이다. 원본 영상의 스크립트, 나레이션 문장, 자막을 그대로 옮기지 않는다.
