@@ -39,6 +39,7 @@ type GeneratedContent = {
   source_item_id: string | null;
   persona_name: string;
   target_platform: string;
+  ai_provider?: string;
   generated_text: string;
   status: string;
   created_at: string;
@@ -667,6 +668,7 @@ function GenerateTab({
   const [manualTopic, setManualTopic] = useState('');
   const [personaId, setPersonaId] = useState('');
   const [targetPlatform, setTargetPlatform] = useState('threads');
+  const [aiProvider, setAiProvider] = useState<'claude' | 'gemini'>('claude');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
 
@@ -687,6 +689,7 @@ function GenerateTab({
           persona_id: personaId,
           persona_is_system: persona?.is_system || false,
           target_platform: targetPlatform,
+          ai_provider: aiProvider,
         }),
       });
       const data = await res.json();
@@ -707,6 +710,29 @@ function GenerateTab({
       <div className="bg-white border border-neutral-200 rounded-xl p-5">
         <h3 className="font-black text-sm mb-4">생성 설정</h3>
         <div className="space-y-3">
+          <div>
+            <label className="text-[11px] text-neutral-400 font-bold mb-1 block">AI 엔진</label>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => setAiProvider('claude')}
+                className={`flex-1 text-xs font-black py-2.5 rounded-lg border ${
+                  aiProvider === 'claude' ? 'bg-black text-white border-black' : 'bg-white border-neutral-200'
+                }`}
+              >
+                🟣 Claude
+              </button>
+              <button
+                type="button"
+                onClick={() => setAiProvider('gemini')}
+                className={`flex-1 text-xs font-black py-2.5 rounded-lg border ${
+                  aiProvider === 'gemini' ? 'bg-black text-white border-black' : 'bg-white border-neutral-200'
+                }`}
+              >
+                🔵 Gemini
+              </button>
+            </div>
+          </div>
           <div>
             <label className="text-[11px] text-neutral-400 font-bold mb-1 block">소재 선택 (또는 아래 직접입력)</label>
             <select
@@ -792,6 +818,11 @@ function GenerateTab({
                     {PLATFORMS.find((p) => p.value === c.target_platform)?.label}
                   </span>
                   <span className="text-[11px] text-neutral-400">{c.persona_name}</span>
+                  {c.ai_provider && (
+                    <span className="text-[11px] font-bold text-neutral-400">
+                      {c.ai_provider === 'gemini' ? '🔵 Gemini' : '🟣 Claude'}
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{c.generated_text}</p>
               </div>
