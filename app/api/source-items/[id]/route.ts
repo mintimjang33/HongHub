@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '../../../../../lib/supabase';
+import { getSupabaseServerClient } from '../../../../lib/supabase';
 
 const FIELDS = ['title', 'source_url', 'views', 'content_type', 'raw_notes', 'status', 'channel_id'];
 

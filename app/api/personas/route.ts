@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '../../../../lib/supabase';
+import { getSupabaseServerClient } from '../../../lib/supabase';
 
 // ut_personas / ut_system_personas는 유쓰레드가 만든 테이블이지만
 // HongHub와 같은 Supabase 프로젝트를 쓰고 있어서 그대로 조회 가능하다.

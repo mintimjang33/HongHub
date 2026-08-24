@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServerClient } from '../../../../lib/supabase';
-import { getConfigValue } from '../../../../lib/remoteConfig';
+import { getSupabaseServerClient } from '../../../lib/supabase';
+import { getConfigValue } from '../../../lib/remoteConfig';
 
 // 플랫폼별 포맷 가이드. 페르소나 톤은 유지하되, 플랫폼 문법(길이/구조)은 여기서 강제한다.
 const PLATFORM_GUIDE: Record<string, string> = {
