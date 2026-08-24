@@ -52,6 +52,23 @@
 - 가이드 문서 6종 작성(클론 프로세스/MCP/크론/API연동 실전/이메일서비스/계획서템플릿) — 처음엔 `docs/`에 둬서 웹에서 안 열렸다가 `public/docs/`로 옮겨서 홈 화면에 실제로 노출되게 수정
 - **사고**: "GitHub에 다 올라간 건 삭제해도 된다"는 지시를 따라 폴더 전체를 지웠는데, `.env.local`(슈퍼베이스 서비스롤 키, MCP 비밀키, 로그인 비밀번호/세션시크릿)은 git에 없는 파일이라 같이 날아감. 사용자가 즉시 지적해서 슈퍼베이스 값은 유쇼츠 폴더에서 복구, 비밀번호류는 알고 있던 값으로 재작성, 세션 시크릿만 새로 발급해서 Vercel에 재동기화 필요 상태가 됨 — **교훈: "GitHub에 있는 것만 지운다"고 할 때 `.env.local`은 항상 예외로 다시 확인할 것, 삭제 명령을 실행하기 전에 사용자의 정정 메시지가 있는지 한 번 더 확인할 것.**
 
+### 2026-08-23~24 — 사이트 등록 개선 + 벤치마킹/MCP 커넥터 기록 기능
+- 사이트 등록 폼에 필드 라벨 추가, URL 필드 5종(깃허브/배포/접속/슈퍼베이스/벤치마킹) 다중값(배열) 지원
+- MCP에 슈퍼베이스 범용 조회(`list_tables`/`run_sql`) + GitHub 파일 읽기 툴 추가
+- 벤치마킹 아이템 수집함 기능 추가 → 이후 출처(어디서 찾았는지) 필드 보강 + 계정모음 페이지로 분리
+- 연결된 MCP 커넥터 목록을 홍허브에 직접 기록하는 기능 추가(위 `list_mcp_connectors` 결과가 이걸로 관리됨) → 접속 URL·관리 이메일 필드 및 이메일별 그룹화 추가
+- 플랫폼별(유튜브/틱톡/인스타 등) 터진 글 분석 페이지 추가
+
+### 2026-08-24 — `/sources` 기능 대량 추가 (⚠️ Claude가 한 작업 아님, GitHub 웹 업로드로 직접 커밋됨)
+- 커밋 메시지가 전부 "Add files via upload"로 남아있는 9개 커밋 — 사용자가 GitHub 웹 UI에서 직접 파일을 올린 것으로 추정, 이 세션에서 만든 게 아니라 사후에 발견함
+- 내용: 소스채널(유튜브/틱톡/인스타) 디스커버리 + 트리비아성 콘텐츠 발굴 기능 — `app/sources/page.tsx`, `app/api/source-channels`, `app/api/source-items`, `app/api/generate-content`, `app/api/import-url`, `lib/aiProviders.ts`(AI 프로바이더 추상화), `lib/ogMeta.ts`, `_migration_10_source_channels.sql`, `_migration_11_ai_provider.sql`, `public/docs/SOURCE_DISCOVERY_GUIDE.md` 등
+- `SOURCE_DISCOVERY_GUIDE.md`에 명시된 중요한 스코프 제약: 트리비아 콘텐츠는 유튜브 쇼츠/틱톡/인스타에서만 바이럴 검증됐고 **쓰레드(Threads)에서는 검증된 사례가 없음** — 쓰레드용 소재는 계속 `ut_benchmark_items`/커뮤니티 게시물에서 가져올 것
+
+### 2026-08-25 — 소스 발굴 가이드 보강 + 유쓰레드 PLAN.md 유실 발견
+- `SOURCE_DISCOVERY_GUIDE.md`에 유튜브 영상 자막(스크립트) 가져오는 방법 추가 — Python `youtube-transcript-api`가 안정적으로 동작하는 걸 실제 영상(496개 세그먼트, 사용자 붙여넣은 스크립트와 100% 일치)으로 검증 후 문서화. Node `fetch`로 유튜브 `timedtext` 엔드포인트 직접 호출은 빈 응답(서명URL/세션 바인딩 문제)이라 안 됨.
+- 유쓰레드(U-Thread) 프로젝트의 자체 `PLAN.md`(로컬 전용, gitignore)가 폴더명이 `dreaths-clone`→`U-Thread`로 바뀌는 과정에서 유실된 걸 발견 → 이 홍허브의 `plan_file_url` 백업도 비어있어 복구 불가 확인, 메모리 기반으로 재작성함. **교훈: 로컬 전용(gitignore) 계획서 파일은 홍허브의 "계획서 파일 업로드"로 주기적으로 백업해야 이런 유실을 막을 수 있음 — 지금 이 파일(HongHub 자신의 PLAN.md)도 같은 위험이 있는지 점검 필요(이건 git 추적이라 안전).**
+
 ## 5. 남은 것
-- Vercel 환경변수의 `HUB_SESSION_SECRET`을 새로 발급한 값으로 갱신 필요(로컬 `.env.local` 재생성 직후)
-- MCP 커넥터를 Claude 쪽에 실제로 등록(사용자가 URL+key로 직접 등록)
+- Vercel 환경변수의 `HUB_SESSION_SECRET`을 새로 발급한 값으로 갱신 필요(로컬 `.env.local` 재생성 직후) — 실제 갱신 여부 미확인, 다음에 로그인 관련 문제 생기면 이것부터 의심할 것
+- ~~MCP 커넥터를 Claude 쪽에 실제로 등록~~ → 완료(`list_mcp_connectors`로 확인, 13개 등록됨)
+- 각 프로젝트(유쓰레드 등)의 로컬 전용 PLAN.md를 홍허브에 정기 백업(파일 업로드는 웹 UI에서만 가능, MCP엔 업로드 도구 없음)
