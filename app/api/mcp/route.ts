@@ -1,6 +1,8 @@
 import { createMcpHandler } from 'mcp-handler';
 import { z } from 'zod';
 import { getSupabaseServerClient } from '../../../lib/supabase';
+import { callAi } from '../../../lib/aiProviders';
+import { fetchOgMeta, detectChannelPlatform } from '../../../lib/ogMeta';
 
 const urlArg = z.union([z.string(), z.array(z.string())]).optional().describe('URL 하나 또는 여러 개(배열)');
 
@@ -9,6 +11,38 @@ function toUrlArray(value: unknown): string[] | null {
   const cleaned = arr.map((v) => String(v).trim()).filter(Boolean);
   return cleaned.length ? cleaned : null;
 }
+
+const CONTENT_TYPE_ENUM = z.enum(['TRIVIA', 'LIFEHACK', 'EMOTIONAL', 'HUMOR', 'MOTIVATION', 'RANKING', 'PERSONAL_STORY', 'DEBATE']);
+const PLATFORM_ENUM = z.enum(['threads', 'youtube_shorts', 'tiktok', 'instagram']);
+const CONTENT_TYPES = ['TRIVIA', 'LIFEHACK', 'EMOTIONAL', 'HUMOR', 'MOTIVATION', 'RANKING', 'PERSONAL_STORY', 'DEBATE'];
+const PLATFORM_VALUES = ['threads', 'youtube_shorts', 'tiktok', 'instagram'];
+
+const PLATFORM_GUIDE: Record<string, string> = {
+  threads: `
+[쓰레드 포맷 규칙]
+- 반드시 3~5줄 이내로 작성한다. 정보 나열형으로 흐르지 않는다.
+- 순수 정보 전달("~다는 사실")보다 "나의 경험/반응"으로 포장하거나, 사람마다 답이 갈리는 질문형으로 마무리한다.
+- 마지막 줄은 항상 댓글을 유도하는 질문으로 끝낸다 (예: "이거 나만 그럼?", "너넨 어떻게 생각함?").
+- 해시태그는 사용하지 않거나 최대 1~2개만 사용한다.
+`.trim(),
+  youtube_shorts: `
+[유튜브 쇼츠 나레이션 스크립트 규칙]
+- 15~40초 분량의 나레이션 대본으로 작성한다.
+- 구조: (1) 강한 훅 한 문장 (2) 반전/핵심 정보 전달 (3) 마무리 임팩트 문장.
+- 각 구간을 줄바꿈으로 구분하고, 괄호로 (훅) (전개) (마무리) 라벨을 붙여준다.
+`.trim(),
+  tiktok: `
+[틱톡 나레이션 스크립트 규칙]
+- 유튜브 쇼츠와 유사한 훅-전개-마무리 구조를 쓰되, 더 캐주얼하고 밈틱한 어휘를 섞는다.
+- 15~30초 분량, 자막에 강조할 문구는 **볼드**로 표시한다.
+`.trim(),
+  instagram: `
+[인스타그램 카드뉴스 규칙]
+- 5~8장의 카드로 나눠서 작성한다. 각 카드는 "카드 1: ..." 형식으로 번호를 매긴다.
+- 카드 1은 표지(강한 훅 제목), 마지막 카드는 요약 또는 참여 유도 문구로 마무리한다.
+- 각 카드 텍스트는 한 줄~두 줄 이내로 짧게 쓴다.
+`.trim(),
+};
 
 const baseHandler = createMcpHandler(
   (server) => {
@@ -328,6 +362,424 @@ const baseHandler = createMcpHandler(
         return { content: [{ type: 'text', text: '삭제됨' }] };
       }
     );
+
+    // ── 소스 발굴 & 콘텐츠 생성 (신규) ─────────────────────────────
+
+    server.registerTool(
+      'list_source_channels',
+      {
+        description: '소스 발굴용으로 등록된 채널 목록을 조회한다 (유튜브/틱톡/인스타/쓰레드/커뮤니티).',
+        inputSchema: z.object({ platform: z.enum(['youtube', 'tiktok', 'instagram', 'threads', 'community']).optional() }),
+      },
+      async ({ platform }) => {
+        const supabase = getSupabaseServerClient();
+        let query = supabase.from('hub_source_channels').select('*').order('created_at', { ascending: false });
+        if (platform) query = query.eq('platform', platform);
+        const { data, error } = await query;
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'add_source_channel',
+      {
+        description: '새 소스 채널을 수동으로 등록한다. (링크만 있으면 import_source_url이 자동으로 채널까지 만들어주니, 이 툴은 채널 정보를 미리 세팅해두고 싶을 때 쓴다)',
+        inputSchema: z.object({
+          name: z.string().describe('채널명'),
+          platform: z.enum(['youtube', 'tiktok', 'instagram', 'threads', 'community']).optional().describe('기본값 youtube'),
+          url: z.string().optional(),
+          subscriber_count: z.string().optional().describe('예: "5.2만"'),
+          content_types: z.array(CONTENT_TYPE_ENUM).optional(),
+          platform_fit: z.array(PLATFORM_ENUM).optional(),
+          notes: z.string().optional(),
+          status: z.string().optional().describe('후보/추적중/보류, 기본값 후보'),
+        }),
+      },
+      async (args) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase
+          .from('hub_source_channels')
+          .insert({
+            name: args.name,
+            platform: args.platform || 'youtube',
+            url: args.url || null,
+            subscriber_count: args.subscriber_count || null,
+            content_types: args.content_types || [],
+            platform_fit: args.platform_fit || [],
+            notes: args.notes || null,
+            status: args.status || '후보',
+          })
+          .select()
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'update_source_channel',
+      {
+        description: '등록된 소스 채널 정보를 수정한다(id 기준, 넘긴 필드만 갱신).',
+        inputSchema: z.object({
+          id: z.string().describe('list_source_channels로 확인'),
+          name: z.string().optional(),
+          platform: z.enum(['youtube', 'tiktok', 'instagram', 'threads', 'community']).optional(),
+          url: z.string().optional(),
+          subscriber_count: z.string().optional(),
+          content_types: z.array(CONTENT_TYPE_ENUM).optional(),
+          platform_fit: z.array(PLATFORM_ENUM).optional(),
+          notes: z.string().optional(),
+          status: z.string().optional(),
+        }),
+      },
+      async ({ id, ...fields }) => {
+        const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        for (const [k, v] of Object.entries(fields)) if (v !== undefined) update[k] = v;
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_source_channels').update(update).eq('id', id).select().single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'delete_source_channel',
+      { description: '소스 채널을 삭제한다 (연결된 소재는 유지됨).', inputSchema: z.object({ id: z.string() }) },
+      async ({ id }) => {
+        const supabase = getSupabaseServerClient();
+        const { error } = await supabase.from('hub_source_channels').delete().eq('id', id);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: '삭제됨' }] };
+      }
+    );
+
+    server.registerTool(
+      'list_source_items',
+      {
+        description: '등록된 소재 목록을 조회한다. status로 필터링 가능 (미가공/가공완료/발행완료).',
+        inputSchema: z.object({
+          status: z.string().optional(),
+          channel_id: z.string().optional(),
+        }),
+      },
+      async ({ status, channel_id }) => {
+        const supabase = getSupabaseServerClient();
+        let query = supabase.from('hub_source_items').select('*').order('created_at', { ascending: false });
+        if (status) query = query.eq('status', status);
+        if (channel_id) query = query.eq('channel_id', channel_id);
+        const { data, error } = await query;
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'add_source_item',
+      {
+        description: '새 소재를 수동으로 등록한다. 링크만 있다면 import_source_url을 쓰는 게 더 빠르다(자동 분류까지 해줌).',
+        inputSchema: z.object({
+          channel_id: z.string().optional(),
+          title: z.string(),
+          source_url: z.string().optional(),
+          views: z.string().optional(),
+          content_type: CONTENT_TYPE_ENUM.optional(),
+          platform_fit: z.array(PLATFORM_ENUM).optional(),
+          raw_notes: z.string().optional().describe('원본 문장 그대로 X, 핵심 사실관계만 요약'),
+          status: z.string().optional().describe('기본값 미가공'),
+        }),
+      },
+      async (args) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase
+          .from('hub_source_items')
+          .insert({
+            channel_id: args.channel_id || null,
+            title: args.title,
+            source_url: args.source_url || null,
+            views: args.views || null,
+            content_type: args.content_type || null,
+            platform_fit: args.platform_fit || [],
+            raw_notes: args.raw_notes || null,
+            status: args.status || '미가공',
+          })
+          .select()
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'update_source_item',
+      {
+        description: '등록된 소재를 수정한다(id 기준, 넘긴 필드만 갱신). 발행 완료 후 status를 "발행완료"로 갱신하는 용도로도 쓴다.',
+        inputSchema: z.object({
+          id: z.string().describe('list_source_items로 확인'),
+          channel_id: z.string().optional(),
+          title: z.string().optional(),
+          source_url: z.string().optional(),
+          views: z.string().optional(),
+          content_type: CONTENT_TYPE_ENUM.optional(),
+          platform_fit: z.array(PLATFORM_ENUM).optional(),
+          raw_notes: z.string().optional(),
+          status: z.string().optional(),
+        }),
+      },
+      async ({ id, ...fields }) => {
+        const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        for (const [k, v] of Object.entries(fields)) if (v !== undefined) update[k] = v;
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_source_items').update(update).eq('id', id).select().single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'delete_source_item',
+      { description: '소재를 삭제한다.', inputSchema: z.object({ id: z.string() }) },
+      async ({ id }) => {
+        const supabase = getSupabaseServerClient();
+        const { error } = await supabase.from('hub_source_items').delete().eq('id', id);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: '삭제됨' }] };
+      }
+    );
+
+    server.registerTool(
+      'import_source_url',
+      {
+        description:
+          '링크(쓰레드/유튜브/틱톡/인스타 등) 하나를 던지면: 이미 등록된 소재인지 확인 → 없으면 og태그로 제목/설명 추출 → 채널 자동 매칭/생성 → AI가 content_type/platform_fit/사실관계 요약까지 자동 분류해서 등록한다. 소재를 발굴할 때 이 툴을 최우선으로 쓴다.',
+        inputSchema: z.object({
+          url: z.string().describe('가져올 게시물/영상 URL'),
+          ai_provider: z.enum(['claude', 'gemini']).optional().describe('분류에 쓸 AI, 기본값 claude'),
+        }),
+      },
+      async ({ url, ai_provider }) => {
+        const provider = ai_provider === 'gemini' ? 'gemini' : 'claude';
+        let hostname = '';
+        try {
+          hostname = new URL(url).hostname;
+        } catch {
+          return { content: [{ type: 'text', text: '올바른 URL 형식이 아닙니다.' }] };
+        }
+
+        const supabase = getSupabaseServerClient();
+        const { data: existing } = await supabase.from('hub_source_items').select('*').eq('source_url', url).maybeSingle();
+        if (existing) return { content: [{ type: 'text', text: `이미 등록됨: ${JSON.stringify(existing, null, 2)}` }] };
+
+        let meta;
+        try {
+          meta = await fetchOgMeta(url);
+        } catch (err) {
+          return { content: [{ type: 'text', text: `페이지를 가져오지 못했습니다: ${err instanceof Error ? err.message : String(err)}` }] };
+        }
+
+        const channelPlatform = detectChannelPlatform(hostname);
+        let channelId: string | null = null;
+        if (meta.siteName && meta.siteName !== hostname) {
+          const { data: matchedChannel } = await supabase
+            .from('hub_source_channels')
+            .select('id')
+            .ilike('name', `%${meta.siteName}%`)
+            .limit(1)
+            .maybeSingle();
+          if (matchedChannel) {
+            channelId = matchedChannel.id;
+          } else {
+            const { data: newChannel } = await supabase
+              .from('hub_source_channels')
+              .insert({
+                name: meta.siteName,
+                platform: channelPlatform,
+                url: `${new URL(url).protocol}//${hostname}`,
+                content_types: [],
+                platform_fit: [],
+                status: '후보',
+                notes: 'import_source_url로 자동 생성됨 — 정보 보강 필요',
+              })
+              .select('id')
+              .single();
+            channelId = newChannel?.id || null;
+          }
+        }
+
+        const classifyPrompt = `
+아래는 어떤 콘텐츠의 제목과 설명이다. 이 정보를 분석해서 JSON으로만 답해라.
+
+제목: ${meta.title}
+설명: ${meta.description || '(설명 없음)'}
+출처 플랫폼: ${channelPlatform}
+
+다음 형식으로만 출력해라:
+{
+  "content_type": "TRIVIA|LIFEHACK|EMOTIONAL|HUMOR|MOTIVATION|RANKING|PERSONAL_STORY|DEBATE 중 하나",
+  "platform_fit": ["threads","youtube_shorts","tiktok","instagram" 중 이 소재에 잘 맞는 것들, 배열"],
+  "raw_notes": "이 콘텐츠의 핵심 사실관계를 1~2문장으로 요약. 원문 표현을 그대로 옮기지 말고 완전히 새로운 문장으로 작성."
+}
+`.trim();
+
+        let classification = { content_type: 'TRIVIA', platform_fit: ['youtube_shorts'] as string[], raw_notes: meta.description || meta.title };
+        try {
+          const raw = await callAi(provider, '너는 콘텐츠 분류 전문가다. 반드시 JSON만 출력한다.', classifyPrompt);
+          const cleaned = raw.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+          const parsed = JSON.parse(cleaned);
+          classification = {
+            content_type: CONTENT_TYPES.includes(parsed.content_type) ? parsed.content_type : 'TRIVIA',
+            platform_fit: Array.isArray(parsed.platform_fit) ? parsed.platform_fit.filter((p: string) => PLATFORM_VALUES.includes(p)) : [],
+            raw_notes: typeof parsed.raw_notes === 'string' ? parsed.raw_notes : meta.description,
+          };
+        } catch {
+          // AI 분류 실패해도 기본값으로 저장 진행
+        }
+
+        const { data: item, error } = await supabase
+          .from('hub_source_items')
+          .insert({
+            channel_id: channelId,
+            title: meta.title,
+            source_url: url,
+            content_type: classification.content_type,
+            platform_fit: classification.platform_fit,
+            raw_notes: classification.raw_notes,
+            status: '미가공',
+          })
+          .select()
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify({ channel_created: !!channelId, item }, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'list_personas',
+      {
+        description: '콘텐츠 생성에 쓸 수 있는 페르소나 목록을 조회한다 (유쓰레드의 ut_personas + 기본 제공 ut_system_personas를 합쳐서 반환).',
+        inputSchema: z.object({}),
+      },
+      async () => {
+        const supabase = getSupabaseServerClient();
+        const [{ data: personas }, { data: systemPersonas }] = await Promise.all([
+          supabase.from('ut_personas').select('id, name, tone_prompt, target_prompt').order('created_at', { ascending: false }),
+          supabase.from('ut_system_personas').select('id, name, prompt').order('sort_order'),
+        ]);
+        const combined = [
+          ...(personas || []).map((p) => ({ ...p, is_system: false })),
+          ...(systemPersonas || []).map((p) => ({ id: p.id, name: `${p.name} (기본)`, tone_prompt: p.prompt, target_prompt: '', is_system: true })),
+        ];
+        return { content: [{ type: 'text', text: JSON.stringify(combined, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'generate_content',
+      {
+        description:
+          '소재(source_item_id) 또는 직접 입력한 주제(manual_topic)를, 선택한 페르소나 톤과 타겟 플랫폼 포맷 규칙에 맞춰 AI로 콘텐츠를 생성하고 저장한다.',
+        inputSchema: z.object({
+          source_item_id: z.string().optional().describe('list_source_items로 확인한 소재 id'),
+          manual_topic: z.string().optional().describe('source_item_id 없이 직접 주제를 줄 때'),
+          persona_id: z.string().describe('list_personas로 확인한 페르소나 id'),
+          persona_is_system: z.boolean().optional().describe('list_personas 결과의 is_system 값을 그대로 넣을 것'),
+          target_platform: PLATFORM_ENUM,
+          ai_provider: z.enum(['claude', 'gemini']).optional().describe('기본값 claude'),
+        }),
+      },
+      async ({ source_item_id, manual_topic, persona_id, persona_is_system, target_platform, ai_provider }) => {
+        if (!source_item_id && !manual_topic?.trim()) {
+          return { content: [{ type: 'text', text: 'source_item_id 또는 manual_topic 중 하나가 필요합니다.' }] };
+        }
+        const provider = ai_provider === 'gemini' ? 'gemini' : 'claude';
+        const supabase = getSupabaseServerClient();
+
+        let persona: { name: string; tone_prompt: string; target_prompt: string } | null = null;
+        if (persona_is_system) {
+          const { data, error } = await supabase.from('ut_system_personas').select('*').eq('id', persona_id).single();
+          if (error || !data) return { content: [{ type: 'text', text: '페르소나를 찾을 수 없습니다.' }] };
+          persona = { name: data.name, tone_prompt: data.prompt, target_prompt: '' };
+        } else {
+          const { data, error } = await supabase.from('ut_personas').select('*').eq('id', persona_id).single();
+          if (error || !data) return { content: [{ type: 'text', text: '페르소나를 찾을 수 없습니다.' }] };
+          persona = { name: data.name, tone_prompt: data.tone_prompt, target_prompt: data.target_prompt };
+        }
+
+        let topicText = manual_topic?.trim() || '';
+        let sourceItemId: string | null = null;
+        if (source_item_id) {
+          const { data: item, error: itemError } = await supabase.from('hub_source_items').select('*').eq('id', source_item_id).single();
+          if (itemError || !item) return { content: [{ type: 'text', text: '소재를 찾을 수 없습니다.' }] };
+          sourceItemId = item.id;
+          topicText = `제목: ${item.title}\n요약/사실관계: ${item.raw_notes || '(추가 메모 없음, 제목 기반으로 작성)'}`;
+        }
+
+        const systemPrompt = `
+너는 아래 페르소나로 글을 쓰는 콘텐츠 작가다.
+
+[페르소나 톤]
+${persona.tone_prompt || ''}
+
+[타겟/추가 지침]
+${persona.target_prompt || ''}
+
+${PLATFORM_GUIDE[target_platform]}
+
+[중요 - 저작권 주의]
+- 아래 소재는 사실관계만 참고하고, 원본 영상/기사의 문장을 그대로 옮기지 마라.
+- 완전히 새로운 표현과 구조로 재작성해라.
+
+결과는 JSON으로만 출력해라: {"content": "..."}
+`.trim();
+
+        let generatedText = '';
+        try {
+          generatedText = await callAi(provider, systemPrompt, `다음 소재로 글을 작성해줘.\n\n${topicText}`);
+        } catch (err) {
+          return { content: [{ type: 'text', text: `AI 생성 실패: ${err instanceof Error ? err.message : String(err)}` }] };
+        }
+        try {
+          const cleaned = generatedText.replace(/^```(json)?/i, '').replace(/```$/, '').trim();
+          const parsed = JSON.parse(cleaned);
+          if (parsed?.content) generatedText = parsed.content;
+        } catch {
+          // JSON 아니면 그대로 사용
+        }
+
+        const { data: saved, error: saveError } = await supabase
+          .from('hub_generated_content')
+          .insert({
+            source_item_id: sourceItemId,
+            persona_id,
+            persona_name: persona.name,
+            target_platform,
+            ai_provider: provider,
+            generated_text: generatedText.trim(),
+            status: 'draft',
+          })
+          .select()
+          .single();
+        if (saveError) return { content: [{ type: 'text', text: `에러: ${saveError.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(saved, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'list_generated_content',
+      { description: '생성된 콘텐츠 목록을 조회한다.', inputSchema: z.object({ limit: z.number().optional().describe('기본 50') }) },
+      async ({ limit }) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase
+          .from('hub_generated_content')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(limit || 50);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    // ── 범용 유틸 (기존) ─────────────────────────────
 
     server.registerTool(
       'list_tables',
