@@ -71,6 +71,7 @@ const baseHandler = createMcpHandler(
           benchmark_url: urlArg.describe('벤치마킹 대상 원본 사이트 URL(여러 개 가능)'),
           notes: z.string().optional(),
           start_date: z.string().optional().describe('시작일 (YYYY-MM-DD)'),
+          plan_content: z.string().optional().describe('계획서 본문(마크다운). PLAN_TEMPLATE.md 구조 권장.'),
         }),
       },
       async (args) => {
@@ -107,6 +108,7 @@ const baseHandler = createMcpHandler(
           benchmark_url: urlArg.describe('통째로 교체됨. 여러 벤치마킹 URL을 유지하려면 배열로 전체를 넘길 것'),
           notes: z.string().optional(),
           start_date: z.string().optional(),
+          plan_content: z.string().optional().describe('계획서 본문(마크다운) 통째로 교체. 진행 기록에 이어붙이려면 먼저 list_sites로 기존 내용을 읽고 합쳐서 넘길 것.'),
         }),
       },
       async ({ id, ...fields }) => {

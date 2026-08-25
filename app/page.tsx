@@ -16,6 +16,7 @@ type Site = {
   start_date: string | null;
   plan_file_url: string | null;
   plan_file_name: string | null;
+  plan_content: string | null;
 };
 
 const KNOWN_EMAILS = [
@@ -308,9 +309,12 @@ export default function Home() {
                       </div>
                       <div className="flex flex-wrap gap-x-3 text-[11px] text-neutral-400 mb-3">
                         {s.start_date && <span>📅 {s.start_date} 시작</span>}
+                        <Link href={`/plan/${s.id}`} className="text-blue-500 font-bold hover:underline">
+                          📋 {s.plan_content ? '계획서 보기' : '계획서 작성'}
+                        </Link>
                         {s.plan_file_url && (
-                          <a href={s.plan_file_url} target="_blank" rel="noopener noreferrer" className="text-blue-500 font-bold hover:underline">
-                            📎 {s.plan_file_name || '계획서'}
+                          <a href={s.plan_file_url} target="_blank" rel="noopener noreferrer" className="text-neutral-400 font-bold hover:underline">
+                            📎 {s.plan_file_name || '이전 업로드 파일'}
                           </a>
                         )}
                       </div>

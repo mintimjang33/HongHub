@@ -26,6 +26,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     'start_date',
     'plan_file_url',
     'plan_file_name',
+    'plan_content',
     'sort_order',
   ];
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
