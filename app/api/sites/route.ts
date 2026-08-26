@@ -29,6 +29,7 @@ export async function POST(request: Request) {
       live_url: toUrlArray(body.live_url),
       supabase_url: toUrlArray(body.supabase_url),
       benchmark_url: toUrlArray(body.benchmark_url),
+      learning_url: toUrlArray(body.learning_url),
       notes: body.notes || null,
       start_date: body.start_date || null,
       plan_file_url: body.plan_file_url || null,

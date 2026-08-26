@@ -8,37 +8,67 @@ type Site = {
   name: string;
   admin_email: string | null;
   benchmark_url: string[] | null;
+  learning_url: string[] | null;
   notes: string | null;
   start_date: string | null;
   plan_content: string | null;
+};
+
+type Channel = {
+  id: string;
+  name: string;
+  platform: string;
+  url: string | null;
+  subscriber_count: string | null;
+  notes: string | null;
 };
 
 // 콘텐츠 파이프라인(코드 프로젝트가 아닌 채널/워크플로) 항목은
 // notes에 이 마커가 들어있는 hub_sites 레코드로 식별한다.
 const PIPELINE_MARKER = '코드 프로젝트 아님';
 
+// 소스 발굴(hub_source_channels)에서 특정 파이프라인 소재로 쓸 채널은
+// notes 맨 앞에 이 태그를 붙여서 표시한다. 예: "[파이프라인:공학쇼츠] ..."
+const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
+
 const EMPTY_FORM = {
   name: '',
   admin_email: 'mintimjang33@gmail.com',
   benchmark_url: [''] as string[],
+  learning_url: [''] as string[],
   notes: '',
   start_date: '',
 };
 
 export default function PipelinesPage() {
   const [sites, setSites] = useState<Site[]>([]);
+  const [channelsByPipeline, setChannelsByPipeline] = useState<Record<string, Channel[]>>({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [quickName, setQuickName] = useState('');
+  const [quickAdding, setQuickAdding] = useState(false);
 
   function load() {
-    fetch('/api/sites')
-      .then((r) => r.json())
-      .then((d) => {
-        const all: Site[] = d.sites || [];
+    Promise.all([
+      fetch('/api/sites').then((r) => r.json()),
+      fetch('/api/source-channels').then((r) => r.json()),
+    ])
+      .then(([sitesData, channelsData]) => {
+        const all: Site[] = sitesData.sites || [];
         setSites(all.filter((s) => (s.notes || '').includes(PIPELINE_MARKER)));
+
+        const channels: Channel[] = channelsData.channels || [];
+        const grouped: Record<string, Channel[]> = {};
+        for (const c of channels) {
+          const m = (c.notes || '').match(CHANNEL_TAG_RE);
+          if (!m) continue;
+          const pipelineName = m[1];
+          (grouped[pipelineName] ??= []).push(c);
+        }
+        setChannelsByPipeline(grouped);
       })
       .finally(() => setLoading(false));
   }
@@ -59,17 +89,18 @@ export default function PipelinesPage() {
       name: s.name,
       admin_email: s.admin_email || 'mintimjang33@gmail.com',
       benchmark_url: s.benchmark_url && s.benchmark_url.length > 0 ? s.benchmark_url : [''],
+      learning_url: s.learning_url && s.learning_url.length > 0 ? s.learning_url : [''],
       notes: (s.notes || '').replace(PIPELINE_MARKER, '').replace(/^[\s—–-]+/, ''),
       start_date: s.start_date || '',
     });
     setShowForm(true);
   }
 
-  function setUrlValue(i: number, value: string) {
+  function setUrlValue(field: 'benchmark_url' | 'learning_url', i: number, value: string) {
     setForm((f) => {
-      const next = [...f.benchmark_url];
+      const next = [...f[field]];
       next[i] = value;
-      return { ...f, benchmark_url: next };
+      return { ...f, [field]: next };
     });
   }
 
@@ -83,6 +114,7 @@ export default function PipelinesPage() {
         name: form.name.trim(),
         admin_email: form.admin_email || null,
         benchmark_url: form.benchmark_url.map((v) => v.trim()).filter(Boolean),
+        learning_url: form.learning_url.map((v) => v.trim()).filter(Boolean),
         notes,
         start_date: form.start_date || null,
       };
@@ -112,6 +144,27 @@ export default function PipelinesPage() {
     load();
   }
 
+  async function handleQuickAdd() {
+    const name = quickName.trim();
+    if (!name) return;
+    setQuickAdding(true);
+    try {
+      await fetch('/api/sites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          admin_email: 'mintimjang33@gmail.com',
+          notes: '코드 프로젝트 아님 — 콘텐츠 파이프라인. (분류만 먼저 만들어둠, 아직 내용 없음)',
+        }),
+      });
+      setQuickName('');
+      load();
+    } finally {
+      setQuickAdding(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50">
       <div className="max-w-5xl mx-auto px-6 py-10">
@@ -130,6 +183,23 @@ export default function PipelinesPage() {
               + 파이프라인 추가
             </button>
           </div>
+        </div>
+
+        <div className="flex items-center gap-2 mb-8">
+          <input
+            value={quickName}
+            onChange={(e) => setQuickName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleQuickAdd()}
+            placeholder="예: 발명학, 과학쇼츠 — 이름만 쳐서 분류 먼저 만들기"
+            className="flex-1 border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+          />
+          <button
+            onClick={handleQuickAdd}
+            disabled={quickAdding || !quickName.trim()}
+            className="text-xs font-black px-5 py-2.5 rounded-lg border border-neutral-300 bg-white hover:border-neutral-400 disabled:opacity-40"
+          >
+            {quickAdding ? '추가 중...' : '+ 분류 빠른 추가'}
+          </button>
         </div>
 
         {loading ? (
@@ -159,11 +229,11 @@ export default function PipelinesPage() {
                     📋 {s.plan_content ? '계획서 보기' : '계획서 작성'}
                   </Link>
                 </div>
-                {s.benchmark_url && s.benchmark_url.length > 0 && (
+                {((s.benchmark_url && s.benchmark_url.length > 0) || (s.learning_url && s.learning_url.length > 0)) && (
                   <div className="flex flex-wrap gap-2 mb-3">
-                    {s.benchmark_url.map((url, i) => (
+                    {s.benchmark_url?.map((url, i) => (
                       <a
-                        key={i}
+                        key={`b-${i}`}
                         href={url}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -172,10 +242,44 @@ export default function PipelinesPage() {
                         🔍 벤치마킹{s.benchmark_url && s.benchmark_url.length > 1 ? ` ${i + 1}` : ''}
                       </a>
                     ))}
+                    {s.learning_url?.map((url, i) => (
+                      <a
+                        key={`l-${i}`}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 px-3 py-1.5 rounded-full"
+                      >
+                        📚 학습{s.learning_url && s.learning_url.length > 1 ? ` ${i + 1}` : ''}
+                      </a>
+                    ))}
                   </div>
                 )}
                 {s.notes && (
                   <p className="text-xs text-neutral-500 whitespace-pre-wrap border-t border-neutral-100 pt-3">{s.notes}</p>
+                )}
+                {(channelsByPipeline[s.name] || []).length > 0 && (
+                  <div className="border-t border-neutral-100 mt-3 pt-3">
+                    <div className="text-[11px] font-black text-neutral-400 mb-2">
+                      🎯 소스 채널 ({channelsByPipeline[s.name].length})
+                    </div>
+                    <div className="space-y-1.5">
+                      {channelsByPipeline[s.name].map((c) => (
+                        <a
+                          key={c.id}
+                          href={c.url || '#'}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-between gap-2 text-[11px] bg-neutral-50 hover:bg-neutral-100 rounded-lg px-3 py-2"
+                        >
+                          <span className="font-bold truncate">{c.name}</span>
+                          {c.subscriber_count && (
+                            <span className="text-neutral-400 flex-shrink-0">{c.subscriber_count}</span>
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             ))}
@@ -221,7 +325,7 @@ export default function PipelinesPage() {
                     <input
                       key={i}
                       value={v}
-                      onChange={(e) => setUrlValue(i, e.target.value)}
+                      onChange={(e) => setUrlValue('benchmark_url', i, e.target.value)}
                       placeholder="https://www.youtube.com/@..."
                       className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
                     />
@@ -232,6 +336,27 @@ export default function PipelinesPage() {
                     className="text-[11px] text-blue-500 font-bold hover:underline"
                   >
                     + 벤치마킹 URL 추가
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">📚 학습(제작법 튜토리얼) URL</label>
+                <div className="space-y-1.5">
+                  {form.learning_url.map((v, i) => (
+                    <input
+                      key={i}
+                      value={v}
+                      onChange={(e) => setUrlValue('learning_url', i, e.target.value)}
+                      placeholder="https://youtu.be/..."
+                      className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, learning_url: [...f.learning_url, ''] }))}
+                    className="text-[11px] text-blue-500 font-bold hover:underline"
+                  >
+                    + 학습 URL 추가
                   </button>
                 </div>
               </div>

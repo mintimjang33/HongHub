@@ -69,6 +69,7 @@ const baseHandler = createMcpHandler(
           live_url: urlArg.describe('실제 접속 URL'),
           supabase_url: urlArg,
           benchmark_url: urlArg.describe('벤치마킹 대상 원본 사이트 URL(여러 개 가능)'),
+          learning_url: urlArg.describe('제작법/학습 튜토리얼 URL(여러 개 가능) — 벤치마킹(무엇을 만들지)과 달리 어떻게 만드는지에 대한 자료'),
           notes: z.string().optional(),
           start_date: z.string().optional().describe('시작일 (YYYY-MM-DD)'),
           plan_content: z.string().optional().describe('계획서 본문(마크다운). PLAN_TEMPLATE.md 구조 권장.'),
@@ -85,6 +86,7 @@ const baseHandler = createMcpHandler(
             live_url: toUrlArray(args.live_url),
             supabase_url: toUrlArray(args.supabase_url),
             benchmark_url: toUrlArray(args.benchmark_url),
+            learning_url: toUrlArray(args.learning_url),
           })
           .select()
           .single();
@@ -106,13 +108,14 @@ const baseHandler = createMcpHandler(
           live_url: urlArg,
           supabase_url: urlArg,
           benchmark_url: urlArg.describe('통째로 교체됨. 여러 벤치마킹 URL을 유지하려면 배열로 전체를 넘길 것'),
+          learning_url: urlArg.describe('통째로 교체됨. 제작법/학습 튜토리얼 URL — 여러 개 유지하려면 배열로 전체를 넘길 것'),
           notes: z.string().optional(),
           start_date: z.string().optional(),
           plan_content: z.string().optional().describe('계획서 본문(마크다운) 통째로 교체. 진행 기록에 이어붙이려면 먼저 list_sites로 기존 내용을 읽고 합쳐서 넘길 것.'),
         }),
       },
       async ({ id, ...fields }) => {
-        const ARRAY_FIELDS = new Set(['github_url', 'vercel_url', 'live_url', 'supabase_url', 'benchmark_url']);
+        const ARRAY_FIELDS = new Set(['github_url', 'vercel_url', 'live_url', 'supabase_url', 'benchmark_url', 'learning_url']);
         const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
         for (const [k, v] of Object.entries(fields)) {
           if (v === undefined) continue;

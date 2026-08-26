@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../../lib/supabase';
 
-const ARRAY_FIELDS = new Set(['github_url', 'vercel_url', 'live_url', 'supabase_url', 'benchmark_url']);
+const ARRAY_FIELDS = new Set(['github_url', 'vercel_url', 'live_url', 'supabase_url', 'benchmark_url', 'learning_url']);
 
 function toUrlArray(value: unknown): string[] | null {
   const arr = Array.isArray(value) ? value : value ? [value] : [];
@@ -22,6 +22,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     'live_url',
     'supabase_url',
     'benchmark_url',
+    'learning_url',
     'notes',
     'start_date',
     'plan_file_url',

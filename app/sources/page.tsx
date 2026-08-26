@@ -67,6 +67,12 @@ const PLATFORMS = [
 
 const CHANNEL_PLATFORMS = ['youtube', 'tiktok', 'instagram', 'threads', 'community'];
 
+// 채널 notes 맨 앞의 "[파이프라인:이름]" 태그로 그룹을 판별한다.
+const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]/;
+function channelGroup(c: Channel): string {
+  return c.notes?.match(CHANNEL_TAG_RE)?.[1] || '미분류';
+}
+
 const TABS = [
   { value: 'channels', label: '1. 소스 채널' },
   { value: 'items', label: '2. 소재 큐레이션' },
@@ -175,6 +181,7 @@ function ChannelsTab({ channels, onChange }: { channels: Channel[]; onChange: ()
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [filterPlatform, setFilterPlatform] = useState('all');
+  const [filterGroup, setFilterGroup] = useState('all');
   const [form, setForm] = useState({
     name: '',
     platform: 'youtube',
@@ -241,20 +248,58 @@ function ChannelsTab({ channels, onChange }: { channels: Channel[]; onChange: ()
     onChange();
   }
 
-  const filtered = filterPlatform === 'all' ? channels : channels.filter((c) => c.platform === filterPlatform);
+  const byGroup = filterGroup === 'all' ? channels : channels.filter((c) => channelGroup(c) === filterGroup);
+  const filtered = filterPlatform === 'all' ? byGroup : byGroup.filter((c) => c.platform === filterPlatform);
+
+  const groupOrder = ['공학쇼츠', '경제학쇼츠', '심리학쇼츠'];
+  const groups = Array.from(new Set(channels.map(channelGroup))).sort((a, b) => {
+    const ia = groupOrder.indexOf(a);
+    const ib = groupOrder.indexOf(b);
+    if (a === '미분류') return 1;
+    if (b === '미분류') return -1;
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
 
   return (
     <div>
+      <div className="flex gap-2 mb-3 border-b border-neutral-200">
+        <button
+          onClick={() => setFilterGroup('all')}
+          className={`text-xs font-black px-4 py-2.5 border-b-2 -mb-px ${
+            filterGroup === 'all' ? 'border-black text-black' : 'border-transparent text-neutral-400 hover:text-black'
+          }`}
+        >
+          전체 ({channels.length})
+        </button>
+        {groups.map((g) => {
+          const count = channels.filter((c) => channelGroup(c) === g).length;
+          return (
+            <button
+              key={g}
+              onClick={() => setFilterGroup(g)}
+              className={`text-xs font-black px-4 py-2.5 border-b-2 -mb-px ${
+                filterGroup === g ? 'border-black text-black' : 'border-transparent text-neutral-400 hover:text-black'
+              }`}
+            >
+              {g === '미분류' ? '📭' : '🧪'} {g} ({count})
+            </button>
+          );
+        })}
+      </div>
+
       <div className="flex items-center justify-between mb-4">
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setFilterPlatform('all')}
             className={`text-xs font-bold px-4 py-2 rounded-full border ${filterPlatform === 'all' ? 'bg-black text-white border-black' : 'bg-white border-neutral-200'}`}
           >
-            전체 ({channels.length})
+            전체 ({byGroup.length})
           </button>
           {CHANNEL_PLATFORMS.map((p) => {
-            const count = channels.filter((c) => c.platform === p).length;
+            const count = byGroup.filter((c) => c.platform === p).length;
             if (count === 0) return null;
             return (
               <button
@@ -304,6 +349,11 @@ function ChannelsTab({ channels, onChange }: { channels: Channel[]; onChange: ()
               </div>
               <div className="flex flex-wrap gap-1.5 mb-2">
                 <span className="text-[11px] font-bold bg-neutral-100 px-3 py-1 rounded-full">{c.status}</span>
+                {(c.notes || '').match(/^\[파이프라인:([^\]]+)\]/) && (
+                  <span className="text-[11px] font-bold bg-amber-50 text-amber-600 px-3 py-1 rounded-full">
+                    🧪 {(c.notes || '').match(/^\[파이프라인:([^\]]+)\]/)?.[1]}
+                  </span>
+                )}
                 {(c.content_types || []).map((t) => (
                   <span key={t} className="text-[11px] font-bold bg-purple-50 text-purple-600 px-3 py-1 rounded-full">
                     {CONTENT_TYPE_LABEL[t] || t}
@@ -319,7 +369,11 @@ function ChannelsTab({ channels, onChange }: { channels: Channel[]; onChange: ()
                   ))}
                 </div>
               )}
-              {c.notes && <p className="text-xs text-neutral-500 whitespace-pre-wrap border-t border-neutral-100 mt-3 pt-3">{c.notes}</p>}
+              {c.notes && (
+                <p className="text-xs text-neutral-500 whitespace-pre-wrap border-t border-neutral-100 mt-3 pt-3">
+                  {c.notes.replace(/^\[파이프라인:[^\]]+\]\s*/, '')}
+                </p>
+              )}
             </div>
           ))}
         </div>
