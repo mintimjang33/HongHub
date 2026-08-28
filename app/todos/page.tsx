@@ -12,6 +12,15 @@ type Todo = {
   created_at: string;
 };
 
+type Site = { id: string; name: string; plan_content: string | null };
+
+function buildLogEntry(todo: Todo): string {
+  const date = new Date().toISOString().slice(0, 10);
+  const lines = [`### ${date} — 오늘의 할일에서 이관`, `- ${todo.content}`];
+  for (const a of todo.attachments || []) lines.push(`  - 📎 ${a.name}: ${a.url}`);
+  return lines.join('\n');
+}
+
 export default function TodosPage() {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +33,12 @@ export default function TodosPage() {
   const [editingContent, setEditingContent] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [sites, setSites] = useState<Site[]>([]);
+  const [completingTodo, setCompletingTodo] = useState<Todo | null>(null);
+  const [selectedSiteId, setSelectedSiteId] = useState<string>('');
+  const [previewText, setPreviewText] = useState('');
+  const [completing, setCompleting] = useState(false);
+
   function load() {
     fetch('/api/todos')
       .then((r) => r.json())
@@ -33,6 +48,9 @@ export default function TodosPage() {
 
   useEffect(() => {
     load();
+    fetch('/api/sites')
+      .then((r) => r.json())
+      .then((d) => setSites(d.sites || []));
   }, []);
 
   async function uploadFiles(files: FileList | File[]) {
@@ -74,9 +92,43 @@ export default function TodosPage() {
     }
   }
 
-  async function handleComplete(id: string) {
-    await fetch(`/api/todos/${id}`, { method: 'DELETE' });
-    setTodos((prev) => prev.filter((t) => t.id !== id));
+  function openCompleteModal(t: Todo) {
+    setCompletingTodo(t);
+    setSelectedSiteId('');
+    setPreviewText(buildLogEntry(t));
+  }
+
+  function closeCompleteModal() {
+    setCompletingTodo(null);
+    setSelectedSiteId('');
+    setPreviewText('');
+  }
+
+  async function confirmComplete() {
+    if (!completingTodo) return;
+    setCompleting(true);
+    try {
+      if (selectedSiteId) {
+        const site = sites.find((s) => s.id === selectedSiteId);
+        const merged = previewText + (site?.plan_content ? `\n\n---\n\n${site.plan_content}` : '');
+        const res = await fetch(`/api/sites/${selectedSiteId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan_content: merged }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          alert(d.error || '계획표 기록에 실패했어요. 삭제하지 않았어요.');
+          return;
+        }
+        setSites((prev) => prev.map((s) => (s.id === selectedSiteId ? { ...s, plan_content: merged } : s)));
+      }
+      await fetch(`/api/todos/${completingTodo.id}`, { method: 'DELETE' });
+      setTodos((prev) => prev.filter((t) => t.id !== completingTodo.id));
+      closeCompleteModal();
+    } finally {
+      setCompleting(false);
+    }
   }
 
   function startEdit(t: Todo) {
@@ -214,7 +266,7 @@ export default function TodosPage() {
                     </p>
                   )}
                   <button
-                    onClick={() => handleComplete(t.id)}
+                    onClick={() => openCompleteModal(t)}
                     className="flex-shrink-0 text-[11px] text-neutral-400 font-bold px-3 py-1.5 rounded-full border border-neutral-200 hover:border-green-400 hover:text-green-600"
                   >
                     ✓ 완료
@@ -243,6 +295,60 @@ export default function TodosPage() {
           </div>
         )}
       </div>
+
+      {completingTodo && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-5">
+            <h2 className="text-sm font-black mb-1">이 할일을 완료 처리할까요?</h2>
+            <p className="text-xs text-neutral-400 mb-4">
+              프로젝트를 선택하면 계획표(진행 기록)에 아래 내용을 남긴 뒤 삭제해요. 선택하지 않으면 기록 없이 바로 삭제돼요.
+            </p>
+
+            <label className="text-[11px] font-bold text-neutral-500 block mb-1">프로젝트 계획표에 기록</label>
+            <select
+              value={selectedSiteId}
+              onChange={(e) => setSelectedSiteId(e.target.value)}
+              className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-xs mb-3"
+            >
+              <option value="">— 기록 없이 그냥 삭제 —</option>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+
+            {selectedSiteId && (
+              <>
+                <label className="text-[11px] font-bold text-neutral-500 block mb-1">계획표에 남길 내용 (수정 가능)</label>
+                <textarea
+                  value={previewText}
+                  onChange={(e) => setPreviewText(e.target.value)}
+                  rows={5}
+                  className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-xs font-mono mb-3"
+                />
+              </>
+            )}
+
+            <div className="flex items-center justify-end gap-2 mt-2">
+              <button
+                onClick={closeCompleteModal}
+                disabled={completing}
+                className="text-xs font-black px-4 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400 disabled:opacity-40"
+              >
+                취소
+              </button>
+              <button
+                onClick={confirmComplete}
+                disabled={completing}
+                className="bg-black text-white text-xs font-black px-4 py-2 rounded-lg hover:bg-neutral-800 disabled:opacity-40"
+              >
+                {completing ? '처리 중...' : selectedSiteId ? '계획표에 기록하고 삭제' : '그냥 삭제'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
