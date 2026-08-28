@@ -217,6 +217,12 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <Link
+              href="/todos"
+              className="text-xs font-black px-5 py-3 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+            >
+              ✅ 오늘의 할일
+            </Link>
+            <Link
               href="/pipelines"
               className="text-xs font-black px-5 py-3 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
             >
