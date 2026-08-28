@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getSupabaseServerClient } from '../../../lib/supabase';
 import { callAi } from '../../../lib/aiProviders';
 import { fetchOgMeta, detectChannelPlatform } from '../../../lib/ogMeta';
+import { getConfigValue } from '../../../lib/remoteConfig';
 
 const urlArg = z.union([z.string(), z.array(z.string())]).optional().describe('URL 하나 또는 여러 개(배열)');
 
@@ -843,6 +844,69 @@ ${PLATFORM_GUIDE[target_platform]}
         if (!res.ok) return { content: [{ type: 'text', text: `에러: 파일을 찾을 수 없습니다 (${res.status})` }] };
         const text = await res.text();
         return { content: [{ type: 'text', text }] };
+      }
+    );
+
+    server.registerTool(
+      'push_github_file',
+      {
+        description:
+          'HongHub GitHub 저장소(mintimjang33/HongHub)에 파일 하나를 생성/수정해서 바로 커밋+푸시한다. app_config 테이블(또는 GITHUB_TOKEN 환경변수)에 해당 저장소 쓰기 권한이 있는 GitHub PAT이 GITHUB_TOKEN 키로 저장되어 있어야 동작한다. content는 파일 일부가 아니라 전체 내용이어야 한다(부분 수정이면 먼저 get_github_file로 전체를 읽고 수정한 뒤 통째로 넘길 것).',
+        inputSchema: z.object({
+          path: z.string().describe('예: app/page.tsx'),
+          content: z.string().describe('파일의 전체 새 내용'),
+          message: z.string().describe('커밋 메시지'),
+          branch: z.string().optional().describe('기본값 main'),
+        }),
+      },
+      async ({ path, content, message, branch }) => {
+        const token = await getConfigValue('GITHUB_TOKEN');
+        if (!token) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'GITHUB_TOKEN이 설정되어 있지 않습니다. mintimjang33/HongHub 저장소에 쓰기 권한이 있는 GitHub Personal Access Token을 app_config 테이블에 key=GITHUB_TOKEN으로 추가하거나 배포 환경변수로 추가한 뒤 다시 시도해주세요.',
+              },
+            ],
+          };
+        }
+        const ref = branch || 'main';
+        const apiUrl = `https://api.github.com/repos/mintimjang33/HongHub/contents/${path}`;
+        const headers = {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+        };
+
+        let sha: string | undefined;
+        const existing = await fetch(`${apiUrl}?ref=${ref}`, { headers });
+        if (existing.ok) {
+          const existingJson = await existing.json();
+          sha = existingJson.sha;
+        }
+
+        const res = await fetch(apiUrl, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({
+            message,
+            content: Buffer.from(content, 'utf-8').toString('base64'),
+            branch: ref,
+            ...(sha ? { sha } : {}),
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) return { content: [{ type: 'text', text: `에러: ${JSON.stringify(json)}` }] };
+        const commitSha = json.commit?.sha ? String(json.commit.sha).slice(0, 7) : '?';
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `커밋 완료 (${commitSha}): https://github.com/mintimjang33/HongHub/blob/${ref}/${path}`,
+            },
+          ],
+        };
       }
     );
   },
