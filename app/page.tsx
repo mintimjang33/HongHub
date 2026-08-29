@@ -19,6 +19,11 @@ type Site = {
   plan_content: string | null;
 };
 
+// 콘텐츠 파이프라인(코드 프로젝트가 아닌 채널/워크플로) 항목은
+// notes에 이 마커가 들어있는 hub_sites 레코드로 식별한다.
+// 이런 항목은 /pipelines 전용이므로 홈(도구/사이트) 목록에서는 제외한다.
+const PIPELINE_MARKER = '코드 프로젝트 아님';
+
 const KNOWN_EMAILS = [
   'mintimjang33@gmail.com',
   'minsiljang0@gmail.com',
@@ -89,7 +94,10 @@ export default function Home() {
   function load() {
     fetch('/api/sites')
       .then((r) => r.json())
-      .then((d) => setSites(d.sites || []))
+      .then((d) => {
+        const all: Site[] = d.sites || [];
+        setSites(all.filter((s) => !(s.notes || '').includes(PIPELINE_MARKER)));
+      })
       .finally(() => setLoading(false));
   }
 
@@ -189,7 +197,7 @@ export default function Home() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('이 사이트를 목록에서 삭제할까요?')) return;
+    if (!confirm('이 도구(사이트)를 목록에서 삭제할까요?')) return;
     await fetch(`/api/sites/${id}`, { method: 'DELETE' });
     load();
   }
@@ -213,7 +221,7 @@ export default function Home() {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-black">🏠 HongHub</h1>
-            <p className="text-xs text-neutral-400 mt-1">내 사이트/프로젝트 계정을 한눈에 모아보는 관리 허브</p>
+            <p className="text-xs text-neutral-400 mt-1">내 도구(사이트) 계정을 한눈에 모아보는 관리 허브</p>
           </div>
           <div className="flex items-center gap-2">
             <Link
@@ -247,7 +255,7 @@ export default function Home() {
               🔌 MCP 커넥터
             </Link>
             <button onClick={openAdd} className="bg-black text-white text-xs font-black px-5 py-3 rounded-lg hover:bg-neutral-800">
-              + 사이트 추가
+              + 도구(사이트) 추가
             </button>
             <button
               onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => (window.location.href = '/login'))}
@@ -295,7 +303,7 @@ export default function Home() {
           <div className="text-sm text-neutral-400 text-center py-20">불러오는 중...</div>
         ) : sites.length === 0 ? (
           <div className="border border-dashed border-neutral-300 rounded-xl p-16 text-center text-sm text-neutral-400">
-            아직 등록된 사이트가 없어요. &quot;+ 사이트 추가&quot;로 시작해보세요.
+            아직 등록된 도구(사이트)가 없어요. &quot;+ 도구(사이트) 추가&quot;로 시작해보세요.
           </div>
         ) : (
           <div className="space-y-8">
@@ -362,14 +370,14 @@ export default function Home() {
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowForm(false)}>
           <div className="bg-white p-6 max-w-md w-full rounded-xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <h2 className="font-black mb-4">{editingId ? '사이트 수정' : '+ 사이트 추가'}</h2>
+            <h2 className="font-black mb-4">{editingId ? '도구(사이트) 수정' : '+ 도구(사이트) 추가'}</h2>
             <div className="space-y-3">
               <div>
-                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">사이트/프로젝트 이름 *</label>
+                <label className="text-[11px] text-neutral-400 font-bold mb-1 block">도구(사이트) 이름 *</label>
                 <input
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  placeholder="사이트/프로젝트 이름"
+                  placeholder="도구(사이트) 이름"
                   className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm"
                 />
               </div>
