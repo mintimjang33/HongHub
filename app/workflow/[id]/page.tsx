@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 type Site = { id: string; name: string; workflow_content: string | null };
 type Step = { n: string; name: string; desc: string; status: string };
@@ -724,7 +724,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
 
   // U-Caption 큐에 작업을 등록하고, 이 PC의 크롬 확장(로컬 워커, 최대 1분 주기)이 처리할 때까지
   // 몇 초 간격으로 상태를 확인한다. 성공하면 바로 저장하지 않고 검토할 수 있게 입력칸만 채워둔다.
-  async function autoFetch(item: SourceItem) {
+  async function fetchTranscript(item: SourceItem) {
     if (!item.source_url) return;
     setFetchingIds((prev) => new Set(prev).add(item.id));
     setFetchErrors((prev) => {
@@ -766,6 +766,17 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
         return next;
       });
     }
+  }
+
+  // "🎬 자동 가져오기" 버튼 하나로 대본·썸네일·길이를 한 번에 시도한다. 대본은 U-Caption 큐라 시간이
+  // 걸리고, 썸네일/길이는 유튜브 API라 빠르다 — 병렬로 돌리고, 이미 있는 값은 다시 안 건드린다.
+  // 어느 하나가 실패해도 나머지는 계속 진행되고, 실패한 항목만 개별 버튼이 그대로 남아서 다시 시도할 수 있다.
+  async function autoFetch(item: SourceItem) {
+    await Promise.allSettled([
+      fetchTranscript(item),
+      item.thumbnail_url ? Promise.resolve() : fetchThumbnail(item),
+      item.duration_seconds ? Promise.resolve() : fetchDuration(item),
+    ]);
   }
 
   async function copyLink(item: SourceItem) {
@@ -858,14 +869,9 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                       className={`w-10 h-10 object-cover rounded shrink-0 bg-neutral-100 ${videoId ? 'cursor-pointer' : ''}`}
                     />
                   ) : (
-                    <button
-                      onClick={() => fetchThumbnail(i)}
-                      disabled={thumbFetchingIds.has(i.id)}
-                      title="썸네일 가져오기"
-                      className="w-10 h-10 shrink-0 rounded bg-neutral-50 border border-dashed border-neutral-200 text-neutral-300 hover:border-neutral-300 hover:text-neutral-400 flex items-center justify-center text-sm disabled:opacity-40"
-                    >
-                      {thumbFetchingIds.has(i.id) ? '...' : '🖼'}
-                    </button>
+                    <div className="w-10 h-10 shrink-0 rounded bg-neutral-50 border border-dashed border-neutral-200 flex items-center justify-center text-sm text-neutral-300">
+                      🖼
+                    </div>
                   )}
                   <div className="flex-1 min-w-0">
                     <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="text-[11px] font-bold truncate block text-left hover:underline">
@@ -877,17 +883,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                           {ch.name}
                         </a>
                       )}
-                      {i.duration_seconds ? (
-                        <span className="text-[11px] text-neutral-300">· ⏱ {fmtDuration(i.duration_seconds)}</span>
-                      ) : (
-                        <button
-                          onClick={() => fetchDuration(i)}
-                          disabled={durationFetchingIds.has(i.id)}
-                          className="text-[11px] text-neutral-300 hover:text-neutral-500 disabled:opacity-40"
-                        >
-                          · {durationFetchingIds.has(i.id) ? '...' : '⏱ 길이 가져오기'}
-                        </button>
-                      )}
+                      {i.duration_seconds ? <span className="text-[11px] text-neutral-400">· ⏱ {fmtDuration(i.duration_seconds)}</span> : null}
                     </div>
                   </div>
                   <button
@@ -904,6 +900,24 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                   >
                     {fetchingIds.has(i.id) ? '가져오는 중...' : '🎬 자동 가져오기'}
                   </button>
+                  {!i.thumbnail_url && (
+                    <button
+                      onClick={() => fetchThumbnail(i)}
+                      disabled={thumbFetchingIds.has(i.id)}
+                      className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
+                    >
+                      {thumbFetchingIds.has(i.id) ? '가져오는 중...' : '🖼 썸네일 가져오기'}
+                    </button>
+                  )}
+                  {!i.duration_seconds && (
+                    <button
+                      onClick={() => fetchDuration(i)}
+                      disabled={durationFetchingIds.has(i.id)}
+                      className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
+                    >
+                      {durationFetchingIds.has(i.id) ? '가져오는 중...' : '⏱ 길이 가져오기'}
+                    </button>
+                  )}
                   <button
                     onClick={() => toggleOpen(i)}
                     className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border ${
@@ -955,8 +969,17 @@ function statusTone(status: string): { bg: string; border: string; text: string;
   return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-600', label: status };
 }
 
-function FlowChart({ steps, siteName }: { steps: Step[]; siteName: string }) {
-  const [selected, setSelected] = useState(0);
+function FlowChart({
+  steps,
+  siteName,
+  selected,
+  onSelect,
+}: {
+  steps: Step[];
+  siteName: string;
+  selected: number;
+  onSelect: (i: number) => void;
+}) {
   if (steps.length === 0) return null;
   const active = steps[Math.min(selected, steps.length - 1)];
   const activeTone = statusTone(active.status);
@@ -973,7 +996,7 @@ function FlowChart({ steps, siteName }: { steps: Step[]; siteName: string }) {
             return (
               <div key={i} className="w-full flex flex-col items-center">
                 <button
-                  onClick={() => setSelected(i)}
+                  onClick={() => onSelect(i)}
                   className={`w-full flex items-center gap-2 border rounded-lg px-2.5 py-2 text-left transition ${
                     isSelected ? `${tone.bg} ${tone.border} ring-2 ring-black/10` : 'bg-white border-neutral-200 hover:border-neutral-300'
                   }`}
@@ -1024,13 +1047,30 @@ function FlowChart({ steps, siteName }: { steps: Step[]; siteName: string }) {
 }
 
 export default function WorkflowPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-neutral-50 p-10 text-sm text-neutral-400">불러오는 중...</div>}>
+      <WorkflowPageInner />
+    </Suspense>
+  );
+}
+
+function WorkflowPageInner() {
   const params = useParams();
   const id = params.id as string;
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [site, setSite] = useState<Site | null>(null);
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [showEditor, setShowEditor] = useState(false);
+
+  // 새로고침해도 보던 단계로 돌아오게 선택된 단계를 URL(?step=N, 1-based)에 저장해둔다.
+  const stepParam = Number(searchParams.get('step'));
+  const selectedStep = Number.isFinite(stepParam) && stepParam > 0 ? stepParam - 1 : 0;
+  function selectStep(i: number) {
+    router.replace(`/workflow/${id}?step=${i + 1}`, { scroll: false });
+  }
 
   useEffect(() => {
     fetch('/api/sites')
@@ -1094,7 +1134,7 @@ export default function WorkflowPage() {
           {savedAt && <span className="text-green-600 font-bold"> · {savedAt} 저장됨</span>}
         </p>
 
-        <FlowChart steps={steps} siteName={site.name} />
+        <FlowChart steps={steps} siteName={site.name} selected={selectedStep} onSelect={selectStep} />
 
         {(showEditor || steps.length === 0) && (
           <textarea
