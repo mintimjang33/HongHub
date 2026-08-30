@@ -14,12 +14,14 @@ type Stage = (typeof STAGES)[number];
 
 type Item = { title: string; transcript: string | null; duration_seconds: number | null; views: string | null };
 type AnalysisResult = { channel?: string; title?: string; script?: string; duration?: string; pace?: string };
+type ContentUnit = { id: string; material: string; title: string; script: string; createdAt: string };
 type ScriptDraft = {
   materials?: string[];
   selectedMaterial?: string;
   titles?: string[];
   selectedTitle?: string;
   script?: string;
+  units?: ContentUnit[];
   updated_at?: string;
 };
 
@@ -161,8 +163,9 @@ export async function POST(request: Request) {
       .split('\n')
       .map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim())
       .filter(Boolean);
-    // 소재를 새로 뽑으면 그 아래(제목/대본 선택)는 더 이상 유효하지 않으므로 같이 초기화한다.
-    nextDraft = { materials };
+    // 소재를 새로 뽑으면 그 아래(제목/대본 선택)는 더 이상 유효하지 않으므로 같이 초기화하되,
+    // 이미 완성해서 기록해둔 units(콘텐츠 단위)는 그대로 보존한다.
+    nextDraft = { units: prevDraft.units, materials };
   } else if (stage === 'titles') {
     const titles = resultText
       .split('\n')
@@ -200,6 +203,7 @@ export async function PATCH(request: Request) {
   if ('titles' in body) patch.titles = body.titles;
   if ('selectedTitle' in body) patch.selectedTitle = body.selectedTitle;
   if ('script' in body) patch.script = body.script;
+  if ('units' in body) patch.units = body.units;
 
   const nextDraft: ScriptDraft = { ...prevDraft, ...patch, updated_at: new Date().toISOString() };
   const { error } = await supabase

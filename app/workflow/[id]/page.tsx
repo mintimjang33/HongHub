@@ -13,12 +13,17 @@ type AnalysisResult = {
   pace?: string;
   updated_at?: string;
 };
+// 5번은 소재 하나마다 별개의 완성 콘텐츠라서, 작업 중인 것 하나(소재→제목→대본 위저드)와
+// 별개로 완성된 것들을 units 배열에 콘텐츠 단위로 저장한다. 나중에 6~9번(영상/TTS/자막/렌더링)도
+// 여기 unit id를 기준으로 진행 상태를 붙일 수 있게 id를 갖고 있다.
+type ContentUnit = { id: string; material: string; title: string; script: string; createdAt: string };
 type ScriptDraft = {
   materials?: string[];
   selectedMaterial?: string;
   titles?: string[];
   selectedTitle?: string;
   script?: string;
+  units?: ContentUnit[];
   updated_at?: string;
 };
 type Site = {
@@ -1197,6 +1202,8 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [scriptDraftText, setScriptDraftText] = useState(draft.script || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [openUnitId, setOpenUnitId] = useState<string | null>(null);
+  const units = draft.units || [];
 
   useEffect(() => {
     setScriptDraftText(draft.script || '');
@@ -1310,11 +1317,52 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   }
 
   async function resetAll() {
-    if (!confirm('소재/제목/대본 선택을 전부 초기화할까요?')) return;
+    if (!confirm('소재/제목/대본 선택을 전부 초기화할까요? (완성해서 저장해둔 콘텐츠 목록은 안 지워져요)')) return;
     await fetch('/api/script-draft', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId: site.id, materials: null, selectedMaterial: null, titles: null, selectedTitle: null, script: null }),
+    });
+    onRefresh();
+  }
+
+  // 소재 하나마다 별개 콘텐츠라서, 대본까지 완성되면 units 목록에 하나로 저장해두고
+  // 위저드는 비워서 같은 소재 추천 목록에서 바로 다음 걸 이어서 진행할 수 있게 한다.
+  async function finalizeUnit() {
+    if (!draft.selectedMaterial || !draft.selectedTitle || !scriptDraftText.trim()) return;
+    setSaving(true);
+    try {
+      const unit: ContentUnit = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        material: draft.selectedMaterial,
+        title: draft.selectedTitle,
+        script: scriptDraftText.trim(),
+        createdAt: new Date().toISOString(),
+      };
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId: site.id,
+          units: [...units, unit],
+          selectedMaterial: null,
+          titles: null,
+          selectedTitle: null,
+          script: null,
+        }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteUnit(id: string) {
+    if (!confirm('이 완성 콘텐츠를 삭제할까요?')) return;
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.filter((u) => u.id !== id) }),
     });
     onRefresh();
   }
@@ -1391,6 +1439,36 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
       <GenerateHint />
       {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
 
+      {units.length > 0 && (
+        <div className="bg-emerald-50/40 border border-emerald-100 rounded-lg p-3 mb-2">
+          <div className="text-[11px] font-black text-emerald-700 mb-2">✅ 완성된 콘텐츠 ({units.length}개)</div>
+          <div className="space-y-1.5">
+            {units.map((u) => (
+              <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+                <div className="flex items-center gap-2 px-3 py-2">
+                  <button
+                    onClick={() => setOpenUnitId((cur) => (cur === u.id ? null : u.id))}
+                    className="flex-1 min-w-0 text-left"
+                  >
+                    <span className={`inline-block mr-1 transition-transform text-neutral-300 ${openUnitId === u.id ? 'rotate-90' : ''}`}>▶</span>
+                    <span className="text-[11px] font-bold">{u.title}</span>
+                  </button>
+                  <button onClick={() => deleteUnit(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="삭제">
+                    ✕
+                  </button>
+                </div>
+                {openUnitId === u.id && (
+                  <div className="px-3 pb-3 pt-1 border-t border-neutral-100">
+                    <p className="text-[10px] text-neutral-400 mb-1.5">소재: {u.material}</p>
+                    <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 1단계: 소재 추천 */}
       <div className="bg-white border border-neutral-100 rounded-lg p-3 mb-2">
         <div className="text-[11px] font-black text-neutral-500 mb-2">1️⃣ 소재 추천</div>
@@ -1458,13 +1536,23 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
           />
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-neutral-300">{scriptDraftText.length.toLocaleString()}자</span>
-            <button
-              onClick={saveScript}
-              disabled={saving}
-              className="bg-black text-white text-[11px] font-black px-4 py-2 rounded-lg disabled:opacity-40"
-            >
-              {saving ? '저장 중...' : '대본 저장'}
-            </button>
+            <div className="flex gap-1.5">
+              <button
+                onClick={saveScript}
+                disabled={saving}
+                className="text-[11px] font-black px-4 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+              >
+                {saving ? '저장 중...' : '대본 저장'}
+              </button>
+              <button
+                onClick={finalizeUnit}
+                disabled={saving || !scriptDraftText.trim()}
+                className="bg-black text-white text-[11px] font-black px-4 py-2 rounded-lg disabled:opacity-40"
+                title="완성 목록에 저장하고 다음 소재로 넘어가기"
+              >
+                ✅ 완성 콘텐츠로 저장 → 다음 소재
+              </button>
+            </div>
           </div>
         </div>
       )}
