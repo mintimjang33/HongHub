@@ -61,38 +61,56 @@ function statusTone(status: string): { bg: string; border: string; text: string;
 }
 
 function FlowChart({ steps }: { steps: Step[] }) {
+  const [selected, setSelected] = useState(0);
   if (steps.length === 0) return null;
+  const active = steps[Math.min(selected, steps.length - 1)];
+  const activeTone = statusTone(active.status);
+
   return (
-    <div className="mb-6 bg-white border border-neutral-200 rounded-xl p-6 overflow-x-auto">
-      <div className="text-[11px] font-black text-neutral-400 mb-4">🔀 플로우차트 미리보기 (아래 표에서 자동 생성)</div>
-      <div className="flex flex-col items-start">
-        {steps.map((s, i) => {
-          const tone = statusTone(s.status);
-          return (
-            <div key={i} className="w-full max-w-2xl">
-              <div className={`flex items-start gap-3 border rounded-xl p-3.5 ${tone.bg} ${tone.border}`}>
-                <div className="shrink-0 w-7 h-7 rounded-full bg-black text-white text-xs font-black flex items-center justify-center">
-                  {s.n}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-black text-sm truncate">{s.name || '(단계명 없음)'}</div>
-                    <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full bg-white border ${tone.border} ${tone.text}`}>
-                      {tone.label}
-                    </span>
-                  </div>
-                  {s.desc && <div className="text-xs text-neutral-500 mt-1">{s.desc}</div>}
-                  {tone.label === '막힘' && s.status && <div className="text-[11px] text-red-500 mt-1 font-bold">{s.status}</div>}
-                </div>
+    <div className="mb-6 bg-white border border-neutral-200 rounded-xl p-5">
+      <div className="text-[11px] font-black text-neutral-400 mb-4">🔀 플로우차트 미리보기 — 단계를 클릭하면 오른쪽에 상세가 떠요</div>
+      <div className="flex gap-5">
+        <div className="w-48 shrink-0 flex flex-col items-center">
+          {steps.map((s, i) => {
+            const tone = statusTone(s.status);
+            const isSelected = i === selected;
+            return (
+              <div key={i} className="w-full flex flex-col items-center">
+                <button
+                  onClick={() => setSelected(i)}
+                  className={`w-full flex items-center gap-2 border rounded-lg px-2.5 py-2 text-left transition ${
+                    isSelected ? `${tone.bg} ${tone.border} ring-2 ring-black/10` : 'bg-white border-neutral-200 hover:border-neutral-300'
+                  }`}
+                >
+                  <span
+                    className={`shrink-0 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center ${
+                      isSelected ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-500'
+                    }`}
+                  >
+                    {s.n}
+                  </span>
+                  <span className="min-w-0 flex-1 text-xs font-bold truncate">{s.name || '(단계명 없음)'}</span>
+                  <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${tone.text.replace('text-', 'bg-')}`} />
+                </button>
+                {i < steps.length - 1 && <div className="w-0.5 h-3 bg-neutral-200" />}
               </div>
-              {i < steps.length - 1 && (
-                <div className="flex justify-start pl-6">
-                  <div className="w-0.5 h-5 bg-neutral-300" />
-                </div>
-              )}
+            );
+          })}
+        </div>
+
+        <div className={`flex-1 min-w-0 border rounded-xl p-5 ${activeTone.bg} ${activeTone.border}`}>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="w-7 h-7 rounded-full bg-black text-white text-xs font-black flex items-center justify-center">{active.n}</span>
+              <h3 className="font-black text-base">{active.name || '(단계명 없음)'}</h3>
             </div>
-          );
-        })}
+            <span className={`shrink-0 text-[10px] font-black px-2.5 py-1 rounded-full bg-white border ${activeTone.border} ${activeTone.text}`}>
+              {activeTone.label}
+            </span>
+          </div>
+          {active.desc && <p className="text-sm text-neutral-600 leading-relaxed mb-3">{active.desc}</p>}
+          {active.status && <p className="text-xs text-neutral-500 leading-relaxed border-t border-black/5 pt-3">{active.status}</p>}
+        </div>
       </div>
     </div>
   );
@@ -143,7 +161,7 @@ export default function WorkflowPage() {
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      <div className="max-w-4xl mx-auto px-6 py-10">
+      <div className="max-w-5xl mx-auto px-6 py-10">
         <Link href="/pipelines" className="text-xs text-neutral-400 font-bold hover:text-black">
           ← 파이프라인
         </Link>
