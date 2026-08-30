@@ -22,6 +22,9 @@ type ContentUnit = {
   material: string;
   title: string;
   script: string;
+  // 최종 선택된 것 외에 그때 같이 추천받았던 후보들 — 나중에 다시 참고하거나 다른 걸로 바꾸고 싶을 때를 위해 보존.
+  materialCandidates?: string[];
+  titleCandidates?: string[];
   titleEn?: string;
   scriptEn?: string;
   titleJa?: string;
@@ -1369,6 +1372,8 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         material: draft.selectedMaterial,
         title: draft.selectedTitle,
         script: scriptDraftText.trim(),
+        materialCandidates: draft.materials,
+        titleCandidates: draft.titles,
         titleEn: draft.titleEn,
         scriptEn: draft.scriptEn,
         titleJa: draft.titleJa,
@@ -1433,6 +1438,16 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, status } : u)) }),
+    });
+    onRefresh();
+  }
+
+  // 확정 당시 같이 추천받았던 다른 제목 후보로 바꿔치기 — 대본/번역/검토는 그 제목 기준으로 만든 거라 그대로 두고 제목만 교체.
+  async function swapUnitTitle(id: string, newTitle: string) {
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, title: newTitle } : u)) }),
     });
     onRefresh();
   }
@@ -1538,6 +1553,24 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                   {openUnitId === u.id && (
                     <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
                       <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+                      {u.titleCandidates && u.titleCandidates.filter((t) => t !== u.title).length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-black text-neutral-400 mb-1">그때 같이 나온 다른 제목 후보 (클릭하면 교체)</p>
+                          <div className="space-y-1">
+                            {u.titleCandidates
+                              .filter((t) => t !== u.title)
+                              .map((t, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => swapUnitTitle(u.id, t)}
+                                  className="block w-full text-left text-[11px] text-neutral-500 hover:text-black hover:bg-neutral-50 rounded px-1.5 py-1"
+                                >
+                                  {t}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      )}
                       <div>
                         <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇰🇷 한국어 ({u.script.length}자)</p>
                         <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
