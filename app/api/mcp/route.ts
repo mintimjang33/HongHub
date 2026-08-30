@@ -851,7 +851,7 @@ ${PLATFORM_GUIDE[target_platform]}
       'push_github_file',
       {
         description:
-          'HongHub GitHub 저장소(mintimjang33/HongHub)에 파일 하나를 생성/수정해서 바로 커밋+푸시한다. app_config 테이블(또는 GITHUB_TOKEN 환경변수)에 해당 저장소 쓰기 권한이 있는 GitHub PAT이 GITHUB_TOKEN 키로 저장되어 있어야 동작한다. content는 파일 일부가 아니라 전체 내용이어야 한다(부분 수정이면 먼저 get_github_file로 전체를 읽고 수정한 뒤 통째로 넘길 것).',
+          'HongHub GitHub 저장소(mintimjang33/HongHub)에 파일 하나를 생성/수정해서 바로 커밋+푸시한다. app_config 테이블(또는 GITHUB_TOKEN 환경변수)에 해당 저장소 쓰기 권한이 있는 GitHub PAT이 GITHUB_TOKEN 키로 저장되어 있어야 동작한다. content는 파일 일부가 아니라 전체 내용이어야 한다(부분 수정이면 먼저 get_github_file로 전체를 읽고 수정한 뒤 통째로 넘길 것). 텍스트 파일 전용이다 — content가 UTF-8 텍스트로 그대로 인코딩돼서 커밋되므로, 이미지 등 바이너리 파일에는 쓰면 안 된다(그러면 깨진 파일이 됨). 이미지는 upload_image를 쓸 것.',
         inputSchema: z.object({
           path: z.string().describe('예: app/page.tsx'),
           content: z.string().describe('파일의 전체 새 내용'),
@@ -907,6 +907,39 @@ ${PLATFORM_GUIDE[target_platform]}
             },
           ],
         };
+      }
+    );
+
+    server.registerTool(
+      'upload_image',
+      {
+        description:
+          '이미지(base64)를 honghub-files Storage 버킷에 실제 바이너리로 업로드하고 공개 URL을 반환한다. push_github_file은 텍스트 파일 전용이라 이미지를 못 다루니(base64 문자열이 그대로 텍스트로 커밋되어 깨진 파일이 됨), 스크린샷처럼 어떤 기능의 유일한 근거가 되는 이미지는 이 도구로 실제 파일까지 저장하고 계획서(plan_content)에 마크다운 이미지 링크로 남길 것.',
+        inputSchema: z.object({
+          imageBase64: z.string().describe('base64로 인코딩된 이미지 데이터 (data:image/png;base64, 같은 접두사 없이 순수 base64 문자열만)'),
+          filename: z.string().optional().describe('원본 파일명(확장자 추출용, 예: screenshot.png). 없으면 png로 저장'),
+        }),
+      },
+      async ({ imageBase64, filename }) => {
+        const supabase = getSupabaseServerClient();
+        const ext = ((filename || '').split('.').pop() || 'png').toLowerCase();
+        const path = `${crypto.randomUUID()}.${ext}`;
+        const CONTENT_TYPE_MAP: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
+        const contentType = CONTENT_TYPE_MAP[ext] || 'image/png';
+
+        let buffer: Buffer;
+        try {
+          buffer = Buffer.from(imageBase64, 'base64');
+        } catch {
+          return { content: [{ type: 'text', text: 'imageBase64를 디코딩하지 못했습니다.' }] };
+        }
+        if (buffer.length === 0) return { content: [{ type: 'text', text: 'imageBase64가 비어있습니다.' }] };
+
+        const { error } = await supabase.storage.from('honghub-files').upload(path, buffer, { contentType });
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+
+        const { data } = supabase.storage.from('honghub-files').getPublicUrl(path);
+        return { content: [{ type: 'text', text: JSON.stringify({ url: data.publicUrl }, null, 2) }] };
       }
     );
   },
