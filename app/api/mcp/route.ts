@@ -743,14 +743,16 @@ const baseHandler = createMcpHandler(
       },
       async ({ site_name, limit }) => {
         const supabase = getSupabaseServerClient();
-        const { data: channelsData } = await supabase.from('hub_source_channels').select('id, notes');
+        const { data: channelsData } = await supabase.from('hub_source_channels').select('id, name, url, subscriber_count, notes');
         const tagRe = /^\[파이프라인:([^\]]+)\]\s*/;
-        const mineChannelIds = (channelsData || [])
-          .filter((c) => c.notes?.match(tagRe)?.[1] === site_name)
-          .map((c) => c.id);
+        const mineChannels = (channelsData || []).filter((c) => c.notes?.match(tagRe)?.[1] === site_name);
+        const mineChannelIds = mineChannels.map((c) => c.id);
         if (mineChannelIds.length === 0) {
           return { content: [{ type: 'text', text: `"${site_name}" 파이프라인에 등록된 채널이 없습니다.` }] };
         }
+        const channelLines = mineChannels
+          .map((c) => `- ${c.name} | 구독자 ${c.subscriber_count || '?'} | ${c.url || ''} | ${(c.notes || '').replace(tagRe, '') || ''}`)
+          .join('\n');
 
         const { data: itemsData, error } = await supabase
           .from('hub_source_items')
@@ -800,7 +802,7 @@ const baseHandler = createMcpHandler(
           content: [
             {
               type: 'text',
-              text: `"${site_name}" 대본까지 확보된 것 중 조회수 상위 ${top.length}개 (전체 ${items.length}개 중 대본 있는 건 ${withTranscript.length}개):\n\n${lines.join('\n\n')}\n\n--- 계산된 통계 (참고용, 그대로 저장해도 됨) ---\n${statsText}`,
+              text: `벤치마크 채널 ${mineChannels.length}개:\n\n${channelLines}\n\n---\n\n"${site_name}" 대본까지 확보된 것 중 조회수 상위 ${top.length}개 (전체 ${items.length}개 중 대본 있는 건 ${withTranscript.length}개):\n\n${lines.join('\n\n')}\n\n--- 계산된 통계 (참고용, 그대로 저장해도 됨) ---\n${statsText}`,
             },
           ],
         };
@@ -812,9 +814,10 @@ const baseHandler = createMcpHandler(
       {
         description:
           'get_pipeline_materials_for_analysis로 받은 데이터를 Claude(이 대화)가 직접 분석한 결과를 저장한다. ' +
-          '워크플로우 페이지 4번 탭(제목/썸네일/대본/시간/속도)에 그대로 표시된다. 넘긴 필드만 갱신되고 나머지는 유지된다.',
+          '워크플로우 페이지 4번 탭(채널/제목/썸네일/대본/시간/속도)에 그대로 표시된다. 넘긴 필드만 갱신되고 나머지는 유지된다.',
         inputSchema: z.object({
           site_id: z.string().describe('파이프라인의 hub_sites id (list_sites로 확인)'),
+          channel: z.string().optional().describe('채널 패턴 분석 결과 (작명/구독자 규모대/포지셔닝)'),
           title: z.string().optional().describe('제목 패턴 분석 결과'),
           thumbnail: z.string().optional().describe('썸네일 패턴 분석 결과 (이미지 URL을 직접 보고 분석)'),
           script: z.string().optional().describe('대본 패턴 분석 결과'),
@@ -822,11 +825,12 @@ const baseHandler = createMcpHandler(
           pace: z.string().optional().describe('나레이션 속도 분석/통계 정리'),
         }),
       },
-      async ({ site_id, title, thumbnail, script, duration, pace }) => {
+      async ({ site_id, channel, title, thumbnail, script, duration, pace }) => {
         const supabase = getSupabaseServerClient();
         const { data: existing } = await supabase.from('hub_sites').select('analysis_result').eq('id', site_id).maybeSingle();
         const merged = {
           ...(existing?.analysis_result || {}),
+          ...(channel !== undefined && { channel }),
           ...(title !== undefined && { title }),
           ...(thumbnail !== undefined && { thumbnail }),
           ...(script !== undefined && { script }),

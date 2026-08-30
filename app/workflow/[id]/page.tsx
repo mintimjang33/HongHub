@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 type AnalysisResult = {
+  channel?: string;
   title?: string;
   script?: string;
   thumbnail?: string;
@@ -1020,6 +1021,7 @@ function isAnalysisStep(step: Step): boolean {
 }
 
 const ANALYSIS_TABS = [
+  { key: 'channel', label: '채널' },
   { key: 'title', label: '제목' },
   { key: 'thumbnail', label: '썸네일' },
   { key: 'script', label: '대본' },
@@ -1033,20 +1035,34 @@ type AnalysisTabKey = (typeof ANALYSIS_TABS)[number]['key'];
 // 여기(hub_sites.analysis_result)에 저장되고, 이 패널은 그 저장된 결과를 읽어서 탭으로 보여주기만 한다.
 function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const [tab, setTab] = useState<AnalysisTabKey>('title');
+  const [checked, setChecked] = useState<Record<AnalysisTabKey, boolean>>({
+    channel: false,
+    title: false,
+    thumbnail: false,
+    script: false,
+    duration: false,
+    pace: false,
+  });
   const [analyzing, setAnalyzing] = useState(false);
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const result = site.analysis_result;
+  const selectedCategories = ANALYSIS_TABS.filter((t) => checked[t.key]).map((t) => t.key);
+
+  function toggle(key: AnalysisTabKey) {
+    setChecked((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
 
   async function analyzeWithGemini() {
+    if (selectedCategories.length === 0) return setError('분석할 항목을 체크해주세요.');
     setAnalyzing(true);
     setError('');
     try {
       const res = await fetch('/api/analyze-materials', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id }),
+        body: JSON.stringify({ siteId: site.id, categories: selectedCategories }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '분석 실패');
@@ -1062,10 +1078,11 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
   // 구독 채팅은 외부에서 자동으로 트리거할 방법이 없어서, 소재 데이터를 프롬프트로 만들어
   // 클립보드에 복사해주는 것까지만 하고 — 붙여넣기/실행은 사용자가 직접 한다.
   async function copyPromptForSubscription() {
+    if (selectedCategories.length === 0) return setError('분석할 항목을 체크해주세요.');
     setCopying(true);
     setError('');
     try {
-      const res = await fetch(`/api/analysis-prompt?siteId=${site.id}`);
+      const res = await fetch(`/api/analysis-prompt?siteId=${site.id}&categories=${selectedCategories.join(',')}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
       await navigator.clipboard.writeText(data.prompt);
@@ -1084,31 +1101,41 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
         <span className="text-xs font-black text-neutral-500">
           🔍 패턴 분석{result?.updated_at && ` — ${new Date(result.updated_at).toLocaleString('ko-KR')} 기준`}
         </span>
-        <div className="flex gap-1.5">
-          <button onClick={onRefresh} className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white">
-            🔄 새로고침
-          </button>
-          <button
-            onClick={copyPromptForSubscription}
-            disabled={copying}
-            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-          >
-            {copying ? '준비 중...' : copied ? '✅ 복사됨!' : '💬 구독으로 분석하기'}
-          </button>
-          <button
-            onClick={analyzeWithGemini}
-            disabled={analyzing}
-            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
-          >
-            {analyzing ? '분석 중... (1분 정도)' : '✨ Gemini Pro로 분석하기'}
-          </button>
-        </div>
+        <button onClick={onRefresh} className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white">
+          🔄 새로고침
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-3 mb-3 bg-neutral-50 border border-neutral-100 rounded-lg p-3">
+        {ANALYSIS_TABS.map((t) => (
+          <label key={t.key} className="flex items-center gap-1.5 text-xs font-bold text-neutral-600 cursor-pointer">
+            <input type="checkbox" checked={checked[t.key]} onChange={() => toggle(t.key)} className="w-3.5 h-3.5" />
+            {t.label}
+          </label>
+        ))}
+      </div>
+
+      <div className="flex gap-1.5 mb-3">
+        <button
+          onClick={copyPromptForSubscription}
+          disabled={copying}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+        >
+          {copying ? '준비 중...' : copied ? '✅ 복사됨!' : '💬 체크한 항목 구독으로 분석하기'}
+        </button>
+        <button
+          onClick={analyzeWithGemini}
+          disabled={analyzing}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
+        >
+          {analyzing ? '분석 중... (1분 정도)' : '✨ 체크한 항목 Gemini Pro로 분석하기'}
+        </button>
       </div>
       <p className="text-[10px] text-neutral-400 mb-3">
-        "✨ Gemini Pro로 분석하기"는 Gemini API(유료, gemini-3.1-pro-preview)를 직접 호출해서 바로 분석·저장해요.
-        "💬 구독으로 분석하기"는 API를 안 쓰고, 소재 데이터를 프롬프트로 만들어 클립보드에 복사만 해줘요(비용 없음)
-        — 그걸 Gemini 웹앱(gemini.google.com, Pro 모델 추천)이나 이 대화의 Claude한테 붙여넣어서 물어보시고,
-        나온 답변을 다시 여기(또는 이 대화)에 붙여넣어주시면 저장해드릴게요.
+        먼저 분석할 항목을 체크하세요. "✨ Gemini Pro"는 Gemini API(유료, gemini-3.1-pro-preview)를 직접
+        호출해서 체크한 것만 바로 분석·저장해요. "💬 구독으로 분석하기"는 API 없이, 체크한 항목만 프롬프트로
+        만들어 클립보드에 복사해줘요(비용 없음) — Gemini 웹앱이나 이 대화의 Claude한테 붙여넣어서 물어보시고,
+        답변을 다시 붙여넣어주시면 저장해드릴게요.
       </p>
       {error && <p className="text-[11px] text-red-500 font-bold mb-3">{error}</p>}
 
@@ -1130,7 +1157,7 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
         <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{result[tab]}</p>
       ) : (
         <p className="text-xs text-neutral-300">
-          아직 &quot;{ANALYSIS_TABS.find((t) => t.key === tab)?.label}&quot; 분석 결과가 없어요 — Claude나 Gemini한테 분석을 요청해보세요.
+          아직 &quot;{ANALYSIS_TABS.find((t) => t.key === tab)?.label}&quot; 분석 결과가 없어요 — 위에서 체크하고 분석을 실행해보세요.
         </p>
       )}
     </div>

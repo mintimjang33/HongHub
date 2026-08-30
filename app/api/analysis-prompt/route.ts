@@ -3,6 +3,17 @@ import { getSupabaseServerClient } from '../../../lib/supabase';
 
 const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 const MAX_ITEMS = 15;
+const ALL_CATEGORIES = ['channel', 'title', 'thumbnail', 'script', 'duration', 'pace'] as const;
+type Category = (typeof ALL_CATEGORIES)[number];
+
+const CATEGORY_INSTRUCTIONS: Record<Category, string> = {
+  channel: '채널 — 채널명 작명 패턴, 구독자 규모대, 채널 소개/메모에서 보이는 공통 포지셔닝',
+  title: '제목 — 공통된 후킹 패턴, 구조, 어투, 길이 경향',
+  thumbnail: '썸네일 — (이미지 링크를 열어서 실제로 보고) 공통된 색감, 구도, 텍스트 사용 스타일',
+  script: '대본 — 공통된 서사 구조(오프닝 훅→전개→반전→마무리 등), 문장 스타일',
+  duration: '시간 — 영상 길이 경향',
+  pace: '속도 — 나레이션 속도(대본 글자수 ÷ 영상 길이) 경향',
+};
 
 type Item = {
   title: string;
@@ -11,6 +22,7 @@ type Item = {
   duration_seconds: number | null;
   views: string | null;
 };
+type ChannelRow = { name: string; url: string | null; subscriber_count: string | null; notes: string | null };
 
 function parseViews(label: string | null): number {
   if (!label) return 0;
@@ -23,62 +35,79 @@ function parseViews(label: string | null): number {
   return n;
 }
 
-// "🎬 구독으로 분석하기" 버튼용 — 유료 API 호출 없이, 이 파이프라인의 2·3번 소재 데이터를
-// Gemini/Claude 구독 채팅에 그대로 붙여넣을 수 있는 프롬프트 텍스트로 만들어서 돌려준다.
+// "💬 구독으로 분석하기" 버튼용 — 유료 API 호출 없이, 체크한 항목만 프롬프트로 만들어
+// Gemini/Claude 구독 채팅에 그대로 붙여넣을 수 있게 돌려준다.
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get('siteId');
   if (!siteId) return NextResponse.json({ error: 'siteId가 필요합니다.' }, { status: 400 });
+  const categories: Category[] = (searchParams.get('categories') || '')
+    .split(',')
+    .filter((c): c is Category => ALL_CATEGORIES.includes(c as Category));
+  if (categories.length === 0) return NextResponse.json({ error: '분석할 항목이 없습니다.' }, { status: 400 });
 
   const supabase = getSupabaseServerClient();
   const { data: site } = await supabase.from('hub_sites').select('id, name').eq('id', siteId).maybeSingle();
   if (!site) return NextResponse.json({ error: '사이트를 찾을 수 없습니다.' }, { status: 404 });
 
-  const { data: channels } = await supabase.from('hub_source_channels').select('id, notes');
-  const mineChannelIds = (channels || [])
-    .filter((c) => c.notes?.match(CHANNEL_TAG_RE)?.[1] === site.name)
-    .map((c) => c.id);
+  const { data: channelsData } = await supabase.from('hub_source_channels').select('id, name, url, subscriber_count, notes');
+  const mineChannels = (channelsData || []).filter((c) => c.notes?.match(CHANNEL_TAG_RE)?.[1] === site.name);
+  const mineChannelIds = mineChannels.map((c) => c.id);
   if (mineChannelIds.length === 0) return NextResponse.json({ error: '등록된 채널이 없습니다.' }, { status: 400 });
 
-  const { data: itemsData, error } = await supabase
-    .from('hub_source_items')
-    .select('title, thumbnail_url, transcript, duration_seconds, views')
-    .in('channel_id', mineChannelIds);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const needsItems = categories.some((c) => c !== 'channel');
+  let itemsSection = '';
+  let withTranscriptCount = 0;
+  let topCount = 0;
 
-  const items: Item[] = (itemsData || []) as Item[];
-  if (items.length === 0) return NextResponse.json({ error: '등록된 소재가 없습니다.' }, { status: 400 });
+  if (needsItems) {
+    const { data: itemsData, error } = await supabase
+      .from('hub_source_items')
+      .select('title, thumbnail_url, transcript, duration_seconds, views')
+      .in('channel_id', mineChannelIds);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // 대본이 있는 소재만 분석 대상으로 쓴다 — 사용자가 직접 확인·저장한 것만 신뢰할 수 있어서다.
-  const withTranscript = items.filter((i) => i.transcript && i.transcript.trim().length > 20);
-  if (withTranscript.length === 0) {
-    return NextResponse.json({ error: '대본이 등록된 소재가 아직 없어요 — 3번 단계에서 먼저 대본을 채워주세요.' }, { status: 400 });
+    const items: Item[] = (itemsData || []) as Item[];
+    // 대본이 있는 소재만 분석 대상으로 쓴다 — 사용자가 직접 확인·저장한 것만 신뢰할 수 있어서다.
+    const withTranscript = items.filter((i) => i.transcript && i.transcript.trim().length > 20);
+    if (withTranscript.length === 0) {
+      return NextResponse.json({ error: '대본이 등록된 소재가 아직 없어요 — 3번 단계에서 먼저 대본을 채워주세요.' }, { status: 400 });
+    }
+    withTranscriptCount = withTranscript.length;
+    const top = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
+    topCount = top.length;
+
+    const lines = top.map((i, idx) => {
+      const parts = [`[${idx + 1}] "${i.title}"`, `조회수 ${i.views || '?'}`];
+      if (i.duration_seconds) parts.push(`길이 ${Math.floor(i.duration_seconds / 60)}:${String(i.duration_seconds % 60).padStart(2, '0')}`);
+      if (i.thumbnail_url) parts.push(`썸네일: ${i.thumbnail_url}`);
+      let line = parts.join(' | ');
+      if (i.transcript && i.transcript.trim().length > 20) line += `\n  대본: ${i.transcript.slice(0, 800)}`;
+      return line;
+    });
+
+    itemsSection = `영상 ${top.length}개(대본까지 확보된 것 중 조회수 상위, 전체 ${items.length}개 중 대본 있는 건 ${withTranscript.length}개)의 제목/조회수/길이/썸네일 이미지 링크/대본이야:\n\n${lines.join('\n\n')}`;
   }
-  const top = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
 
-  const lines = top.map((i, idx) => {
-    const parts = [`[${idx + 1}] "${i.title}"`, `조회수 ${i.views || '?'}`];
-    if (i.duration_seconds) parts.push(`길이 ${Math.floor(i.duration_seconds / 60)}:${String(i.duration_seconds % 60).padStart(2, '0')}`);
-    if (i.thumbnail_url) parts.push(`썸네일: ${i.thumbnail_url}`);
-    let line = parts.join(' | ');
-    if (i.transcript && i.transcript.trim().length > 20) line += `\n  대본: ${i.transcript.slice(0, 800)}`;
-    return line;
-  });
+  let channelSection = '';
+  if (categories.includes('channel')) {
+    const channelLines = mineChannels
+      .map((c: ChannelRow) => `- ${c.name} | 구독자 ${c.subscriber_count || '?'} | ${c.url || ''} | ${(c.notes || '').replace(CHANNEL_TAG_RE, '') || ''}`)
+      .join('\n');
+    channelSection = `벤치마크 채널 ${mineChannels.length}개:\n\n${channelLines}`;
+  }
 
-  const prompt = `"${site.name}" 파이프라인 벤치마크 영상 ${top.length}개(대본까지 확보된 것 중 조회수 상위, 전체 ${items.length}개 중 대본 있는 건 ${withTranscript.length}개)를 분석해줘.
+  const dataSections = [channelSection, itemsSection].filter(Boolean).join('\n\n---\n\n');
+  const instructionList = categories.map((c, idx) => `${idx + 1}. ${CATEGORY_INSTRUCTIONS[c]}`).join('\n');
 
-각 영상의 제목/조회수/길이/썸네일 이미지 링크/대본이야:
+  const prompt = `"${site.name}" 파이프라인을 분석해줘.
 
-${lines.join('\n\n')}
+${dataSections}
 
-아래 5가지를 각각 정리해줘:
-1. 제목 — 공통된 후킹 패턴, 구조, 어투, 길이 경향
-2. 썸네일 — (이미지 링크를 열어서 실제로 보고) 공통된 색감, 구도, 텍스트 사용 스타일
-3. 대본 — 공통된 서사 구조(오프닝 훅→전개→반전→마무리 등), 문장 스타일
-4. 시간 — 영상 길이 경향
-5. 속도 — 나레이션 속도(대본 글자수 ÷ 영상 길이) 경향
+아래를 각각 정리해줘:
+${instructionList}
 
 새 대본/썸네일 제작에 바로 참고할 수 있게 구체적으로 답해줘.`;
 
-  return NextResponse.json({ prompt, analyzedCount: top.length, totalCount: items.length, withTranscriptCount: withTranscript.length });
+  return NextResponse.json({ prompt, analyzedCount: topCount, totalCount: mineChannels.length, withTranscriptCount });
 }
