@@ -1,7 +1,7 @@
 // 유튜브 채널의 인기 영상 조회. U-Finder/U-OneShot과 같은 Supabase 프로젝트를 쓰기 때문에,
 // 그 두 도구가 이미 app_config 테이블에 넣어둔 YouTube Data API 키를 그대로 읽어서 쓴다
 // (새 키를 따로 발급/등록할 필요 없음).
-import { getSupabaseServerClient } from './supabase';
+import { getConfigValue } from './remoteConfig';
 
 const BASE = 'https://www.googleapis.com/youtube/v3';
 
@@ -27,15 +27,10 @@ export type ShortsResult = {
   thumbnail: string;
 };
 
-let cachedKey: string | null = null;
-
 async function apiKey(): Promise<string> {
-  if (cachedKey) return cachedKey;
-  const supabase = getSupabaseServerClient();
-  const { data, error } = await supabase.from('app_config').select('value').eq('key', 'YOUTUBE_DATA_API_KEY').maybeSingle();
-  if (error || !data?.value) throw new Error('app_config에 YOUTUBE_DATA_API_KEY가 등록되어 있지 않습니다.');
-  cachedKey = data.value as string;
-  return cachedKey;
+  const key = await getConfigValue('YOUTUBE_DATA_API_KEY');
+  if (!key) throw new Error('app_config에 YOUTUBE_DATA_API_KEY가 등록되어 있지 않습니다.');
+  return key;
 }
 
 async function apiGet(path: string, params: Record<string, string | number | undefined>) {

@@ -654,6 +654,8 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
+  const [fetchingIds, setFetchingIds] = useState<Set<string>>(new Set());
+  const [fetchErrors, setFetchErrors] = useState<Record<string, string>>({});
 
   function load() {
     setLoading(true);
@@ -699,6 +701,52 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     }
   }
 
+  // U-Caption 큐에 작업을 등록하고, 이 PC의 크롬 확장(로컬 워커, 최대 1분 주기)이 처리할 때까지
+  // 몇 초 간격으로 상태를 확인한다. 성공하면 바로 저장하지 않고 검토할 수 있게 입력칸만 채워둔다.
+  async function autoFetch(item: SourceItem) {
+    if (!item.source_url) return;
+    setFetchingIds((prev) => new Set(prev).add(item.id));
+    setFetchErrors((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
+    try {
+      const res = await fetch('/api/transcript-jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: item.source_url }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '작업 등록 실패');
+      const jobId = data.jobId;
+
+      for (let attempt = 0; attempt < 18; attempt++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const jobRes = await fetch(`/api/transcript-jobs/${jobId}`);
+        const job = await jobRes.json();
+        if (!jobRes.ok) throw new Error(job.error || '작업 조회 실패');
+        if (job.status === 'done') {
+          setOpenItemId(item.id);
+          setDraft(job.transcript || '');
+          return;
+        }
+        if (job.status === 'error') {
+          throw new Error(job.error || '자막을 가져오지 못했어요.');
+        }
+      }
+      throw new Error('1분 30초 안에 끝나지 않았어요 — 크롬에 U-Caption 확장이 켜져 있는지 확인해주세요.');
+    } catch (err) {
+      setFetchErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setFetchingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
+
   return (
     <div className="border-t border-black/5 pt-3">
       <button
@@ -709,7 +757,8 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
         📜 대본 수집 ({loading ? '...' : `${withTranscript.length}/${mineItems.length}`})
       </button>
       <p className="text-[10px] text-neutral-400 mb-2">
-        2번에서 등록한 소재들이에요. 대본은 자동으로 안 채워져서(U-Caption으로 Claude에게 받아오거나 직접 붙여넣기) 하나씩 확인하고 저장해야 해요.
+        2번에서 등록한 소재들이에요. "🎬 자동 가져오기"는 이 PC에 U-Caption 크롬 확장이 켜져 있어야
+        동작해요(최대 1분 정도 걸림, 자막 없는 영상은 실패). 안 되거나 급하면 직접 붙여넣어도 돼요.
       </p>
 
       {expanded && (
@@ -734,6 +783,13 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                     {i.title || i.source_url}
                   </button>
                   <button
+                    onClick={() => autoFetch(i)}
+                    disabled={fetchingIds.has(i.id)}
+                    className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
+                  >
+                    {fetchingIds.has(i.id) ? '가져오는 중...' : '🎬 자동 가져오기'}
+                  </button>
+                  <button
                     onClick={() => toggleOpen(i)}
                     className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border ${
                       has ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300'
@@ -742,6 +798,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                     📜 대본 {has ? '있음' : '없음'}
                   </button>
                 </div>
+                {fetchErrors[i.id] && <p className="text-[10px] text-red-500 font-bold mt-1.5">{fetchErrors[i.id]}</p>}
                 {openItemId === i.id && (
                   <div className="mt-2 pt-2 border-t border-neutral-100">
                     <textarea

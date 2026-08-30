@@ -4,6 +4,7 @@ import { getSupabaseServerClient } from '../../../lib/supabase';
 import { callAi } from '../../../lib/aiProviders';
 import { fetchOgMeta, detectChannelPlatform } from '../../../lib/ogMeta';
 import { getConfigValue } from '../../../lib/remoteConfig';
+import { searchShorts, resolveChannelId, getChannelTopVideos, fmtCount } from '../../../lib/youtubeSearch';
 
 const urlArg = z.union([z.string(), z.array(z.string())]).optional().describe('URL 하나 또는 여러 개(배열)');
 
@@ -675,6 +676,55 @@ const baseHandler = createMcpHandler(
           .single();
         if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
         return { content: [{ type: 'text', text: JSON.stringify({ channel_created: !!channelId, item }, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'search_youtube_channels',
+      {
+        description:
+          '키워드로 유튜브 쇼츠를 검색해서(최근 업로드, 조회수 기준) 채널당 1개씩만 추린다. ' +
+          '워크플로우 페이지의 "🔍 채널 찾기" 버튼과 같은 기능 — 1번(채널 발굴) 단계에서 쓴다.',
+        inputSchema: z.object({
+          query: z.string().describe('검색어 (예: 건축 상식, 심리 실험)'),
+          uploadWithinDays: z.number().optional().describe('최근 며칠 이내 업로드만 (기본 14일)'),
+          maxSubscribers: z.number().optional().describe('이 구독자 수 이하 채널만'),
+          minViews: z.number().optional().describe('이 조회수 이상만 (기본 10000)'),
+        }),
+      },
+      async ({ query, uploadWithinDays, maxSubscribers, minViews }) => {
+        try {
+          const results = await searchShorts({ query, uploadWithinDays, maxSubscribers, minViews });
+          const text = results
+            .map((r) => `- "${r.title}" | 채널: ${r.channelTitle}(구독자 ${fmtCount(r.subscriberCount)}명) | 조회수 ${fmtCount(r.views)} | ${r.channelUrl} | ${r.url}`)
+            .join('\n');
+          return { content: [{ type: 'text', text: `${results.length}개 채널 발견:\n\n${text}` }] };
+        } catch (err) {
+          return { content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
+        }
+      }
+    );
+
+    server.registerTool(
+      'get_channel_top_videos',
+      {
+        description:
+          '채널 URL/핸들/ID 하나를 지정해서 그 채널의 조회수 상위 영상을 가져온다. ' +
+          '워크플로우 페이지의 "📥 채널별 인기 영상 가져오기"와 같은 기능 — 2번(채널별 소재 수집) 단계에서 쓴다.',
+        inputSchema: z.object({
+          channelUrl: z.string().describe('채널 URL(youtube.com/@handle, /channel/UC..., /c/..., /user/...) 또는 채널ID/핸들'),
+          maxResults: z.number().optional().describe('가져올 영상 수 (기본 10)'),
+        }),
+      },
+      async ({ channelUrl, maxResults }) => {
+        try {
+          const channelId = await resolveChannelId(channelUrl);
+          const results = await getChannelTopVideos({ channelId, maxResults });
+          const text = results.map((r) => `- "${r.title}" | 조회수 ${fmtCount(r.views)} | ${r.url}`).join('\n');
+          return { content: [{ type: 'text', text: `${results.length}개 영상:\n\n${text}` }] };
+        } catch (err) {
+          return { content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }] };
+        }
       }
     );
 
