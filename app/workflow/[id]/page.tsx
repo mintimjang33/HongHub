@@ -82,6 +82,30 @@ function isChannelStep(step: Step): boolean {
   return /채널\s*발굴/.test(`${step.name} ${step.desc}`);
 }
 
+// 영상을 새 탭으로 안 열고 페이지 안에서 바로 확인할 수 있게 하는 작은 모달.
+// 확인 → 닫기 → 다음 확인 → 닫기 흐름이 되게, 오버레이 클릭이나 ✕로 바로 닫힌다.
+function VideoPreviewModal({ videoId, onClose }: { videoId: string; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-black rounded-xl overflow-hidden w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-end p-1.5 bg-neutral-900">
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
+            ✕ 닫기
+          </button>
+        </div>
+        <div className="aspect-[9/16] w-full">
+          <iframe
+            src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
+            className="w-full h-full"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 워크플로우 페이지에서 바로 채널을 추가/조회하는 패널. hub_source_channels에
 // [파이프라인:{siteName}] 태그로 저장하므로, 여기서 추가하면 /pipelines, /sources에도 그대로 반영된다.
 function ChannelPanel({ siteName }: { siteName: string }) {
@@ -97,6 +121,7 @@ function ChannelPanel({ siteName }: { siteName: string }) {
   const [searchError, setSearchError] = useState('');
   const [searchResults, setSearchResults] = useState<DiscoverResult[]>([]);
   const [addedChannelIds, setAddedChannelIds] = useState<Set<string>>(new Set());
+  const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -258,12 +283,17 @@ function ChannelPanel({ siteName }: { siteName: string }) {
                   <div key={r.videoId} className="flex items-center gap-2 border border-neutral-100 rounded-lg p-2">
                     {r.thumbnail && (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={r.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100" />
+                      <img
+                        src={r.thumbnail}
+                        alt=""
+                        onClick={() => setPreviewVideoId(r.videoId)}
+                        className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100 cursor-pointer"
+                      />
                     )}
                     <div className="flex-1 min-w-0">
-                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold truncate block hover:underline">
+                      <button onClick={() => setPreviewVideoId(r.videoId)} className="text-xs font-bold truncate block hover:underline text-left">
                         {r.title}
-                      </a>
+                      </button>
                       <div className="text-[11px] text-neutral-400 mt-0.5">
                         {r.channelTitle} · 구독자 {r.subscriberLabel} · 조회수 {r.viewsLabel}
                       </div>
@@ -282,6 +312,7 @@ function ChannelPanel({ siteName }: { siteName: string }) {
           )}
         </div>
       )}
+      {previewVideoId && <VideoPreviewModal videoId={previewVideoId} onClose={() => setPreviewVideoId(null)} />}
 
       {showForm && (
         <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-2 space-y-2">
@@ -348,6 +379,7 @@ function MaterialPanel({ siteName }: { siteName: string }) {
   const [fetchError, setFetchError] = useState('');
   const [groups, setGroups] = useState<ChannelMaterialGroup[]>([]);
   const [addedVideoIds, setAddedVideoIds] = useState<Set<string>>(new Set());
+  const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -474,12 +506,17 @@ function MaterialPanel({ siteName }: { siteName: string }) {
                     <div key={r.videoId} className="flex items-center gap-2 bg-white border border-neutral-100 rounded-lg p-2">
                       {r.thumbnail && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={r.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100" />
+                        <img
+                          src={r.thumbnail}
+                          alt=""
+                          onClick={() => setPreviewVideoId(r.videoId)}
+                          className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100 cursor-pointer"
+                        />
                       )}
                       <div className="flex-1 min-w-0">
-                        <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold truncate block hover:underline">
+                        <button onClick={() => setPreviewVideoId(r.videoId)} className="text-xs font-bold truncate block hover:underline text-left">
                           {r.title}
-                        </a>
+                        </button>
                         <div className="text-[11px] text-neutral-400 mt-0.5">조회수 {r.viewsLabel}</div>
                       </div>
                       <button
@@ -497,6 +534,7 @@ function MaterialPanel({ siteName }: { siteName: string }) {
           ))}
         </div>
       )}
+      {previewVideoId && <VideoPreviewModal videoId={previewVideoId} onClose={() => setPreviewVideoId(null)} />}
 
       {expanded && groups.length === 0 && mineItems.length > 0 && (
         <div className="space-y-1.5">
