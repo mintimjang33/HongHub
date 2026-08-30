@@ -90,7 +90,7 @@ function parseSteps(markdown: string): Step[] {
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
 function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
-  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step)) return null;
+  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step) || isAnalysisStep(step)) return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
   return null;
 }
@@ -1005,6 +1005,126 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
   );
 }
 
+function isAnalysisStep(step: Step): boolean {
+  return /분석/.test(`${step.name} ${step.desc}`);
+}
+
+type AnalysisResult = {
+  title: string;
+  script: string;
+  thumbnail: string;
+  durationStats: { count: number; avg: number; min: number; max: number } | null;
+  paceStats: { count: number; avgCharsPerSec: number } | null;
+  analyzedCount: number;
+  totalCount: number;
+};
+
+const ANALYSIS_TABS = [
+  { key: 'title', label: '제목' },
+  { key: 'thumbnail', label: '썸네일' },
+  { key: 'script', label: '대본' },
+  { key: 'duration', label: '시간' },
+  { key: 'pace', label: '속도' },
+] as const;
+type AnalysisTabKey = (typeof ANALYSIS_TABS)[number]['key'];
+
+// 2·3번에서 모은 소재(제목/썸네일/대본/길이/조회수)를 AI로 분석해서 탭별로 보여준다.
+// 리스트가 아니라 "패턴 요약"이 목적이라 항목별 나열 UI가 아니라 탭 전환 UI로 만든다.
+function AnalysisPanel({ siteName }: { siteName: string }) {
+  const [tab, setTab] = useState<AnalysisTabKey>('title');
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState('');
+
+  async function analyze() {
+    setAnalyzing(true);
+    setError('');
+    try {
+      const res = await fetch('/api/analyze-materials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '분석 실패');
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAnalyzing(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-black/5 pt-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-black text-neutral-500">
+          🔍 패턴 분석{result && ` — 조회수 상위 ${result.analyzedCount}/${result.totalCount}개 기준`}
+        </span>
+        <button
+          onClick={analyze}
+          disabled={analyzing}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
+        >
+          {analyzing ? '분석 중...' : result ? '🔄 다시 분석하기' : '🔍 패턴 분석하기'}
+        </button>
+      </div>
+      <p className="text-[10px] text-neutral-400 mb-2">
+        2번(제목/썸네일/조회수)·3번(대본)에서 모은 소재를 AI로 분석해요. 다시 분석하면 이전 결과를 덮어써요(저장은 안 됨).
+      </p>
+
+      {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
+
+      {result && (
+        <div>
+          <div className="flex gap-1.5 mb-3 border-b border-neutral-100">
+            {ANALYSIS_TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`text-[11px] font-black px-3 py-2 border-b-2 -mb-px ${
+                  tab === t.key ? 'border-black text-black' : 'border-transparent text-neutral-400 hover:text-black'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {(tab === 'title' || tab === 'script' || tab === 'thumbnail') && (
+            <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">
+              {tab === 'title' ? result.title : tab === 'script' ? result.script : result.thumbnail}
+            </p>
+          )}
+
+          {tab === 'duration' &&
+            (result.durationStats ? (
+              <div className="text-xs text-neutral-600 leading-relaxed space-y-1">
+                <p>분석 대상 {result.durationStats.count}개 기준</p>
+                <p>평균 길이: {fmtDuration(result.durationStats.avg)}</p>
+                <p>
+                  범위: {fmtDuration(result.durationStats.min)} ~ {fmtDuration(result.durationStats.max)}
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-neutral-300">길이 데이터가 있는 소재가 없어요 — 2·3번에서 "⏱ 길이 가져오기"로 채워주세요.</p>
+            ))}
+
+          {tab === 'pace' &&
+            (result.paceStats ? (
+              <div className="text-xs text-neutral-600 leading-relaxed space-y-1">
+                <p>분석 대상 {result.paceStats.count}개 기준 (대본+길이 둘 다 있는 것만)</p>
+                <p>평균 나레이션 속도: 초당 {result.paceStats.avgCharsPerSec}자</p>
+              </div>
+            ) : (
+              <p className="text-xs text-neutral-300">대본과 길이가 둘 다 있는 소재가 아직 없어요.</p>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
   const s = status || '';
   if (/⚠️|막힘|막히는/.test(s)) return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-600', label: '막힘' };
@@ -1078,6 +1198,7 @@ function FlowChart({
           {isChannelStep(active) && <ChannelPanel siteName={siteName} />}
           {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
           {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
+          {isAnalysisStep(active) && <AnalysisPanel siteName={siteName} />}
           {link && (
             <Link
               href={link.href}
