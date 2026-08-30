@@ -677,6 +677,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [thumbFetchingIds, setThumbFetchingIds] = useState<Set<string>>(new Set());
   const [durationFetchingIds, setDurationFetchingIds] = useState<Set<string>>(new Set());
+  const [openThumbId, setOpenThumbId] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -874,32 +875,17 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
             const ch = i.channel_id ? channelById.get(i.channel_id) : undefined;
             return (
               <div key={i.id} className="bg-white border border-neutral-100 rounded-lg p-2">
-                <div className="flex items-center gap-2">
-                  {i.thumbnail_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={i.thumbnail_url}
-                      alt=""
-                      onClick={() => videoId && setPreviewVideoId(videoId)}
-                      className={`w-10 h-10 object-cover rounded shrink-0 bg-neutral-100 ${videoId ? 'cursor-pointer' : ''}`}
-                    />
-                  ) : (
-                    <div className="w-10 h-10 shrink-0 rounded bg-neutral-50 border border-dashed border-neutral-200 flex items-center justify-center text-sm text-neutral-300">
-                      🖼
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="text-[11px] font-bold truncate block text-left hover:underline">
-                      {i.title || i.source_url}
-                    </button>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {ch && (
-                        <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
-                          {ch.name}
-                        </a>
-                      )}
-                      {i.views && <span className="text-[11px] text-neutral-400">· 조회수 {i.views}</span>}
-                    </div>
+                <div className="flex-1 min-w-0">
+                  <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="text-[11px] font-bold truncate block text-left hover:underline">
+                    {i.title || i.source_url}
+                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {ch && (
+                      <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
+                        {ch.name}
+                      </a>
+                    )}
+                    {i.views && <span className="text-[11px] text-neutral-400">· 조회수 {i.views}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap mt-2">
@@ -918,25 +904,27 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                     {fetchingIds.has(i.id) ? '가져오는 중...' : '🎬 자동 가져오기'}
                   </button>
                   <button
-                    onClick={() => fetchThumbnail(i)}
+                    onClick={() => (i.thumbnail_url ? setOpenThumbId((cur) => (cur === i.id ? null : i.id)) : fetchThumbnail(i))}
                     disabled={thumbFetchingIds.has(i.id)}
-                    title="다시 가져오기"
                     className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border disabled:opacity-40 ${
-                      i.thumbnail_url ? 'bg-neutral-50 text-neutral-500 border-neutral-200 hover:border-neutral-300' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300'
+                      i.thumbnail_url ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300'
                     }`}
                   >
-                    {thumbFetchingIds.has(i.id) ? '가져오는 중...' : i.thumbnail_url ? '🖼 썸네일 있음' : '🖼 썸네일 가져오기'}
+                    {thumbFetchingIds.has(i.id) ? '가져오는 중...' : i.thumbnail_url ? '🖼 썸네일 있음' : '🖼 썸네일 없음'}
                   </button>
-                  <button
-                    onClick={() => fetchDuration(i)}
-                    disabled={durationFetchingIds.has(i.id)}
-                    title="다시 가져오기"
-                    className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border disabled:opacity-40 ${
-                      i.duration_seconds ? 'bg-neutral-50 text-neutral-500 border-neutral-200 hover:border-neutral-300' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300'
-                    }`}
-                  >
-                    {durationFetchingIds.has(i.id) ? '가져오는 중...' : i.duration_seconds ? `⏱ ${fmtDuration(i.duration_seconds)}` : '⏱ 길이 가져오기'}
-                  </button>
+                  {i.duration_seconds ? (
+                    <span className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-neutral-50 text-neutral-500 border-neutral-200">
+                      ⏱ {fmtDuration(i.duration_seconds)}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => fetchDuration(i)}
+                      disabled={durationFetchingIds.has(i.id)}
+                      className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
+                    >
+                      {durationFetchingIds.has(i.id) ? '가져오는 중...' : '⏱ 길이 가져오기'}
+                    </button>
+                  )}
                   <button
                     onClick={() => toggleOpen(i)}
                     className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border ${
@@ -947,6 +935,12 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                   </button>
                 </div>
                 {fetchErrors[i.id] && <p className="text-[10px] text-red-500 font-bold mt-1.5">{fetchErrors[i.id]}</p>}
+                {openThumbId === i.id && i.thumbnail_url && (
+                  <div className="mt-2 pt-2 border-t border-neutral-100">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={i.thumbnail_url} alt="" className="max-w-[200px] rounded-lg" />
+                  </div>
+                )}
                 {openItemId === i.id && (
                   <div className="mt-2 pt-2 border-t border-neutral-100">
                     <textarea
