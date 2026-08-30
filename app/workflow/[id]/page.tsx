@@ -7,17 +7,9 @@ import { useParams } from 'next/navigation';
 type Site = { id: string; name: string; workflow_content: string | null };
 type Step = { n: string; name: string; desc: string; status: string };
 type Channel = { id: string; name: string; url: string | null; subscriber_count: string | null; notes: string | null };
-type DiscoverResult = {
-  videoId: string;
-  title: string;
-  url: string;
-  channelId: string;
-  channelTitle: string;
-  channelUrl: string;
-  subscriberLabel: string;
-  viewsLabel: string;
-  thumbnail: string;
-};
+type SourceItem = { id: string; channel_id: string | null; source_url: string | null };
+type ChannelVideoResult = { videoId: string; title: string; url: string; views: number; viewsLabel: string; thumbnail: string };
+type MaterialResult = ChannelVideoResult & { channelId: string; channelName: string };
 
 const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 
@@ -65,17 +57,18 @@ function parseSteps(markdown: string): Step[] {
 }
 
 // 단계 이름/내용에 등장하는 키워드로 실제 작업 페이지 바로가기 링크를 만들어준다.
-// 채널 단계는 여기서 바로 추가할 수 있게 만들어서 별도 링크가 필요 없다.
+// "채널 발굴"(보통 1번)과 "소재 수집"(보통 2번) 단계는 이 페이지에서 바로 처리할 수 있게
+// 만들어서(ChannelPanel/MaterialPanel) 별도 링크가 필요 없다.
 function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
-  if (/채널/.test(text)) return null;
-  if (/대본|자막.*수집|소재/.test(text)) return { href: '/sources?tab=items', label: '🎯 소스 발굴 → 소재 탭에서 "🔗 링크로 가져오기" / "📜 대본"' };
+  if (isChannelStep(step) || isMaterialStep(step)) return null;
+  if (/대본|자막.*수집/.test(text)) return { href: '/sources?tab=items', label: '🎯 소스 발굴 → 소재 탭에서 "🔗 링크로 가져오기" / "📜 대본"' };
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
   return null;
 }
 
 function isChannelStep(step: Step): boolean {
-  return /채널/.test(`${step.name} ${step.desc}`);
+  return /채널\s*발굴/.test(`${step.name} ${step.desc}`);
 }
 
 // 워크플로우 페이지에서 바로 채널을 추가/조회하는 패널. hub_source_channels에
@@ -87,12 +80,6 @@ function ChannelPanel({ siteName }: { siteName: string }) {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: '', url: '', subscriber_count: '' });
-  const [showSearch, setShowSearch] = useState(false);
-  const [query, setQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState('');
-  const [searchResults, setSearchResults] = useState<DiscoverResult[]>([]);
-  const [addedChannelIds, setAddedChannelIds] = useState<Set<string>>(new Set());
 
   function load() {
     setLoading(true);
@@ -107,55 +94,6 @@ function ChannelPanel({ siteName }: { siteName: string }) {
   }, []);
 
   const mine = channels.filter((c) => (c.notes || '').match(CHANNEL_TAG_RE)?.[1] === siteName);
-  const mineUrls = new Set(mine.map((c) => c.url).filter(Boolean));
-
-  async function handleSearch() {
-    if (!query.trim()) return;
-    setSearching(true);
-    setSearchError('');
-    try {
-      const res = await fetch(`/api/discover-channels?query=${encodeURIComponent(query)}`);
-      const data = await res.json();
-      if (!res.ok) {
-        setSearchError(data.error || '검색 실패');
-        setSearchResults([]);
-      } else {
-        setSearchResults(data.results || []);
-      }
-    } catch (err) {
-      setSearchError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSearching(false);
-    }
-  }
-
-  async function addFromSearch(r: DiscoverResult) {
-    setAddedChannelIds((prev) => new Set(prev).add(r.channelId));
-    try {
-      await fetch('/api/source-channels', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: r.channelTitle,
-          platform: 'youtube',
-          url: r.channelUrl,
-          subscriber_count: r.subscriberLabel,
-          content_types: [],
-          platform_fit: [],
-          notes: `[파이프라인:${siteName}]`,
-          status: '후보',
-        }),
-      });
-      setExpanded(true);
-      load();
-    } catch {
-      setAddedChannelIds((prev) => {
-        const next = new Set(prev);
-        next.delete(r.channelId);
-        return next;
-      });
-    }
-  }
 
   async function handleAdd() {
     if (!form.name.trim()) return;
@@ -194,90 +132,13 @@ function ChannelPanel({ siteName }: { siteName: string }) {
           <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
           🎯 등록된 채널 ({loading ? '...' : mine.length})
         </button>
-        <div className="flex gap-1.5">
-          <button
-            onClick={() => setShowSearch((v) => !v)}
-            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
-          >
-            🔍 채널 찾기
-          </button>
-          <button
-            onClick={() => setShowForm((v) => !v)}
-            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800"
-          >
-            + 채널 추가
-          </button>
-        </div>
+        <button
+          onClick={() => setShowForm((v) => !v)}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800"
+        >
+          + 채널 추가
+        </button>
       </div>
-
-      {showSearch && (
-        <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-2">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-black text-neutral-500">🔍 채널 찾기</span>
-            <button
-              onClick={() => {
-                setShowSearch(false);
-                setQuery('');
-                setSearchResults([]);
-                setSearchError('');
-              }}
-              className="text-[11px] font-bold text-neutral-400 hover:text-black"
-            >
-              ✕ 닫기
-            </button>
-          </div>
-          <div className="flex gap-2 mb-2">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="검색어 (예: 건축 상식, 심리 실험)"
-              className="flex-1 border border-neutral-200 rounded-lg px-3 py-2 text-xs"
-            />
-            <button
-              onClick={handleSearch}
-              disabled={searching || !query.trim()}
-              className="text-[11px] font-black px-4 py-2 rounded-lg bg-black text-white disabled:opacity-40"
-            >
-              {searching ? '찾는 중...' : '찾기'}
-            </button>
-          </div>
-          <p className="text-[10px] text-neutral-400 mb-2">
-            최근 14일 내 조회수 1만 이상 쇼츠를 유튜브에서 검색해서, 채널별로 가장 잘 터진 영상 하나씩만 보여줘요.
-          </p>
-          {searchError && <p className="text-[11px] text-red-500 font-bold mb-2">{searchError}</p>}
-          {searchResults.length > 0 && (
-            <div className="space-y-1.5 max-h-80 overflow-y-auto">
-              {searchResults.map((r) => {
-                const already = mineUrls.has(r.channelUrl) || addedChannelIds.has(r.channelId);
-                return (
-                  <div key={r.videoId} className="flex items-center gap-2 border border-neutral-100 rounded-lg p-2">
-                    {r.thumbnail && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={r.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold truncate block hover:underline">
-                        {r.title}
-                      </a>
-                      <div className="text-[11px] text-neutral-400 mt-0.5">
-                        {r.channelTitle} · 구독자 {r.subscriberLabel} · 조회수 {r.viewsLabel}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => addFromSearch(r)}
-                      disabled={already}
-                      className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40 disabled:bg-neutral-300"
-                    >
-                      {already ? '추가됨' : '+ 채널로 추가'}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
 
       {showForm && (
         <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-2 space-y-2">
@@ -331,6 +192,167 @@ function ChannelPanel({ siteName }: { siteName: string }) {
       )}
     </div>
   );
+}
+
+// 워크플로우 페이지에서 바로 소재를 수집하는 패널. 1번에서 이미 등록된 채널들을 그대로 돌아가며
+// 채널별 인기 영상을 가져와 조회수순으로 합쳐 보여준다 — 여기서 채널을 새로 찾거나 추가하지 않는다.
+function MaterialPanel({ siteName }: { siteName: string }) {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [items, setItems] = useState<SourceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState('');
+  const [results, setResults] = useState<MaterialResult[]>([]);
+  const [addedVideoIds, setAddedVideoIds] = useState<Set<string>>(new Set());
+
+  function load() {
+    setLoading(true);
+    Promise.all([
+      fetch('/api/source-channels').then((r) => r.json()),
+      fetch('/api/source-items').then((r) => r.json()),
+    ])
+      .then(([c, i]) => {
+        setChannels(c.channels || []);
+        setItems(i.items || []);
+      })
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const mineChannels = channels.filter((c) => (c.notes || '').match(CHANNEL_TAG_RE)?.[1] === siteName);
+  const mineChannelIds = new Set(mineChannels.map((c) => c.id));
+  const mineItems = items.filter((i) => i.channel_id && mineChannelIds.has(i.channel_id));
+  const mineItemUrls = new Set(mineItems.map((i) => i.source_url).filter(Boolean));
+
+  async function fetchTopVideos() {
+    const withUrl = mineChannels.filter((c) => c.url);
+    if (withUrl.length === 0) {
+      setFetchError('URL이 등록된 채널이 없어요. 1번 채널 발굴에서 URL을 채워주세요.');
+      return;
+    }
+    setFetching(true);
+    setFetchError('');
+    try {
+      const perChannel = await Promise.all(
+        withUrl.map(async (c) => {
+          const res = await fetch(`/api/channel-videos?channelUrl=${encodeURIComponent(c.url!)}`);
+          const data = await res.json();
+          if (!res.ok) return [];
+          return (data.results || []).map((r: ChannelVideoResult) => ({ ...r, channelId: c.id, channelName: c.name }));
+        })
+      );
+      const merged: MaterialResult[] = perChannel.flat();
+      merged.sort((a, b) => b.views - a.views);
+      setResults(merged);
+      setExpanded(true);
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFetching(false);
+    }
+  }
+
+  async function registerMaterial(r: MaterialResult) {
+    setAddedVideoIds((prev) => new Set(prev).add(r.videoId));
+    try {
+      await fetch('/api/source-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel_id: r.channelId,
+          title: r.title,
+          source_url: r.url,
+          thumbnail_url: r.thumbnail,
+          views: r.viewsLabel,
+          content_type: 'TRIVIA',
+          platform_fit: [],
+          raw_notes: '',
+        }),
+      });
+      load();
+    } catch {
+      setAddedVideoIds((prev) => {
+        const next = new Set(prev);
+        next.delete(r.videoId);
+        return next;
+      });
+    }
+  }
+
+  return (
+    <div className="border-t border-black/5 pt-3">
+      <div className="flex items-center justify-between mb-2">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-xs font-black text-neutral-500 hover:text-black"
+        >
+          <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+          🎯 등록된 소재 ({loading ? '...' : mineItems.length})
+        </button>
+        <button
+          onClick={fetchTopVideos}
+          disabled={fetching}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
+        >
+          {fetching ? '가져오는 중...' : '📥 채널별 인기 영상 가져오기'}
+        </button>
+      </div>
+      <p className="text-[10px] text-neutral-400 mb-2">
+        1번에 등록된 채널들을 돌면서 각 채널의 조회수 상위 영상을 가져와 조회수순으로 합쳐 보여줘요.
+      </p>
+
+      {fetchError && <p className="text-[11px] text-red-500 font-bold mb-2">{fetchError}</p>}
+
+      {results.length > 0 && (
+        <div className="space-y-1.5 max-h-96 overflow-y-auto mb-2">
+          {results.map((r) => {
+            const already = mineItemUrls.has(r.url) || addedVideoIds.has(r.videoId);
+            return (
+              <div key={r.videoId} className="flex items-center gap-2 bg-white border border-neutral-100 rounded-lg p-2">
+                {r.thumbnail && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={r.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold truncate block hover:underline">
+                    {r.title}
+                  </a>
+                  <div className="text-[11px] text-neutral-400 mt-0.5">
+                    {r.channelName} · 조회수 {r.viewsLabel}
+                  </div>
+                </div>
+                <button
+                  onClick={() => registerMaterial(r)}
+                  disabled={already}
+                  className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40 disabled:bg-neutral-300"
+                >
+                  {already ? '등록됨' : '소재등록'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {expanded && results.length === 0 && mineItems.length > 0 && (
+        <div className="space-y-1.5">
+          {mineItems.map((i) => (
+            <div key={i.id} className="text-[11px] bg-white border border-neutral-100 rounded-lg px-3 py-2 truncate">
+              {i.source_url}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isMaterialStep(step: Step): boolean {
+  return /소재/.test(`${step.name} ${step.desc}`);
 }
 
 function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
@@ -395,6 +417,7 @@ function FlowChart({ steps, siteName }: { steps: Step[]; siteName: string }) {
           {active.desc && <p className="text-sm text-neutral-600 leading-relaxed mb-3">{active.desc}</p>}
           {active.status && <p className="text-xs text-neutral-500 leading-relaxed border-t border-black/5 pt-3 mb-3">{active.status}</p>}
           {isChannelStep(active) && <ChannelPanel siteName={siteName} />}
+          {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
           {link && (
             <Link
               href={link.href}
