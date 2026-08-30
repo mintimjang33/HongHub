@@ -212,6 +212,20 @@ function ChannelPanel({ siteName }: { siteName: string }) {
 
       {showSearch && (
         <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-black text-neutral-500">🔍 채널 찾기</span>
+            <button
+              onClick={() => {
+                setShowSearch(false);
+                setQuery('');
+                setSearchResults([]);
+                setSearchError('');
+              }}
+              className="text-[11px] font-bold text-neutral-400 hover:text-black"
+            >
+              ✕ 닫기
+            </button>
+          </div>
           <div className="flex gap-2 mb-2">
             <input
               value={query}
