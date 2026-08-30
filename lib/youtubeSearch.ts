@@ -1,6 +1,10 @@
-// 유튜브 채널/영상 검색. HongHub 자체 YOUTUBE_API_KEY로 서버사이드에서 직접 호출한다.
+// 유튜브 채널/영상 검색. U-Finder/U-OneShot과 같은 Supabase 프로젝트를 쓰기 때문에,
+// 그 두 도구가 이미 app_config 테이블에 넣어둔 YouTube Data API 키를 그대로 읽어서 쓴다
+// (새 키를 따로 발급/등록할 필요 없음).
 // U-Finder MCP의 search_shorts 도구와 같은 로직(검색 → 영상 상세 → 채널 상세 → 필터/정렬)을
 // 웹 UI에서 바로 쓸 수 있도록 이식한 버전.
+import { getSupabaseServerClient } from './supabase';
+
 const BASE = 'https://www.googleapis.com/youtube/v3';
 
 export type ShortsResult = {
@@ -16,15 +20,20 @@ export type ShortsResult = {
   thumbnail: string;
 };
 
-function apiKey(): string {
-  const key = process.env.YOUTUBE_API_KEY;
-  if (!key) throw new Error('YOUTUBE_API_KEY 환경변수가 설정되어 있지 않습니다.');
-  return key;
+let cachedKey: string | null = null;
+
+async function apiKey(): Promise<string> {
+  if (cachedKey) return cachedKey;
+  const supabase = getSupabaseServerClient();
+  const { data, error } = await supabase.from('app_config').select('value').eq('key', 'YOUTUBE_DATA_API_KEY').maybeSingle();
+  if (error || !data?.value) throw new Error('app_config에 YOUTUBE_DATA_API_KEY가 등록되어 있지 않습니다.');
+  cachedKey = data.value as string;
+  return cachedKey;
 }
 
 async function apiGet(path: string, params: Record<string, string | number | undefined>) {
   const url = new URL(`${BASE}/${path}`);
-  url.searchParams.set('key', apiKey());
+  url.searchParams.set('key', await apiKey());
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') url.searchParams.set(k, String(v));
   const res = await fetch(url);
   if (!res.ok) {
