@@ -1140,7 +1140,7 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
           disabled={copying}
           className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
         >
-          {copying ? '준비 중...' : copied ? '✅ 복사됨!' : '💬 체크한 항목 구독으로 분석하기'}
+          {copying ? '준비 중...' : copied ? '✅ 복사됨!' : '💬 체크한 항목 Gemini·Claude 구독으로 분석하기'}
         </button>
         <button
           onClick={analyzeWithGemini}
@@ -1152,9 +1152,11 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
       </div>
       <p className="text-[10px] text-neutral-400 mb-3">
         먼저 분석할 항목을 체크하세요. "✨ Gemini Pro"는 Gemini API(유료, gemini-3.1-pro-preview)를 직접
-        호출해서 체크한 것만 바로 분석·저장해요. "💬 구독으로 분석하기"는 API 없이, 체크한 항목만 프롬프트로
-        만들어 클립보드에 복사해줘요(비용 없음) — Gemini 웹앱이나 이 대화의 Claude한테 붙여넣어서 물어보시고,
-        답변을 다시 붙여넣어주시면 저장해드릴게요.
+        호출해서 체크한 것만 바로 분석·저장해요. "💬 Gemini·Claude 구독으로 분석하기"는 API 없이, 체크한
+        항목만 프롬프트로 만들어 클립보드에 복사해줘요(비용 없음) — Gemini 웹앱이든 Claude(claude.ai나 이
+        대화)든 아무 구독 채팅에나 붙여넣어서 물어보시고, 답변을 다시 붙여넣어주시면 저장해드릴게요. HongHub이
+        Vercel에서 돌아가서 두 구독 계정을 여기서 자동으로 대신 불러내는 건 안 되고(로컬 PC에 로그인된 CLI가
+        필요), 지금은 이 복사-붙여넣기 방식이 유일한 무료 경로예요.
       </p>
       {error && <p className="text-[11px] text-red-500 font-bold mb-3">{error}</p>}
 
@@ -1325,7 +1327,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
           disabled={copying === stage}
           className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
         >
-          {copying === stage ? '준비 중...' : copied === stage ? '✅ 복사됨!' : '💬 구독으로 만들기'}
+          {copying === stage ? '준비 중...' : copied === stage ? '✅ 복사됨!' : '💬 Gemini·Claude 구독으로 만들기'}
         </button>
         <button
           onClick={() => generate(stage)}
@@ -1335,6 +1337,17 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
           {generating === stage ? '만드는 중... (1분 정도)' : '✨ Gemini Pro로 만들기'}
         </button>
       </div>
+    );
+  }
+
+  function GenerateHint() {
+    return (
+      <p className="text-[10px] text-neutral-400 mb-2">
+        "✨ Gemini Pro"는 유료 API를 직접 호출해서 바로 저장해요. "💬 Gemini·Claude 구독으로 만들기"는 비용 없이
+        프롬프트만 클립보드에 복사해줘요 — Gemini 웹앱이든 Claude(claude.ai나 이 대화)든 아무 구독 채팅에 붙여넣어서
+        물어보고, 답변을 아래 붙여넣기 칸에 넣으면 저장돼요. (Vercel에서 도는 앱이라 두 구독 계정을 여기서 자동으로
+        대신 불러낼 순 없어요.)
+      </p>
     );
   }
 
@@ -1375,6 +1388,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
           🔄 처음부터
         </button>
       </div>
+      <GenerateHint />
       {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
 
       {/* 1단계: 소재 추천 */}
