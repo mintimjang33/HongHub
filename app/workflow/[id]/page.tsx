@@ -874,7 +874,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
             const ch = i.channel_id ? channelById.get(i.channel_id) : undefined;
             return (
               <div key={i.id} className="bg-white border border-neutral-100 rounded-lg p-2">
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
                   {i.thumbnail_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -901,6 +901,8 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                       {i.views && <span className="text-[11px] text-neutral-400">· 조회수 {i.views}</span>}
                     </div>
                   </div>
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap mt-2">
                   <button
                     onClick={() => copyLink(i)}
                     title="링크 복사"
