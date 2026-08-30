@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 
 type Site = { id: string; name: string; workflow_content: string | null };
+type Step = { n: string; name: string; desc: string; status: string };
 
 const TEMPLATE = `# {{프로젝트명}} 워크플로우
 
@@ -29,6 +30,74 @@ const TEMPLATE = `# {{프로젝트명}} 워크플로우
 -
 `;
 
+// "| 1 | 채널 발굴 | 내용... | 상태... |" 형태의 마크다운 표 행을 파싱해서 단계 배열로 만든다.
+// 헤더 행(#/단계/내용/상태)과 구분선 행(|---|...)은 건너뛴다. 표가 없거나 형식이 안 맞으면 빈 배열.
+function parseSteps(markdown: string): Step[] {
+  const lines = markdown.split('\n');
+  const steps: Step[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('|')) continue;
+    const cells = trimmed
+      .split('|')
+      .slice(1, -1)
+      .map((c) => c.trim());
+    if (cells.length < 3) continue;
+    const [n, name, desc = '', status = ''] = cells;
+    if (!/^\d+$/.test(n)) continue; // 헤더/구분선/숫자 아닌 행 제외
+    steps.push({ n, name, desc, status });
+  }
+  return steps;
+}
+
+function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
+  const s = status || '';
+  if (/⚠️|막힘|막히는/.test(s)) return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-600', label: '막힘' };
+  if (/미착수/.test(s)) return { bg: 'bg-neutral-50', border: 'border-neutral-200', text: 'text-neutral-400', label: '미착수' };
+  if (/진행\s*중|상시/.test(s)) return { bg: 'bg-blue-50', border: 'border-blue-300', text: 'text-blue-600', label: '진행 중' };
+  if (/검증|완료|확인|가능|결정됨/.test(s)) return { bg: 'bg-green-50', border: 'border-green-300', text: 'text-green-600', label: '완료' };
+  if (!s.trim()) return { bg: 'bg-neutral-50', border: 'border-neutral-200', text: 'text-neutral-300', label: '-' };
+  return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-600', label: status };
+}
+
+function FlowChart({ steps }: { steps: Step[] }) {
+  if (steps.length === 0) return null;
+  return (
+    <div className="mb-6 bg-white border border-neutral-200 rounded-xl p-6 overflow-x-auto">
+      <div className="text-[11px] font-black text-neutral-400 mb-4">🔀 플로우차트 미리보기 (아래 표에서 자동 생성)</div>
+      <div className="flex flex-col items-start">
+        {steps.map((s, i) => {
+          const tone = statusTone(s.status);
+          return (
+            <div key={i} className="w-full max-w-2xl">
+              <div className={`flex items-start gap-3 border rounded-xl p-3.5 ${tone.bg} ${tone.border}`}>
+                <div className="shrink-0 w-7 h-7 rounded-full bg-black text-white text-xs font-black flex items-center justify-center">
+                  {s.n}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-black text-sm truncate">{s.name || '(단계명 없음)'}</div>
+                    <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full bg-white border ${tone.border} ${tone.text}`}>
+                      {tone.label}
+                    </span>
+                  </div>
+                  {s.desc && <div className="text-xs text-neutral-500 mt-1">{s.desc}</div>}
+                  {tone.label === '막힘' && s.status && <div className="text-[11px] text-red-500 mt-1 font-bold">{s.status}</div>}
+                </div>
+              </div>
+              {i < steps.length - 1 && (
+                <div className="flex justify-start pl-6">
+                  <div className="w-0.5 h-5 bg-neutral-300" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function WorkflowPage() {
   const params = useParams();
   const id = params.id as string;
@@ -36,6 +105,7 @@ export default function WorkflowPage() {
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
 
   useEffect(() => {
     fetch('/api/sites')
@@ -46,6 +116,8 @@ export default function WorkflowPage() {
         setContent(found?.workflow_content || '');
       });
   }, [id]);
+
+  const steps = useMemo(() => parseSteps(content), [content]);
 
   async function save() {
     setSaving(true);
@@ -64,6 +136,7 @@ export default function WorkflowPage() {
   function insertTemplate() {
     if (content.trim() && !confirm('지금 내용을 템플릿으로 덮어쓸까요?')) return;
     setContent(TEMPLATE.replace('{{프로젝트명}}', site?.name || '').replace(/\{\{YYYY-MM-DD\}\}/g, new Date().toISOString().slice(0, 10)));
+    setShowEditor(true);
   }
 
   if (!site) return <div className="min-h-screen bg-neutral-50 p-10 text-sm text-neutral-400">불러오는 중...</div>;
@@ -80,22 +153,33 @@ export default function WorkflowPage() {
             <button onClick={insertTemplate} className="text-xs font-black px-4 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white">
               📐 템플릿 채우기
             </button>
+            <button
+              onClick={() => setShowEditor((v) => !v)}
+              className="text-xs font-black px-4 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+            >
+              {showEditor ? '✕ 편집 닫기' : '✏️ 표 편집하기'}
+            </button>
             <button onClick={save} disabled={saving} className="bg-black text-white text-xs font-black px-5 py-2 rounded-lg hover:bg-neutral-800 disabled:opacity-40">
               {saving ? '저장 중...' : '저장'}
             </button>
           </div>
         </div>
         <p className="text-xs text-neutral-400 mb-4">
-          계획서와는 별개로, 이 파이프라인이 "어떤 순서로 어떤 도구를 쓰는지"만 적어두는 곳이에요.
+          계획서와는 별개로, 이 파이프라인이 "어떤 순서로 어떤 도구를 쓰는지"만 적어두는 곳이에요. 표를 채우면 아래에 순서도로 자동 표시돼요.
           {savedAt && <span className="text-green-600 font-bold"> · {savedAt} 저장됨</span>}
         </p>
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          rows={32}
-          className="w-full border border-neutral-200 rounded-lg p-4 text-xs font-mono leading-relaxed"
-          placeholder="아직 워크플로우가 없어요 — [📐 템플릿 채우기]로 시작해보세요."
-        />
+
+        <FlowChart steps={steps} />
+
+        {(showEditor || steps.length === 0) && (
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={28}
+            className="w-full border border-neutral-200 rounded-lg p-4 text-xs font-mono leading-relaxed"
+            placeholder="아직 워크플로우가 없어요 — [📐 템플릿 채우기]로 시작해보세요."
+          />
+        )}
       </div>
     </div>
   );
