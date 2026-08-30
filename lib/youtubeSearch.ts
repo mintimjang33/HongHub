@@ -56,7 +56,8 @@ export async function resolveChannelId(input: string): Promise<string> {
   if (/^UC[\w-]{22}$/.test(raw)) return raw;
 
   let handle = raw;
-  const urlMatch = raw.match(/youtube\.com\/(?:channel\/(UC[\w-]{22})|@([\w.-]+)|c\/([\w.-]+)|user\/([\w.-]+))/i);
+  // 핸들 부분은 \w로 제한하면 한글 핸들(예: @전세계건축물)을 못 잡으므로 경로 구분자 전까지 통째로 잡는다.
+  const urlMatch = raw.match(/youtube\.com\/(?:channel\/(UC[\w-]{22})|@([^/?#]+)|c\/([^/?#]+)|user\/([^/?#]+))/i);
   if (urlMatch) {
     if (urlMatch[1]) return urlMatch[1];
     handle = urlMatch[2] || urlMatch[3] || urlMatch[4];

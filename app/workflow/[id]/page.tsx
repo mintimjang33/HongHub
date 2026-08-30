@@ -9,7 +9,7 @@ type Step = { n: string; name: string; desc: string; status: string };
 type Channel = { id: string; name: string; url: string | null; subscriber_count: string | null; notes: string | null };
 type SourceItem = { id: string; channel_id: string | null; source_url: string | null };
 type ChannelVideoResult = { videoId: string; title: string; url: string; views: number; viewsLabel: string; thumbnail: string };
-type MaterialResult = ChannelVideoResult & { channelId: string; channelName: string };
+type ChannelMaterialGroup = { channelId: string; channelName: string; videos: ChannelVideoResult[]; error?: string };
 type DiscoverResult = {
   videoId: string;
   title: string;
@@ -346,7 +346,7 @@ function MaterialPanel({ siteName }: { siteName: string }) {
   const [expanded, setExpanded] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState('');
-  const [results, setResults] = useState<MaterialResult[]>([]);
+  const [groups, setGroups] = useState<ChannelMaterialGroup[]>([]);
   const [addedVideoIds, setAddedVideoIds] = useState<Set<string>>(new Set());
 
   function load() {
@@ -372,25 +372,29 @@ function MaterialPanel({ siteName }: { siteName: string }) {
   const mineItemUrls = new Set(mineItems.map((i) => i.source_url).filter(Boolean));
 
   async function fetchTopVideos() {
-    const withUrl = mineChannels.filter((c) => c.url);
-    if (withUrl.length === 0) {
-      setFetchError('URL이 등록된 채널이 없어요. 1번 채널 발굴에서 URL을 채워주세요.');
+    if (mineChannels.length === 0) {
+      setFetchError('1번에 등록된 채널이 없어요.');
       return;
     }
     setFetching(true);
     setFetchError('');
     try {
-      const perChannel = await Promise.all(
-        withUrl.map(async (c) => {
-          const res = await fetch(`/api/channel-videos?channelUrl=${encodeURIComponent(c.url!)}`);
-          const data = await res.json();
-          if (!res.ok) return [];
-          return (data.results || []).map((r: ChannelVideoResult) => ({ ...r, channelId: c.id, channelName: c.name }));
+      // 채널별로 결과를 유지한다 — 하나로 합쳐서 정렬하면 조회수 낮은 채널이 안 보여서
+      // "13개 채널 중 몇 개만 나온다"는 걸 알아챌 수 없기 때문에, 채널마다 섹션을 분리해서 보여준다.
+      const perChannel: ChannelMaterialGroup[] = await Promise.all(
+        mineChannels.map(async (c): Promise<ChannelMaterialGroup> => {
+          if (!c.url) return { channelId: c.id, channelName: c.name, videos: [], error: 'URL 미등록' };
+          try {
+            const res = await fetch(`/api/channel-videos?channelUrl=${encodeURIComponent(c.url)}`);
+            const data = await res.json();
+            if (!res.ok) return { channelId: c.id, channelName: c.name, videos: [], error: data.error || '가져오기 실패' };
+            return { channelId: c.id, channelName: c.name, videos: data.results || [] };
+          } catch (err) {
+            return { channelId: c.id, channelName: c.name, videos: [], error: err instanceof Error ? err.message : String(err) };
+          }
         })
       );
-      const merged: MaterialResult[] = perChannel.flat();
-      merged.sort((a, b) => b.views - a.views);
-      setResults(merged);
+      setGroups(perChannel);
       setExpanded(true);
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : String(err));
@@ -399,14 +403,14 @@ function MaterialPanel({ siteName }: { siteName: string }) {
     }
   }
 
-  async function registerMaterial(r: MaterialResult) {
+  async function registerMaterial(channelId: string, r: ChannelVideoResult) {
     setAddedVideoIds((prev) => new Set(prev).add(r.videoId));
     try {
       await fetch('/api/source-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          channel_id: r.channelId,
+          channel_id: channelId,
           title: r.title,
           source_url: r.url,
           thumbnail_url: r.thumbnail,
@@ -445,43 +449,56 @@ function MaterialPanel({ siteName }: { siteName: string }) {
         </button>
       </div>
       <p className="text-[10px] text-neutral-400 mb-2">
-        1번에 등록된 채널들을 돌면서 각 채널의 조회수 상위 영상을 가져와 조회수순으로 합쳐 보여줘요.
+        1번에 등록된 채널 {mineChannels.length}개를 하나씩 돌면서 채널별 조회수 상위 영상을 가져와요.
       </p>
 
       {fetchError && <p className="text-[11px] text-red-500 font-bold mb-2">{fetchError}</p>}
 
-      {results.length > 0 && (
-        <div className="space-y-1.5 max-h-96 overflow-y-auto mb-2">
-          {results.map((r) => {
-            const already = mineItemUrls.has(r.url) || addedVideoIds.has(r.videoId);
-            return (
-              <div key={r.videoId} className="flex items-center gap-2 bg-white border border-neutral-100 rounded-lg p-2">
-                {r.thumbnail && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={r.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100" />
+      {groups.length > 0 && (
+        <div className="space-y-3 max-h-[32rem] overflow-y-auto mb-2">
+          {groups.map((g) => (
+            <div key={g.channelId} className="border border-neutral-100 rounded-lg p-2">
+              <div className="text-[11px] font-black text-neutral-500 mb-1.5 flex items-center justify-between">
+                <span>{g.channelName}</span>
+                {g.error ? (
+                  <span className="text-red-400 font-bold">{g.error}</span>
+                ) : (
+                  <span className="text-neutral-300">영상 {g.videos.length}개</span>
                 )}
-                <div className="flex-1 min-w-0">
-                  <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold truncate block hover:underline">
-                    {r.title}
-                  </a>
-                  <div className="text-[11px] text-neutral-400 mt-0.5">
-                    {r.channelName} · 조회수 {r.viewsLabel}
-                  </div>
-                </div>
-                <button
-                  onClick={() => registerMaterial(r)}
-                  disabled={already}
-                  className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40 disabled:bg-neutral-300"
-                >
-                  {already ? '등록됨' : '소재등록'}
-                </button>
               </div>
-            );
-          })}
+              {!g.error && g.videos.length === 0 && <p className="text-[11px] text-neutral-300 px-1">가져온 영상 없음</p>}
+              <div className="space-y-1.5">
+                {g.videos.map((r) => {
+                  const already = mineItemUrls.has(r.url) || addedVideoIds.has(r.videoId);
+                  return (
+                    <div key={r.videoId} className="flex items-center gap-2 bg-white border border-neutral-100 rounded-lg p-2">
+                      {r.thumbnail && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={r.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold truncate block hover:underline">
+                          {r.title}
+                        </a>
+                        <div className="text-[11px] text-neutral-400 mt-0.5">조회수 {r.viewsLabel}</div>
+                      </div>
+                      <button
+                        onClick={() => registerMaterial(g.channelId, r)}
+                        disabled={already}
+                        className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40 disabled:bg-neutral-300"
+                      >
+                        {already ? '등록됨' : '소재등록'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {expanded && results.length === 0 && mineItems.length > 0 && (
+      {expanded && groups.length === 0 && mineItems.length > 0 && (
         <div className="space-y-1.5">
           {mineItems.map((i) => (
             <div key={i.id} className="text-[11px] bg-white border border-neutral-100 rounded-lg px-3 py-2 truncate">
