@@ -77,16 +77,34 @@ export async function GET(request: Request) {
     const top = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
     topCount = top.length;
 
+    // 체크한 항목에 필요한 필드만 넣는다 — 예를 들어 "제목"만 체크했는데 썸네일 링크·대본 전문까지
+    // 딸려 나가면 프롬프트만 쓸데없이 커진다.
+    const includeDuration = categories.includes('duration') || categories.includes('pace');
+    const includeThumbnail = categories.includes('thumbnail');
+    const includeScriptText = categories.includes('script');
+    const includeCharCount = categories.includes('pace');
+    const fieldNames = [
+      '제목',
+      '조회수',
+      includeDuration && '길이',
+      includeThumbnail && '썸네일 이미지 링크',
+      includeScriptText && '대본',
+      includeCharCount && '대본 글자수',
+    ]
+      .filter(Boolean)
+      .join('/');
+
     const lines = top.map((i, idx) => {
       const parts = [`[${idx + 1}] "${i.title}"`, `조회수 ${i.views || '?'}`];
-      if (i.duration_seconds) parts.push(`길이 ${Math.floor(i.duration_seconds / 60)}:${String(i.duration_seconds % 60).padStart(2, '0')}`);
-      if (i.thumbnail_url) parts.push(`썸네일: ${i.thumbnail_url}`);
+      if (includeDuration && i.duration_seconds) parts.push(`길이 ${Math.floor(i.duration_seconds / 60)}:${String(i.duration_seconds % 60).padStart(2, '0')}`);
+      if (includeThumbnail && i.thumbnail_url) parts.push(`썸네일: ${i.thumbnail_url}`);
+      if (includeCharCount) parts.push(`대본 글자수: ${i.transcript!.trim().length}자`);
       let line = parts.join(' | ');
-      if (i.transcript && i.transcript.trim().length > 20) line += `\n  대본: ${i.transcript.slice(0, 800)}`;
+      if (includeScriptText) line += `\n  대본: ${i.transcript!.slice(0, 800)}`;
       return line;
     });
 
-    itemsSection = `영상 ${top.length}개(대본까지 확보된 것 중 조회수 상위, 전체 ${items.length}개 중 대본 있는 건 ${withTranscript.length}개)의 제목/조회수/길이/썸네일 이미지 링크/대본이야:\n\n${lines.join('\n\n')}`;
+    itemsSection = `영상 ${top.length}개(대본까지 확보된 것 중 조회수 상위, 전체 ${items.length}개 중 대본 있는 건 ${withTranscript.length}개)의 ${fieldNames}이야:\n\n${lines.join('\n\n')}`;
   }
 
   let channelSection = '';
