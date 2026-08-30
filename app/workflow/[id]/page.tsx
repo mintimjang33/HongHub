@@ -10,6 +10,17 @@ type Channel = { id: string; name: string; url: string | null; subscriber_count:
 type SourceItem = { id: string; channel_id: string | null; source_url: string | null };
 type ChannelVideoResult = { videoId: string; title: string; url: string; views: number; viewsLabel: string; thumbnail: string };
 type MaterialResult = ChannelVideoResult & { channelId: string; channelName: string };
+type DiscoverResult = {
+  videoId: string;
+  title: string;
+  url: string;
+  channelId: string;
+  channelTitle: string;
+  channelUrl: string;
+  subscriberLabel: string;
+  viewsLabel: string;
+  thumbnail: string;
+};
 
 const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 
@@ -80,6 +91,12 @@ function ChannelPanel({ siteName }: { siteName: string }) {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: '', url: '', subscriber_count: '' });
+  const [showSearch, setShowSearch] = useState(false);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [searchResults, setSearchResults] = useState<DiscoverResult[]>([]);
+  const [addedChannelIds, setAddedChannelIds] = useState<Set<string>>(new Set());
 
   function load() {
     setLoading(true);
@@ -94,6 +111,55 @@ function ChannelPanel({ siteName }: { siteName: string }) {
   }, []);
 
   const mine = channels.filter((c) => (c.notes || '').match(CHANNEL_TAG_RE)?.[1] === siteName);
+  const mineUrls = new Set(mine.map((c) => c.url).filter(Boolean));
+
+  async function handleSearch() {
+    if (!query.trim()) return;
+    setSearching(true);
+    setSearchError('');
+    try {
+      const res = await fetch(`/api/discover-channels?query=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setSearchError(data.error || '검색 실패');
+        setSearchResults([]);
+      } else {
+        setSearchResults(data.results || []);
+      }
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function addFromSearch(r: DiscoverResult) {
+    setAddedChannelIds((prev) => new Set(prev).add(r.channelId));
+    try {
+      await fetch('/api/source-channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: r.channelTitle,
+          platform: 'youtube',
+          url: r.channelUrl,
+          subscriber_count: r.subscriberLabel,
+          content_types: [],
+          platform_fit: [],
+          notes: `[파이프라인:${siteName}]`,
+          status: '후보',
+        }),
+      });
+      setExpanded(true);
+      load();
+    } catch {
+      setAddedChannelIds((prev) => {
+        const next = new Set(prev);
+        next.delete(r.channelId);
+        return next;
+      });
+    }
+  }
 
   async function handleAdd() {
     if (!form.name.trim()) return;
@@ -132,13 +198,90 @@ function ChannelPanel({ siteName }: { siteName: string }) {
           <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
           🎯 등록된 채널 ({loading ? '...' : mine.length})
         </button>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800"
-        >
-          + 채널 추가
-        </button>
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setShowSearch((v) => !v)}
+            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white"
+          >
+            🔍 채널 찾기
+          </button>
+          <button
+            onClick={() => setShowForm((v) => !v)}
+            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800"
+          >
+            + 채널 추가
+          </button>
+        </div>
       </div>
+
+      {showSearch && (
+        <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-black text-neutral-500">🔍 채널 찾기</span>
+            <button
+              onClick={() => {
+                setShowSearch(false);
+                setQuery('');
+                setSearchResults([]);
+                setSearchError('');
+              }}
+              className="text-[11px] font-bold text-neutral-400 hover:text-black"
+            >
+              ✕ 닫기
+            </button>
+          </div>
+          <div className="flex gap-2 mb-2">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder="검색어 (예: 건축 상식, 심리 실험)"
+              className="flex-1 border border-neutral-200 rounded-lg px-3 py-2 text-xs"
+            />
+            <button
+              onClick={handleSearch}
+              disabled={searching || !query.trim()}
+              className="text-[11px] font-black px-4 py-2 rounded-lg bg-black text-white disabled:opacity-40"
+            >
+              {searching ? '찾는 중...' : '찾기'}
+            </button>
+          </div>
+          <p className="text-[10px] text-neutral-400 mb-2">
+            최근 14일 내 조회수 1만 이상 쇼츠를 유튜브에서 검색해서, 채널별로 가장 잘 터진 영상 하나씩만 보여줘요.
+          </p>
+          {searchError && <p className="text-[11px] text-red-500 font-bold mb-2">{searchError}</p>}
+          {searchResults.length > 0 && (
+            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+              {searchResults.map((r) => {
+                const already = mineUrls.has(r.channelUrl) || addedChannelIds.has(r.channelId);
+                return (
+                  <div key={r.videoId} className="flex items-center gap-2 border border-neutral-100 rounded-lg p-2">
+                    {r.thumbnail && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={r.thumbnail} alt="" className="w-14 h-14 object-cover rounded-lg shrink-0 bg-neutral-100" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold truncate block hover:underline">
+                        {r.title}
+                      </a>
+                      <div className="text-[11px] text-neutral-400 mt-0.5">
+                        {r.channelTitle} · 구독자 {r.subscriberLabel} · 조회수 {r.viewsLabel}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => addFromSearch(r)}
+                      disabled={already}
+                      className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40 disabled:bg-neutral-300"
+                    >
+                      {already ? '추가됨' : '+ 채널로 추가'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {showForm && (
         <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-2 space-y-2">
