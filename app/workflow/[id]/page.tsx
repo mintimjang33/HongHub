@@ -7,7 +7,14 @@ import { useParams } from 'next/navigation';
 type Site = { id: string; name: string; workflow_content: string | null };
 type Step = { n: string; name: string; desc: string; status: string };
 type Channel = { id: string; name: string; url: string | null; subscriber_count: string | null; notes: string | null };
-type SourceItem = { id: string; channel_id: string | null; source_url: string | null; title: string; thumbnail_url: string | null };
+type SourceItem = {
+  id: string;
+  channel_id: string | null;
+  source_url: string | null;
+  title: string;
+  thumbnail_url: string | null;
+  transcript: string | null;
+};
 type ChannelVideoResult = { videoId: string; title: string; url: string; views: number; viewsLabel: string; thumbnail: string };
 type ChannelMaterialGroup = { channelId: string; channelName: string; videos: ChannelVideoResult[]; error?: string };
 type DiscoverResult = {
@@ -68,12 +75,11 @@ function parseSteps(markdown: string): Step[] {
 }
 
 // 단계 이름/내용에 등장하는 키워드로 실제 작업 페이지 바로가기 링크를 만들어준다.
-// "채널 발굴"(보통 1번)과 "소재 수집"(보통 2번) 단계는 이 페이지에서 바로 처리할 수 있게
-// 만들어서(ChannelPanel/MaterialPanel) 별도 링크가 필요 없다.
+// "채널 발굴"(1번), "소재 수집"(2번), "대본 수집"(3번) 단계는 이 페이지에서 바로 처리할 수 있게
+// 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
 function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
-  if (isChannelStep(step) || isMaterialStep(step)) return null;
-  if (/대본|자막.*수집/.test(text)) return { href: '/sources?tab=items', label: '🎯 소스 발굴 → 소재 탭에서 "🔗 링크로 가져오기" / "📜 대본"' };
+  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step)) return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
   return null;
 }
@@ -633,6 +639,139 @@ function isMaterialStep(step: Step): boolean {
   return /소재/.test(`${step.name} ${step.desc}`);
 }
 
+function isTranscriptStep(step: Step): boolean {
+  return /대본|자막.*수집/.test(`${step.name} ${step.desc}`);
+}
+
+// 2번에서 등록된 소재들을 훑어보면서 대본(자막)을 붙여넣어 저장하는 패널.
+// 대본 자동 수집은 이 웹앱만으로는 안 되고(U-Caption 크롬 확장 + Claude 필요) 수동 붙여넣기만 지원한다.
+function TranscriptPanel({ siteName }: { siteName: string }) {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [items, setItems] = useState<SourceItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(true);
+  const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
+
+  function load() {
+    setLoading(true);
+    Promise.all([
+      fetch('/api/source-channels').then((r) => r.json()),
+      fetch('/api/source-items').then((r) => r.json()),
+    ])
+      .then(([c, i]) => {
+        setChannels(c.channels || []);
+        setItems(i.items || []);
+      })
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const mineChannelIds = new Set(channels.filter((c) => (c.notes || '').match(CHANNEL_TAG_RE)?.[1] === siteName).map((c) => c.id));
+  const mineItems = items.filter((i) => i.channel_id && mineChannelIds.has(i.channel_id));
+  const withTranscript = mineItems.filter((i) => i.transcript && i.transcript.trim());
+
+  function toggleOpen(item: SourceItem) {
+    if (openItemId === item.id) {
+      setOpenItemId(null);
+      return;
+    }
+    setOpenItemId(item.id);
+    setDraft(item.transcript || '');
+  }
+
+  async function saveTranscript(id: string) {
+    setSaving(true);
+    try {
+      await fetch(`/api/source-items/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: draft }),
+      });
+      load();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-black/5 pt-3">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex items-center gap-1.5 text-xs font-black text-neutral-500 hover:text-black mb-2"
+      >
+        <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+        📜 대본 수집 ({loading ? '...' : `${withTranscript.length}/${mineItems.length}`})
+      </button>
+      <p className="text-[10px] text-neutral-400 mb-2">
+        2번에서 등록한 소재들이에요. 대본은 자동으로 안 채워져서(U-Caption으로 Claude에게 받아오거나 직접 붙여넣기) 하나씩 확인하고 저장해야 해요.
+      </p>
+
+      {expanded && (
+        <div className="space-y-1.5 max-h-[36rem] overflow-y-auto">
+          {mineItems.length === 0 && <p className="text-[11px] text-neutral-300 px-1">2번에서 먼저 소재를 등록해주세요.</p>}
+          {mineItems.map((i) => {
+            const videoId = extractVideoId(i.source_url);
+            const has = !!(i.transcript && i.transcript.trim());
+            return (
+              <div key={i.id} className="bg-white border border-neutral-100 rounded-lg p-2">
+                <div className="flex items-center gap-2">
+                  {i.thumbnail_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={i.thumbnail_url}
+                      alt=""
+                      onClick={() => videoId && setPreviewVideoId(videoId)}
+                      className={`w-10 h-10 object-cover rounded shrink-0 bg-neutral-100 ${videoId ? 'cursor-pointer' : ''}`}
+                    />
+                  )}
+                  <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="flex-1 min-w-0 text-[11px] font-bold truncate text-left hover:underline">
+                    {i.title || i.source_url}
+                  </button>
+                  <button
+                    onClick={() => toggleOpen(i)}
+                    className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border ${
+                      has ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300'
+                    }`}
+                  >
+                    📜 대본 {has ? '있음' : '없음'}
+                  </button>
+                </div>
+                {openItemId === i.id && (
+                  <div className="mt-2 pt-2 border-t border-neutral-100">
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      rows={5}
+                      placeholder="이 영상의 대본/자막 전문을 붙여넣으세요 (U-Caption으로 뽑은 자막 등)"
+                      className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed"
+                    />
+                    <div className="flex justify-end mt-1.5">
+                      <button
+                        onClick={() => saveTranscript(i.id)}
+                        disabled={saving}
+                        className="bg-black text-white text-[11px] font-black px-4 py-2 rounded-lg disabled:opacity-40"
+                      >
+                        {saving ? '저장 중...' : '대본 저장'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {previewVideoId && <VideoPreviewModal videoId={previewVideoId} onClose={() => setPreviewVideoId(null)} />}
+    </div>
+  );
+}
+
 function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
   const s = status || '';
   if (/⚠️|막힘|막히는/.test(s)) return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-600', label: '막힘' };
@@ -696,6 +835,7 @@ function FlowChart({ steps, siteName }: { steps: Step[]; siteName: string }) {
           {active.status && <p className="text-xs text-neutral-500 leading-relaxed border-t border-black/5 pt-3 mb-3">{active.status}</p>}
           {isChannelStep(active) && <ChannelPanel siteName={siteName} />}
           {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
+          {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
           {link && (
             <Link
               href={link.href}
