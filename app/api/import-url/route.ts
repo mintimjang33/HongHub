@@ -96,6 +96,7 @@ export async function POST(request: Request) {
       channel_id: channelId,
       title: meta.title,
       source_url: url,
+      thumbnail_url: meta.image,
       content_type: classification.content_type,
       platform_fit: classification.platform_fit,
       raw_notes: classification.raw_notes,

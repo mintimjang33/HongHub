@@ -25,6 +25,8 @@ export async function POST(request: Request) {
       channel_id: body.channel_id || null,
       title: body.title.trim(),
       source_url: body.source_url?.trim() || null,
+      thumbnail_url: body.thumbnail_url?.trim() || null,
+      transcript: body.transcript || null,
       views: body.views || null,
       content_type: body.content_type || null,
       platform_fit: Array.isArray(body.platform_fit) ? body.platform_fit : [],

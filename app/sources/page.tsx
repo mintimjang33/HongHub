@@ -21,6 +21,8 @@ type SourceItem = {
   channel_id: string | null;
   title: string;
   source_url: string | null;
+  thumbnail_url: string | null;
+  transcript: string | null;
   views: string | null;
   content_type: string | null;
   platform_fit: string[];
@@ -498,6 +500,9 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
   const [importProvider, setImportProvider] = useState<'claude' | 'gemini'>('claude');
   const [importing, setImporting] = useState(false);
   const [importLog, setImportLog] = useState<{ url: string; status: 'ok' | 'dup' | 'error'; message: string }[]>([]);
+  const [openTranscriptId, setOpenTranscriptId] = useState<string | null>(null);
+  const [transcriptDraft, setTranscriptDraft] = useState('');
+  const [savingTranscript, setSavingTranscript] = useState(false);
   const [form, setForm] = useState({
     channel_id: '',
     title: '',
@@ -580,6 +585,29 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
     onChange();
   }
 
+  function toggleTranscript(item: SourceItem) {
+    if (openTranscriptId === item.id) {
+      setOpenTranscriptId(null);
+      return;
+    }
+    setOpenTranscriptId(item.id);
+    setTranscriptDraft(item.transcript || '');
+  }
+
+  async function saveTranscript(id: string) {
+    setSavingTranscript(true);
+    try {
+      await fetch(`/api/source-items/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: transcriptDraft }),
+      });
+      onChange();
+    } finally {
+      setSavingTranscript(false);
+    }
+  }
+
   const STATUSES = ['미가공', '가공완료', '발행완료'];
   const filtered = filterStatus === 'all' ? items : items.filter((i) => i.status === filterStatus);
   const channelName = (id: string | null) => channels.find((c) => c.id === id)?.name;
@@ -589,7 +617,8 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
       <div className="bg-white border border-neutral-200 rounded-xl p-5 mb-4">
         <h3 className="font-black text-sm mb-1">🔗 링크로 가져오기</h3>
         <p className="text-[11px] text-neutral-400 mb-3">
-          쓰레드/유튜브/틱톡/인스타 링크를 한 줄에 하나씩 붙여넣으면, 이미 등록된 건 건너뛰고 새 것만 자동 분석해서 등록해요.
+          쓰레드/유튜브/틱톡/인스타 링크를 한 줄에 하나씩 붙여넣으면, 이미 등록된 건 건너뛰고 새 것만 채널명/제목/썸네일까지 자동으로 가져와서 등록해요.
+          대본은 자동 수집이 안 돼서, 등록된 소재 카드의 &quot;📜 대본&quot; 버튼으로 직접 붙여넣어야 해요.
         </p>
         <textarea
           value={importUrls}
@@ -675,24 +704,46 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
           {filtered.map((it) => (
             <div key={it.id} className="bg-white border border-neutral-200 rounded-xl p-4 shadow-sm">
               <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="font-bold text-sm">{it.title}</div>
-                  <div className="text-[11px] text-neutral-400 mt-1">
-                    {channelName(it.channel_id) && `${channelName(it.channel_id)} · `}
-                    {it.views && `조회수 ${it.views}`}
-                  </div>
-                  {it.raw_notes && <p className="text-xs text-neutral-500 mt-2 whitespace-pre-wrap">{it.raw_notes}</p>}
-                  <div className="flex flex-wrap gap-1.5 mt-2">
-                    {it.content_type && (
-                      <span className="text-[11px] font-bold bg-purple-50 text-purple-600 px-3 py-1 rounded-full">
-                        {CONTENT_TYPE_LABEL[it.content_type] || it.content_type}
-                      </span>
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  {it.thumbnail_url && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={it.thumbnail_url} alt="" className="w-20 h-20 object-cover rounded-lg shrink-0 bg-neutral-100" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    {it.source_url ? (
+                      <a href={it.source_url} target="_blank" rel="noopener noreferrer" className="font-bold text-sm hover:underline">
+                        {it.title}
+                      </a>
+                    ) : (
+                      <div className="font-bold text-sm">{it.title}</div>
                     )}
-                    {(it.platform_fit || []).map((p) => (
-                      <span key={p} className="text-[11px] font-bold bg-blue-50 text-blue-600 px-3 py-1 rounded-full">
-                        {PLATFORMS.find((pf) => pf.value === p)?.label || p}
-                      </span>
-                    ))}
+                    <div className="text-[11px] text-neutral-400 mt-1">
+                      {channelName(it.channel_id) && `${channelName(it.channel_id)} · `}
+                      {it.views && `조회수 ${it.views}`}
+                    </div>
+                    {it.raw_notes && <p className="text-xs text-neutral-500 mt-2 whitespace-pre-wrap">{it.raw_notes}</p>}
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {it.content_type && (
+                        <span className="text-[11px] font-bold bg-purple-50 text-purple-600 px-3 py-1 rounded-full">
+                          {CONTENT_TYPE_LABEL[it.content_type] || it.content_type}
+                        </span>
+                      )}
+                      {(it.platform_fit || []).map((p) => (
+                        <span key={p} className="text-[11px] font-bold bg-blue-50 text-blue-600 px-3 py-1 rounded-full">
+                          {PLATFORMS.find((pf) => pf.value === p)?.label || p}
+                        </span>
+                      ))}
+                      <button
+                        onClick={() => toggleTranscript(it)}
+                        className={`text-[11px] font-bold px-3 py-1 rounded-full border ${
+                          it.transcript
+                            ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                            : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300'
+                        }`}
+                      >
+                        📜 대본 {it.transcript ? '있음' : '없음'}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-2 flex-shrink-0 ml-3">
@@ -712,6 +763,26 @@ function ItemsTab({ items, channels, onChange }: { items: SourceItem[]; channels
                   </button>
                 </div>
               </div>
+              {openTranscriptId === it.id && (
+                <div className="mt-3 border-t border-neutral-100 pt-3">
+                  <textarea
+                    value={transcriptDraft}
+                    onChange={(e) => setTranscriptDraft(e.target.value)}
+                    rows={6}
+                    placeholder="이 영상의 대본/자막 전문을 붙여넣으세요 (U-Caption으로 뽑은 자막 등)"
+                    className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-xs font-mono leading-relaxed"
+                  />
+                  <div className="flex justify-end mt-2">
+                    <button
+                      onClick={() => saveTranscript(it.id)}
+                      disabled={savingTranscript}
+                      className="bg-black text-white text-[11px] font-black px-4 py-2 rounded-lg disabled:opacity-40"
+                    >
+                      {savingTranscript ? '저장 중...' : '대본 저장'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

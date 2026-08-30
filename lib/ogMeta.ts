@@ -22,7 +22,9 @@ export function decodeHtmlEntities(text: string): string {
     .replace(/&#39;/g, "'");
 }
 
-export async function fetchOgMeta(url: string): Promise<{ title: string; description: string; siteName: string; hostname: string }> {
+export async function fetchOgMeta(
+  url: string
+): Promise<{ title: string; description: string; siteName: string; hostname: string; image: string | null }> {
   const hostname = new URL(url).hostname;
   const pageRes = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; HongHubBot/1.0; +https://honghub.vercel.app)' },
@@ -32,5 +34,6 @@ export async function fetchOgMeta(url: string): Promise<{ title: string; descrip
   const title = decodeHtmlEntities(extractMeta(html, 'og:title') || html.match(/<title>([^<]*)<\/title>/i)?.[1] || '제목 없음');
   const description = decodeHtmlEntities(extractMeta(html, 'og:description') || '');
   const siteName = decodeHtmlEntities(extractMeta(html, 'og:site_name') || hostname);
-  return { title, description, siteName, hostname };
+  const image = decodeHtmlEntities(extractMeta(html, 'og:image') || '') || null;
+  return { title, description, siteName, hostname, image };
 }
