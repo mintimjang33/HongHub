@@ -1034,6 +1034,8 @@ type AnalysisTabKey = (typeof ANALYSIS_TABS)[number]['key'];
 function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const [tab, setTab] = useState<AnalysisTabKey>('title');
   const [analyzing, setAnalyzing] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const result = site.analysis_result;
 
@@ -1056,6 +1058,26 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
     }
   }
 
+  // 유료 API 없이 구독(Gemini 웹앱, 또는 이 대화의 Claude)으로 분석하고 싶을 때 쓰는 버튼.
+  // 구독 채팅은 외부에서 자동으로 트리거할 방법이 없어서, 소재 데이터를 프롬프트로 만들어
+  // 클립보드에 복사해주는 것까지만 하고 — 붙여넣기/실행은 사용자가 직접 한다.
+  async function copyPromptForSubscription() {
+    setCopying(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/analysis-prompt?siteId=${site.id}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
+      await navigator.clipboard.writeText(data.prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCopying(false);
+    }
+  }
+
   return (
     <div className="border-t border-black/5 pt-3">
       <div className="flex items-center justify-between mb-2">
@@ -1067,6 +1089,13 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
             🔄 새로고침
           </button>
           <button
+            onClick={copyPromptForSubscription}
+            disabled={copying}
+            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+          >
+            {copying ? '준비 중...' : copied ? '✅ 복사됨!' : '💬 구독으로 분석하기'}
+          </button>
+          <button
             onClick={analyzeWithGemini}
             disabled={analyzing}
             className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
@@ -1076,9 +1105,10 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
         </div>
       </div>
       <p className="text-[10px] text-neutral-400 mb-3">
-        "✨ Gemini Pro로 분석하기"는 Gemini API(유료, gemini-3.1-pro-preview)를 호출해서 2·3번에서 모은
-        소재를 바로 분석·저장해요 — 썸네일 이미지까지 실제로 보고 분석합니다. 비용 없이 하고 싶으면
-        Claude(이 대화)한테 &quot;{site.name} 패턴 분석해줘&quot;라고 요청하셔도 됩니다(무료, 대신 이미지는 못 봄).
+        "✨ Gemini Pro로 분석하기"는 Gemini API(유료, gemini-3.1-pro-preview)를 직접 호출해서 바로 분석·저장해요.
+        "💬 구독으로 분석하기"는 API를 안 쓰고, 소재 데이터를 프롬프트로 만들어 클립보드에 복사만 해줘요(비용 없음)
+        — 그걸 Gemini 웹앱(gemini.google.com, Pro 모델 추천)이나 이 대화의 Claude한테 붙여넣어서 물어보시고,
+        나온 답변을 다시 여기(또는 이 대화)에 붙여넣어주시면 저장해드릴게요.
       </p>
       {error && <p className="text-[11px] text-red-500 font-bold mb-3">{error}</p>}
 
