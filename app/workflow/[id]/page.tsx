@@ -6,6 +6,9 @@ import { useParams } from 'next/navigation';
 
 type Site = { id: string; name: string; workflow_content: string | null };
 type Step = { n: string; name: string; desc: string; status: string };
+type Channel = { id: string; name: string; url: string | null; subscriber_count: string | null; notes: string | null };
+
+const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 
 const TEMPLATE = `# {{프로젝트명}} 워크플로우
 
@@ -50,6 +53,143 @@ function parseSteps(markdown: string): Step[] {
   return steps;
 }
 
+// 단계 이름/내용에 등장하는 키워드로 실제 작업 페이지 바로가기 링크를 만들어준다.
+// 채널 단계는 여기서 바로 추가할 수 있게 만들어서 별도 링크가 필요 없다.
+function stepLink(step: Step): { href: string; label: string } | null {
+  const text = `${step.name} ${step.desc}`;
+  if (/채널/.test(text)) return null;
+  if (/대본|자막.*수집|소재/.test(text)) return { href: '/sources?tab=items', label: '🎯 소스 발굴 → 소재 탭에서 "🔗 링크로 가져오기" / "📜 대본"' };
+  if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
+  return null;
+}
+
+function isChannelStep(step: Step): boolean {
+  return /채널/.test(`${step.name} ${step.desc}`);
+}
+
+// 워크플로우 페이지에서 바로 채널을 추가/조회하는 패널. hub_source_channels에
+// [파이프라인:{siteName}] 태그로 저장하므로, 여기서 추가하면 /pipelines, /sources에도 그대로 반영된다.
+function ChannelPanel({ siteName }: { siteName: string }) {
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ name: '', url: '', subscriber_count: '' });
+
+  function load() {
+    setLoading(true);
+    fetch('/api/source-channels')
+      .then((r) => r.json())
+      .then((d) => setChannels(d.channels || []))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const mine = channels.filter((c) => (c.notes || '').match(CHANNEL_TAG_RE)?.[1] === siteName);
+
+  async function handleAdd() {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    try {
+      await fetch('/api/source-channels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          platform: 'youtube',
+          url: form.url || null,
+          subscriber_count: form.subscriber_count || null,
+          content_types: [],
+          platform_fit: [],
+          notes: `[파이프라인:${siteName}]`,
+          status: '후보',
+        }),
+      });
+      setForm({ name: '', url: '', subscriber_count: '' });
+      setShowForm(false);
+      setExpanded(true);
+      load();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-black/5 pt-3">
+      <div className="flex items-center justify-between mb-2">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-xs font-black text-neutral-500 hover:text-black"
+        >
+          <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
+          🎯 등록된 채널 ({loading ? '...' : mine.length})
+        </button>
+        <button
+          onClick={() => setShowForm((v) => !v)}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800"
+        >
+          + 채널 추가
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-2 space-y-2">
+          <input
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="채널명 *"
+            className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={form.url}
+              onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
+              placeholder="URL"
+              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs"
+            />
+            <input
+              value={form.subscriber_count}
+              onChange={(e) => setForm((f) => ({ ...f, subscriber_count: e.target.value }))}
+              placeholder="구독자수 (예: 5.2만)"
+              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs"
+            />
+          </div>
+          <div className="flex justify-end">
+            <button
+              onClick={handleAdd}
+              disabled={saving || !form.name.trim()}
+              className="text-[11px] font-black px-4 py-2 rounded-lg bg-black text-white disabled:opacity-40"
+            >
+              {saving ? '저장 중...' : '저장'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {expanded && mine.length > 0 && (
+        <div className="space-y-1.5">
+          {mine.map((c) => (
+            <a
+              key={c.id}
+              href={c.url || '#'}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-between gap-2 text-[11px] bg-white hover:bg-neutral-50 border border-neutral-100 rounded-lg px-3 py-2"
+            >
+              <span className="font-bold truncate">{c.name}</span>
+              {c.subscriber_count && <span className="text-neutral-400 flex-shrink-0">{c.subscriber_count}</span>}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
   const s = status || '';
   if (/⚠️|막힘|막히는/.test(s)) return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-600', label: '막힘' };
@@ -60,11 +200,12 @@ function statusTone(status: string): { bg: string; border: string; text: string;
   return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-600', label: status };
 }
 
-function FlowChart({ steps }: { steps: Step[] }) {
+function FlowChart({ steps, siteName }: { steps: Step[]; siteName: string }) {
   const [selected, setSelected] = useState(0);
   if (steps.length === 0) return null;
   const active = steps[Math.min(selected, steps.length - 1)];
   const activeTone = statusTone(active.status);
+  const link = stepLink(active);
 
   return (
     <div className="mb-6 bg-white border border-neutral-200 rounded-xl p-5">
@@ -109,7 +250,16 @@ function FlowChart({ steps }: { steps: Step[] }) {
             </span>
           </div>
           {active.desc && <p className="text-sm text-neutral-600 leading-relaxed mb-3">{active.desc}</p>}
-          {active.status && <p className="text-xs text-neutral-500 leading-relaxed border-t border-black/5 pt-3">{active.status}</p>}
+          {active.status && <p className="text-xs text-neutral-500 leading-relaxed border-t border-black/5 pt-3 mb-3">{active.status}</p>}
+          {isChannelStep(active) && <ChannelPanel siteName={siteName} />}
+          {link && (
+            <Link
+              href={link.href}
+              className="inline-block text-xs font-black text-blue-600 hover:underline border-t border-black/5 pt-3 w-full"
+            >
+              {link.label} →
+            </Link>
+          )}
         </div>
       </div>
     </div>
@@ -187,7 +337,7 @@ export default function WorkflowPage() {
           {savedAt && <span className="text-green-600 font-bold"> · {savedAt} 저장됨</span>}
         </p>
 
-        <FlowChart steps={steps} />
+        <FlowChart steps={steps} siteName={site.name} />
 
         {(showEditor || steps.length === 0) && (
           <textarea

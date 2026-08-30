@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
 // ---- 타입 ----
 type Channel = {
@@ -82,7 +83,17 @@ const TABS = [
 ];
 
 export default function SourcesPage() {
-  const [tab, setTab] = useState('channels');
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-neutral-50 p-10 text-sm text-neutral-400">불러오는 중...</div>}>
+      <SourcesPageInner />
+    </Suspense>
+  );
+}
+
+function SourcesPageInner() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get('tab');
+  const [tab, setTab] = useState(TABS.some((t) => t.value === initialTab) ? (initialTab as string) : 'channels');
   const [channels, setChannels] = useState<Channel[]>([]);
   const [items, setItems] = useState<SourceItem[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);

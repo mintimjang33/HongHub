@@ -51,6 +51,7 @@ export default function PipelinesPage() {
   const [saving, setSaving] = useState(false);
   const [quickName, setQuickName] = useState('');
   const [quickAdding, setQuickAdding] = useState(false);
+  const [expandedChannels, setExpandedChannels] = useState<Record<string, boolean>>({});
 
   function load() {
     Promise.all([
@@ -264,25 +265,31 @@ export default function PipelinesPage() {
                 )}
                 {(channelsByPipeline[s.name] || []).length > 0 && (
                   <div className="border-t border-neutral-100 mt-3 pt-3">
-                    <div className="text-[11px] font-black text-neutral-400 mb-2">
+                    <button
+                      onClick={() => setExpandedChannels((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
+                      className="flex items-center gap-1.5 text-[11px] font-black text-neutral-400 hover:text-black mb-2"
+                    >
+                      <span className={`transition-transform ${expandedChannels[s.id] ? 'rotate-90' : ''}`}>▶</span>
                       🎯 소스 채널 ({channelsByPipeline[s.name].length})
-                    </div>
-                    <div className="space-y-1.5">
-                      {channelsByPipeline[s.name].map((c) => (
-                        <a
-                          key={c.id}
-                          href={c.url || '#'}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center justify-between gap-2 text-[11px] bg-neutral-50 hover:bg-neutral-100 rounded-lg px-3 py-2"
-                        >
-                          <span className="font-bold truncate">{c.name}</span>
-                          {c.subscriber_count && (
-                            <span className="text-neutral-400 flex-shrink-0">{c.subscriber_count}</span>
-                          )}
-                        </a>
-                      ))}
-                    </div>
+                    </button>
+                    {expandedChannels[s.id] && (
+                      <div className="space-y-1.5">
+                        {channelsByPipeline[s.name].map((c) => (
+                          <a
+                            key={c.id}
+                            href={c.url || '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-between gap-2 text-[11px] bg-neutral-50 hover:bg-neutral-100 rounded-lg px-3 py-2"
+                          >
+                            <span className="font-bold truncate">{c.name}</span>
+                            {c.subscriber_count && (
+                              <span className="text-neutral-400 flex-shrink-0">{c.subscriber_count}</span>
+                            )}
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
