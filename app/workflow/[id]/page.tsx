@@ -147,6 +147,22 @@ function VideoPreviewModal({ videoId, onClose }: { videoId: string; onClose: () 
   );
 }
 
+function ImagePreviewModal({ src, onClose }: { src: string; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-black rounded-xl overflow-hidden max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-end p-1.5 bg-neutral-900">
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
+            ✕ 닫기
+          </button>
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={src} alt="" className="w-full max-h-[80vh] object-contain" />
+      </div>
+    </div>
+  );
+}
+
 // 워크플로우 페이지에서 바로 채널을 추가/조회하는 패널. hub_source_channels에
 // [파이프라인:{siteName}] 태그로 저장하므로, 여기서 추가하면 /pipelines, /sources에도 그대로 반영된다.
 function ChannelPanel({ siteName }: { siteName: string }) {
@@ -678,6 +694,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
   const [thumbFetchingIds, setThumbFetchingIds] = useState<Set<string>>(new Set());
   const [durationFetchingIds, setDurationFetchingIds] = useState<Set<string>>(new Set());
   const [openThumbId, setOpenThumbId] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   function load() {
     setLoading(true);
@@ -852,6 +869,11 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     }
   }
 
+  async function deleteItem(id: string) {
+    await fetch(`/api/source-items/${id}`, { method: 'DELETE' });
+    load();
+  }
+
   return (
     <div className="border-t border-black/5 pt-3">
       <button
@@ -875,18 +897,23 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
             const ch = i.channel_id ? channelById.get(i.channel_id) : undefined;
             return (
               <div key={i.id} className="bg-white border border-neutral-100 rounded-lg p-2">
-                <div className="flex-1 min-w-0">
-                  <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="text-[11px] font-bold truncate block text-left hover:underline">
-                    {i.title || i.source_url}
-                  </button>
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {ch && (
-                      <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
-                        {ch.name}
-                      </a>
-                    )}
-                    {i.views && <span className="text-[11px] text-neutral-400">· 조회수 {i.views}</span>}
+                <div className="flex items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="text-[11px] font-bold truncate block text-left hover:underline">
+                      {i.title || i.source_url}
+                    </button>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {ch && (
+                        <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
+                          {ch.name}
+                        </a>
+                      )}
+                      {i.views && <span className="text-[11px] text-neutral-400">· 조회수 {i.views}</span>}
+                    </div>
                   </div>
+                  <button onClick={() => deleteItem(i.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="삭제">
+                    ✕
+                  </button>
                 </div>
                 <div className="flex items-center gap-1.5 flex-wrap mt-2">
                   <button
@@ -938,7 +965,12 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                 {openThumbId === i.id && i.thumbnail_url && (
                   <div className="mt-2 pt-2 border-t border-neutral-100">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={i.thumbnail_url} alt="" className="max-w-[200px] rounded-lg" />
+                    <img
+                      src={i.thumbnail_url}
+                      alt=""
+                      onClick={() => setPreviewImage(i.thumbnail_url)}
+                      className="max-w-[200px] rounded-lg cursor-pointer hover:opacity-90"
+                    />
                   </div>
                 )}
                 {openItemId === i.id && (
@@ -968,6 +1000,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
         </div>
       )}
       {previewVideoId && <VideoPreviewModal videoId={previewVideoId} onClose={() => setPreviewVideoId(null)} />}
+      {previewImage && <ImagePreviewModal src={previewImage} onClose={() => setPreviewImage(null)} />}
     </div>
   );
 }
