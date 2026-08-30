@@ -12,6 +12,7 @@ type Site = {
   notes: string | null;
   start_date: string | null;
   plan_content: string | null;
+  workflow_content: string | null;
 };
 
 type Channel = {
@@ -227,6 +228,9 @@ export default function PipelinesPage() {
                   {s.start_date && <span>📅 {s.start_date} 시작</span>}
                   <Link href={`/plan/${s.id}`} className="text-blue-500 font-bold hover:underline">
                     📋 {s.plan_content ? '계획서 보기' : '계획서 작성'}
+                  </Link>
+                  <Link href={`/workflow/${s.id}`} className="text-emerald-600 font-bold hover:underline">
+                    🔧 {s.workflow_content ? '워크플로우 보기' : '워크플로우 작성'}
                   </Link>
                 </div>
                 {((s.benchmark_url && s.benchmark_url.length > 0) || (s.learning_url && s.learning_url.length > 0)) && (

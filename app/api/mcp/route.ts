@@ -74,6 +74,12 @@ const baseHandler = createMcpHandler(
           notes: z.string().optional(),
           start_date: z.string().optional().describe('시작일 (YYYY-MM-DD)'),
           plan_content: z.string().optional().describe('계획서 본문(마크다운). PLAN_TEMPLATE.md 구조 권장.'),
+          workflow_content: z
+            .string()
+            .optional()
+            .describe(
+              '워크플로우 본문(마크다운) — 계획서(plan_content)와는 별개 섹션. "무엇을 벤치마킹하는지"가 계획서라면, 이건 "어떤 순서로 어떤 도구를 쓰는지"만 담는다. 파이프라인(코드 아닌 콘텐츠 제작 워크플로) 항목마다 각자 따로 둔다 — 여러 파이프라인이 공유하는 문서로 만들지 말 것.'
+            ),
         }),
       },
       async (args) => {
@@ -113,6 +119,12 @@ const baseHandler = createMcpHandler(
           notes: z.string().optional(),
           start_date: z.string().optional(),
           plan_content: z.string().optional().describe('계획서 본문(마크다운) 통째로 교체. 진행 기록에 이어붙이려면 먼저 list_sites로 기존 내용을 읽고 합쳐서 넘길 것.'),
+          workflow_content: z
+            .string()
+            .optional()
+            .describe(
+              '워크플로우 본문(마크다운) 통째로 교체 — 계획서(plan_content)와는 별개 섹션. 이어붙이려면 먼저 list_sites로 기존 내용을 읽고 합쳐서 넘길 것. 파이프라인마다 각자 따로 두는 것이지 여러 파이프라인이 공유하는 문서가 아니다.'
+            ),
         }),
       },
       async ({ id, ...fields }) => {
