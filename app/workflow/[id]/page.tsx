@@ -4,7 +4,15 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
-type Site = { id: string; name: string; workflow_content: string | null };
+type AnalysisResult = {
+  title?: string;
+  script?: string;
+  thumbnail?: string;
+  duration?: string;
+  pace?: string;
+  updated_at?: string;
+};
+type Site = { id: string; name: string; workflow_content: string | null; analysis_result: AnalysisResult | null };
 type Step = { n: string; name: string; desc: string; status: string };
 type Channel = { id: string; name: string; url: string | null; subscriber_count: string | null; notes: string | null };
 type SourceItem = {
@@ -674,7 +682,9 @@ function isMaterialStep(step: Step): boolean {
 }
 
 function isTranscriptStep(step: Step): boolean {
-  return /대본|자막.*수집/.test(`${step.name} ${step.desc}`);
+  // 단순히 "대본"만 매칭하면 4번(제목/썸네일/대본에서... 분석)·5번(대본 작성) 설명에 "대본"이
+  // 스쳐지나가는 것까지 걸려버리므로, "대본...수집" 처럼 수집이 뒤에 나오는 경우만 매칭한다.
+  return /대본.*수집|자막.*수집/.test(`${step.name} ${step.desc}`);
 }
 
 // 2번에서 등록된 소재들을 훑어보면서 대본(자막)을 붙여넣어 저장하는 패널.
@@ -1009,16 +1019,6 @@ function isAnalysisStep(step: Step): boolean {
   return /분석/.test(`${step.name} ${step.desc}`);
 }
 
-type AnalysisResult = {
-  title: string;
-  script: string;
-  thumbnail: string;
-  durationStats: { count: number; avg: number; min: number; max: number } | null;
-  paceStats: { count: number; avgCharsPerSec: number } | null;
-  analyzedCount: number;
-  totalCount: number;
-};
-
 const ANALYSIS_TABS = [
   { key: 'title', label: '제목' },
   { key: 'thumbnail', label: '썸네일' },
@@ -1028,98 +1028,48 @@ const ANALYSIS_TABS = [
 ] as const;
 type AnalysisTabKey = (typeof ANALYSIS_TABS)[number]['key'];
 
-// 2·3번에서 모은 소재(제목/썸네일/대본/길이/조회수)를 AI로 분석해서 탭별로 보여준다.
-// 리스트가 아니라 "패턴 요약"이 목적이라 항목별 나열 UI가 아니라 탭 전환 UI로 만든다.
-function AnalysisPanel({ siteName }: { siteName: string }) {
+// 2·3번에서 모은 소재를 웹앱이 유료 API로 직접 분석하지 않는다 — Claude(구독)나 Gemini한테
+// 채팅으로 "OO 파이프라인 패턴 분석해줘"라고 요청하면, save_pipeline_analysis MCP 툴로
+// 여기(hub_sites.analysis_result)에 저장되고, 이 패널은 그 저장된 결과를 읽어서 탭으로 보여주기만 한다.
+function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const [tab, setTab] = useState<AnalysisTabKey>('title');
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [error, setError] = useState('');
-
-  async function analyze() {
-    setAnalyzing(true);
-    setError('');
-    try {
-      const res = await fetch('/api/analyze-materials', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteName }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '분석 실패');
-      setResult(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setAnalyzing(false);
-    }
-  }
+  const result = site.analysis_result;
 
   return (
     <div className="border-t border-black/5 pt-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-black text-neutral-500">
-          🔍 패턴 분석{result && ` — 조회수 상위 ${result.analyzedCount}/${result.totalCount}개 기준`}
+          🔍 패턴 분석{result?.updated_at && ` — ${new Date(result.updated_at).toLocaleString('ko-KR')} 기준`}
         </span>
-        <button
-          onClick={analyze}
-          disabled={analyzing}
-          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
-        >
-          {analyzing ? '분석 중...' : result ? '🔄 다시 분석하기' : '🔍 패턴 분석하기'}
+        <button onClick={onRefresh} className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white">
+          🔄 새로고침
         </button>
       </div>
-      <p className="text-[10px] text-neutral-400 mb-2">
-        2번(제목/썸네일/조회수)·3번(대본)에서 모은 소재를 AI로 분석해요. 다시 분석하면 이전 결과를 덮어써요(저장은 안 됨).
+      <p className="text-[10px] text-neutral-400 mb-3">
+        여기서 직접 분석하지 않아요 — Claude(이 대화)나 Gemini한테 "{site.name} 패턴 분석해줘"라고 요청하면
+        2번(제목/썸네일/조회수)·3번(대본)에서 모은 소재를 보고 분석해서 여기 저장해줘요. 유료 API 호출 없이 구독으로 처리돼요.
       </p>
 
-      {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
+      <div className="flex gap-1.5 mb-3 border-b border-neutral-100">
+        {ANALYSIS_TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`text-[11px] font-black px-3 py-2 border-b-2 -mb-px ${
+              tab === t.key ? 'border-black text-black' : 'border-transparent text-neutral-400 hover:text-black'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      {result && (
-        <div>
-          <div className="flex gap-1.5 mb-3 border-b border-neutral-100">
-            {ANALYSIS_TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`text-[11px] font-black px-3 py-2 border-b-2 -mb-px ${
-                  tab === t.key ? 'border-black text-black' : 'border-transparent text-neutral-400 hover:text-black'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {(tab === 'title' || tab === 'script' || tab === 'thumbnail') && (
-            <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">
-              {tab === 'title' ? result.title : tab === 'script' ? result.script : result.thumbnail}
-            </p>
-          )}
-
-          {tab === 'duration' &&
-            (result.durationStats ? (
-              <div className="text-xs text-neutral-600 leading-relaxed space-y-1">
-                <p>분석 대상 {result.durationStats.count}개 기준</p>
-                <p>평균 길이: {fmtDuration(result.durationStats.avg)}</p>
-                <p>
-                  범위: {fmtDuration(result.durationStats.min)} ~ {fmtDuration(result.durationStats.max)}
-                </p>
-              </div>
-            ) : (
-              <p className="text-xs text-neutral-300">길이 데이터가 있는 소재가 없어요 — 2·3번에서 "⏱ 길이 가져오기"로 채워주세요.</p>
-            ))}
-
-          {tab === 'pace' &&
-            (result.paceStats ? (
-              <div className="text-xs text-neutral-600 leading-relaxed space-y-1">
-                <p>분석 대상 {result.paceStats.count}개 기준 (대본+길이 둘 다 있는 것만)</p>
-                <p>평균 나레이션 속도: 초당 {result.paceStats.avgCharsPerSec}자</p>
-              </div>
-            ) : (
-              <p className="text-xs text-neutral-300">대본과 길이가 둘 다 있는 소재가 아직 없어요.</p>
-            ))}
-        </div>
+      {result?.[tab] ? (
+        <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{result[tab]}</p>
+      ) : (
+        <p className="text-xs text-neutral-300">
+          아직 &quot;{ANALYSIS_TABS.find((t) => t.key === tab)?.label}&quot; 분석 결과가 없어요 — Claude나 Gemini한테 분석을 요청해보세요.
+        </p>
       )}
     </div>
   );
@@ -1137,15 +1087,18 @@ function statusTone(status: string): { bg: string; border: string; text: string;
 
 function FlowChart({
   steps,
-  siteName,
+  site,
   selected,
   onSelect,
+  onRefreshSite,
 }: {
   steps: Step[];
-  siteName: string;
+  site: Site;
   selected: number;
   onSelect: (i: number) => void;
+  onRefreshSite: () => void;
 }) {
+  const siteName = site.name;
   if (steps.length === 0) return null;
   const active = steps[Math.min(selected, steps.length - 1)];
   const activeTone = statusTone(active.status);
@@ -1198,7 +1151,7 @@ function FlowChart({
           {isChannelStep(active) && <ChannelPanel siteName={siteName} />}
           {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
           {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
-          {isAnalysisStep(active) && <AnalysisPanel siteName={siteName} />}
+          {isAnalysisStep(active) && <AnalysisPanel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
@@ -1239,7 +1192,7 @@ function WorkflowPageInner() {
     router.replace(`/workflow/${id}?step=${i + 1}`, { scroll: false });
   }
 
-  useEffect(() => {
+  function loadSite() {
     fetch('/api/sites')
       .then((r) => r.json())
       .then((d) => {
@@ -1247,6 +1200,11 @@ function WorkflowPageInner() {
         setSite(found || null);
         setContent(found?.workflow_content || '');
       });
+  }
+
+  useEffect(() => {
+    loadSite();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const steps = useMemo(() => parseSteps(content), [content]);
@@ -1301,7 +1259,7 @@ function WorkflowPageInner() {
           {savedAt && <span className="text-green-600 font-bold"> · {savedAt} 저장됨</span>}
         </p>
 
-        <FlowChart steps={steps} siteName={site.name} selected={selectedStep} onSelect={selectStep} />
+        <FlowChart steps={steps} site={site} selected={selectedStep} onSelect={selectStep} onRefreshSite={loadSite} />
 
         {(showEditor || steps.length === 0) && (
           <textarea

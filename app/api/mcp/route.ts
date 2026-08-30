@@ -729,6 +729,112 @@ const baseHandler = createMcpHandler(
     );
 
     server.registerTool(
+      'get_pipeline_materials_for_analysis',
+      {
+        description:
+          '워크플로우 4번(분석) 단계용 — 파이프라인 이름으로 그 파이프라인의 2번(제목/썸네일/조회수)·3번(대본)에서 ' +
+          '모은 소재 원본 데이터를 가져온다. 이 웹앱은 유료 API로 직접 분석하지 않으므로, 이 툴로 데이터를 받아서 ' +
+          'Claude(이 대화)가 직접 제목/썸네일(이미지 URL 보고)/대본의 공통 패턴을 분석한 뒤, ' +
+          'save_pipeline_analysis 툴로 그 결과를 저장해준다.',
+        inputSchema: z.object({
+          site_name: z.string().describe('파이프라인 이름 (예: 공학, 경제학)'),
+          limit: z.number().optional().describe('조회수 상위 몇 개까지 볼지 (기본 15)'),
+        }),
+      },
+      async ({ site_name, limit }) => {
+        const supabase = getSupabaseServerClient();
+        const { data: channelsData } = await supabase.from('hub_source_channels').select('id, notes');
+        const tagRe = /^\[파이프라인:([^\]]+)\]\s*/;
+        const mineChannelIds = (channelsData || [])
+          .filter((c) => c.notes?.match(tagRe)?.[1] === site_name)
+          .map((c) => c.id);
+        if (mineChannelIds.length === 0) {
+          return { content: [{ type: 'text', text: `"${site_name}" 파이프라인에 등록된 채널이 없습니다.` }] };
+        }
+
+        const { data: itemsData, error } = await supabase
+          .from('hub_source_items')
+          .select('title, thumbnail_url, transcript, duration_seconds, views')
+          .in('channel_id', mineChannelIds);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+
+        const items = itemsData || [];
+        if (items.length === 0) return { content: [{ type: 'text', text: `"${site_name}"에 등록된 소재가 없습니다.` }] };
+
+        function parseViews(label: string | null): number {
+          const m = (label || '').match(/([\d.]+)\s*(억|만|천)?/);
+          if (!m) return 0;
+          const n = parseFloat(m[1]);
+          return m[2] === '억' ? n * 1e8 : m[2] === '만' ? n * 1e4 : m[2] === '천' ? n * 1e3 : n;
+        }
+        const top = [...items].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, limit || 15);
+
+        const durations = items.map((i) => i.duration_seconds).filter((n): n is number => !!n);
+        const paces = items.filter((i) => i.transcript && i.duration_seconds).map((i) => i.transcript!.length / i.duration_seconds!);
+
+        const lines = top.map((i, idx) => {
+          const parts = [`[${idx + 1}] "${i.title}"`, `조회수 ${i.views || '?'}`];
+          if (i.duration_seconds) parts.push(`길이 ${Math.floor(i.duration_seconds / 60)}:${String(i.duration_seconds % 60).padStart(2, '0')}`);
+          if (i.thumbnail_url) parts.push(`썸네일: ${i.thumbnail_url}`);
+          let line = parts.join(' | ');
+          if (i.transcript && i.transcript.trim().length > 20) line += `\n  대본: ${i.transcript.slice(0, 800)}`;
+          return line;
+        });
+
+        const statsText = [
+          durations.length > 0
+            ? `길이 통계(${durations.length}개): 평균 ${Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)}초, 범위 ${Math.min(...durations)}~${Math.max(...durations)}초`
+            : '길이 데이터 없음',
+          paces.length > 0
+            ? `나레이션 속도(${paces.length}개, 대본자수÷길이초): 평균 초당 ${(paces.reduce((a, b) => a + b, 0) / paces.length).toFixed(1)}자`
+            : '속도 계산 가능한 소재(대본+길이 둘 다 있는 것) 없음',
+        ].join('\n');
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `"${site_name}" 조회수 상위 ${top.length}/${items.length}개:\n\n${lines.join('\n\n')}\n\n--- 계산된 통계 (참고용, 그대로 저장해도 됨) ---\n${statsText}`,
+            },
+          ],
+        };
+      }
+    );
+
+    server.registerTool(
+      'save_pipeline_analysis',
+      {
+        description:
+          'get_pipeline_materials_for_analysis로 받은 데이터를 Claude(이 대화)가 직접 분석한 결과를 저장한다. ' +
+          '워크플로우 페이지 4번 탭(제목/썸네일/대본/시간/속도)에 그대로 표시된다. 넘긴 필드만 갱신되고 나머지는 유지된다.',
+        inputSchema: z.object({
+          site_id: z.string().describe('파이프라인의 hub_sites id (list_sites로 확인)'),
+          title: z.string().optional().describe('제목 패턴 분석 결과'),
+          thumbnail: z.string().optional().describe('썸네일 패턴 분석 결과 (이미지 URL을 직접 보고 분석)'),
+          script: z.string().optional().describe('대본 패턴 분석 결과'),
+          duration: z.string().optional().describe('영상 길이 분석/통계 정리'),
+          pace: z.string().optional().describe('나레이션 속도 분석/통계 정리'),
+        }),
+      },
+      async ({ site_id, title, thumbnail, script, duration, pace }) => {
+        const supabase = getSupabaseServerClient();
+        const { data: existing } = await supabase.from('hub_sites').select('analysis_result').eq('id', site_id).maybeSingle();
+        const merged = {
+          ...(existing?.analysis_result || {}),
+          ...(title !== undefined && { title }),
+          ...(thumbnail !== undefined && { thumbnail }),
+          ...(script !== undefined && { script }),
+          ...(duration !== undefined && { duration }),
+          ...(pace !== undefined && { pace }),
+          updated_at: new Date().toISOString(),
+        };
+        const { error } = await supabase.from('hub_sites').update({ analysis_result: merged, updated_at: new Date().toISOString() }).eq('id', site_id);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: 'OK — 저장됨' }] };
+      }
+    );
+
+    server.registerTool(
       'list_personas',
       {
         description: '콘텐츠 생성에 쓸 수 있는 페르소나 목록을 조회한다 (유쓰레드의 ut_personas + 기본 제공 ut_system_personas를 합쳐서 반환).',

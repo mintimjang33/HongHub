@@ -33,6 +33,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   ];
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const f of fields) if (f in body) update[f] = ARRAY_FIELDS.has(f) ? toUrlArray(body[f]) : body[f] || null;
+  if ('analysis_result' in body) update.analysis_result = body.analysis_result || null;
 
   const supabase = getSupabaseServerClient();
   const { data, error } = await supabase.from('hub_sites').update(update).eq('id', id).select().single();
