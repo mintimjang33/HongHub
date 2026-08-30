@@ -15,6 +15,7 @@ type SourceItem = {
   thumbnail_url: string | null;
   transcript: string | null;
   duration_seconds: number | null;
+  views: string | null;
 };
 type ChannelVideoResult = {
   videoId: string;
@@ -802,7 +803,14 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ thumbnail_url: data.image }),
         });
+        setFetchErrors((prev) => {
+          const next = { ...prev };
+          delete next[item.id];
+          return next;
+        });
         load();
+      } else {
+        setFetchErrors((prev) => ({ ...prev, [item.id]: data.error || '썸네일을 못 가져왔어요.' }));
       }
     } finally {
       setThumbFetchingIds((prev) => {
@@ -825,7 +833,14 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ duration_seconds: data.seconds }),
         });
+        setFetchErrors((prev) => {
+          const next = { ...prev };
+          delete next[item.id];
+          return next;
+        });
         load();
+      } else {
+        setFetchErrors((prev) => ({ ...prev, [item.id]: data.error || '영상 길이를 못 가져왔어요.' }));
       }
     } finally {
       setDurationFetchingIds((prev) => {
@@ -877,13 +892,13 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                     <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="text-[11px] font-bold truncate block text-left hover:underline">
                       {i.title || i.source_url}
                     </button>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       {ch && (
                         <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
                           {ch.name}
                         </a>
                       )}
-                      {i.duration_seconds ? <span className="text-[11px] text-neutral-400">· ⏱ {fmtDuration(i.duration_seconds)}</span> : null}
+                      {i.views && <span className="text-[11px] text-neutral-400">· 조회수 {i.views}</span>}
                     </div>
                   </div>
                   <button
@@ -900,7 +915,9 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                   >
                     {fetchingIds.has(i.id) ? '가져오는 중...' : '🎬 자동 가져오기'}
                   </button>
-                  {!i.thumbnail_url && (
+                  {i.thumbnail_url ? (
+                    <span className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-neutral-50 text-neutral-500 border-neutral-200">🖼 썸네일 있음</span>
+                  ) : (
                     <button
                       onClick={() => fetchThumbnail(i)}
                       disabled={thumbFetchingIds.has(i.id)}
@@ -909,7 +926,9 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                       {thumbFetchingIds.has(i.id) ? '가져오는 중...' : '🖼 썸네일 가져오기'}
                     </button>
                   )}
-                  {!i.duration_seconds && (
+                  {i.duration_seconds ? (
+                    <span className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-neutral-50 text-neutral-500 border-neutral-200">⏱ {fmtDuration(i.duration_seconds)}</span>
+                  ) : (
                     <button
                       onClick={() => fetchDuration(i)}
                       disabled={durationFetchingIds.has(i.id)}
