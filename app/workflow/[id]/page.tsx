@@ -915,28 +915,26 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                   >
                     {fetchingIds.has(i.id) ? '가져오는 중...' : '🎬 자동 가져오기'}
                   </button>
-                  {i.thumbnail_url ? (
-                    <span className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-neutral-50 text-neutral-500 border-neutral-200">🖼 썸네일 있음</span>
-                  ) : (
-                    <button
-                      onClick={() => fetchThumbnail(i)}
-                      disabled={thumbFetchingIds.has(i.id)}
-                      className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
-                    >
-                      {thumbFetchingIds.has(i.id) ? '가져오는 중...' : '🖼 썸네일 가져오기'}
-                    </button>
-                  )}
-                  {i.duration_seconds ? (
-                    <span className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-neutral-50 text-neutral-500 border-neutral-200">⏱ {fmtDuration(i.duration_seconds)}</span>
-                  ) : (
-                    <button
-                      onClick={() => fetchDuration(i)}
-                      disabled={durationFetchingIds.has(i.id)}
-                      className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
-                    >
-                      {durationFetchingIds.has(i.id) ? '가져오는 중...' : '⏱ 길이 가져오기'}
-                    </button>
-                  )}
+                  <button
+                    onClick={() => fetchThumbnail(i)}
+                    disabled={thumbFetchingIds.has(i.id)}
+                    title="다시 가져오기"
+                    className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border disabled:opacity-40 ${
+                      i.thumbnail_url ? 'bg-neutral-50 text-neutral-500 border-neutral-200 hover:border-neutral-300' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300'
+                    }`}
+                  >
+                    {thumbFetchingIds.has(i.id) ? '가져오는 중...' : i.thumbnail_url ? '🖼 썸네일 있음' : '🖼 썸네일 가져오기'}
+                  </button>
+                  <button
+                    onClick={() => fetchDuration(i)}
+                    disabled={durationFetchingIds.has(i.id)}
+                    title="다시 가져오기"
+                    className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border disabled:opacity-40 ${
+                      i.duration_seconds ? 'bg-neutral-50 text-neutral-500 border-neutral-200 hover:border-neutral-300' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300'
+                    }`}
+                  >
+                    {durationFetchingIds.has(i.id) ? '가져오는 중...' : i.duration_seconds ? `⏱ ${fmtDuration(i.duration_seconds)}` : '⏱ 길이 가져오기'}
+                  </button>
                   <button
                     onClick={() => toggleOpen(i)}
                     className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border ${
