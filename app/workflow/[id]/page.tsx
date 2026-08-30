@@ -13,7 +13,21 @@ type AnalysisResult = {
   pace?: string;
   updated_at?: string;
 };
-type Site = { id: string; name: string; workflow_content: string | null; analysis_result: AnalysisResult | null };
+type ScriptDraft = {
+  materials?: string[];
+  selectedMaterial?: string;
+  titles?: string[];
+  selectedTitle?: string;
+  script?: string;
+  updated_at?: string;
+};
+type Site = {
+  id: string;
+  name: string;
+  workflow_content: string | null;
+  analysis_result: AnalysisResult | null;
+  script_draft: ScriptDraft | null;
+};
 type Step = { n: string; name: string; desc: string; status: string };
 type Channel = { id: string; name: string; url: string | null; subscriber_count: string | null; notes: string | null };
 type SourceItem = {
@@ -99,7 +113,7 @@ function parseSteps(markdown: string): Step[] {
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
 function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
-  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step) || isAnalysisStep(step)) return null;
+  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step) || isAnalysisStep(step) || isScriptStep(step)) return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
   return null;
 }
@@ -1017,7 +1031,12 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
 }
 
 function isAnalysisStep(step: Step): boolean {
-  return /분석/.test(`${step.name} ${step.desc}`);
+  // desc까지 같이 보면 5번("4번 분석 기반...")의 desc에 "분석"이 스쳐지나가는 것까지 걸리므로 name만 본다.
+  return /분석/.test(step.name);
+}
+
+function isScriptStep(step: Step): boolean {
+  return /대본\s*작성/.test(step.name);
 }
 
 const ANALYSIS_TABS = [
@@ -1164,6 +1183,281 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
   );
 }
 
+// 5번(대본 작성) 단계 패널 — 소재 추천 → 제목 추천 → 대본, 3단계를 순서대로 진행한다.
+// 각 단계는 4번과 동일한 하이브리드 방식(유료 Gemini Pro / 무료 구독-복사)을 쓴다.
+function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const draft = site.script_draft || {};
+  const [generating, setGenerating] = useState<'materials' | 'titles' | 'script' | null>(null);
+  const [copying, setCopying] = useState<'materials' | 'titles' | 'script' | null>(null);
+  const [copied, setCopied] = useState<'materials' | 'titles' | 'script' | null>(null);
+  const [pasteOpen, setPasteOpen] = useState<'materials' | 'titles' | 'script' | null>(null);
+  const [pasteText, setPasteText] = useState('');
+  const [scriptDraftText, setScriptDraftText] = useState(draft.script || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setScriptDraftText(draft.script || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.script]);
+
+  async function generate(stage: 'materials' | 'titles' | 'script') {
+    setGenerating(stage);
+    setError('');
+    try {
+      const body: Record<string, string> = { siteId: site.id, stage };
+      if (stage === 'titles') body.material = draft.selectedMaterial || '';
+      if (stage === 'script') body.title = draft.selectedTitle || '';
+      const res = await fetch('/api/script-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '생성 실패');
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGenerating(null);
+    }
+  }
+
+  async function copyPrompt(stage: 'materials' | 'titles' | 'script') {
+    setCopying(stage);
+    setError('');
+    try {
+      const q = new URLSearchParams({ siteId: site.id, stage });
+      if (stage === 'titles') q.set('material', draft.selectedMaterial || '');
+      if (stage === 'script') q.set('title', draft.selectedTitle || '');
+      const res = await fetch(`/api/script-draft?${q}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
+      await navigator.clipboard.writeText(data.prompt);
+      setCopied(stage);
+      setPasteOpen(stage);
+      setPasteText('');
+      setTimeout(() => setCopied((cur) => (cur === stage ? null : cur)), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCopying(null);
+    }
+  }
+
+  async function savePasted(stage: 'materials' | 'titles' | 'script') {
+    if (!pasteText.trim()) return;
+    setSaving(true);
+    setError('');
+    try {
+      const patch: Record<string, unknown> = { siteId: site.id };
+      if (stage === 'materials') {
+        patch.materials = pasteText.split('\n').map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
+      } else if (stage === 'titles') {
+        patch.titles = pasteText.split('\n').map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
+      } else {
+        patch.script = pasteText.trim();
+      }
+      const res = await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '저장 실패');
+      setPasteOpen(null);
+      setPasteText('');
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function selectMaterial(m: string) {
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, selectedMaterial: m }),
+    });
+    onRefresh();
+  }
+
+  async function selectTitle(t: string) {
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, selectedTitle: t }),
+    });
+    onRefresh();
+  }
+
+  async function saveScript() {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, script: scriptDraftText }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetAll() {
+    if (!confirm('소재/제목/대본 선택을 전부 초기화할까요?')) return;
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, materials: null, selectedMaterial: null, titles: null, selectedTitle: null, script: null }),
+    });
+    onRefresh();
+  }
+
+  function GenerateButtons({ stage }: { stage: 'materials' | 'titles' | 'script' }) {
+    return (
+      <div className="flex gap-1.5 mb-2">
+        <button
+          onClick={() => copyPrompt(stage)}
+          disabled={copying === stage}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+        >
+          {copying === stage ? '준비 중...' : copied === stage ? '✅ 복사됨!' : '💬 구독으로 만들기'}
+        </button>
+        <button
+          onClick={() => generate(stage)}
+          disabled={generating === stage}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
+        >
+          {generating === stage ? '만드는 중... (1분 정도)' : '✨ Gemini Pro로 만들기'}
+        </button>
+      </div>
+    );
+  }
+
+  function PasteBox({ stage }: { stage: 'materials' | 'titles' | 'script' }) {
+    if (pasteOpen !== stage) return null;
+    return (
+      <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 mb-2">
+        <textarea
+          value={pasteText}
+          onChange={(e) => setPasteText(e.target.value)}
+          rows={stage === 'script' ? 6 : 4}
+          placeholder="구독 채팅(Gemini/Claude) 답변을 여기에 붙여넣으세요"
+          className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+        />
+        <div className="flex justify-end gap-1.5">
+          <button onClick={() => setPasteOpen(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+            취소
+          </button>
+          <button
+            onClick={() => savePasted(stage)}
+            disabled={saving || !pasteText.trim()}
+            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+          >
+            {saving ? '저장 중...' : '붙여넣기 저장'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-black/5 pt-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-black text-neutral-500">
+          ✍️ 대본 작성 — 소재 추천 → 제목 추천 → 대본
+        </span>
+        <button onClick={resetAll} className="text-[11px] font-bold text-neutral-400 hover:text-red-500 px-2">
+          🔄 처음부터
+        </button>
+      </div>
+      {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
+
+      {/* 1단계: 소재 추천 */}
+      <div className="bg-white border border-neutral-100 rounded-lg p-3 mb-2">
+        <div className="text-[11px] font-black text-neutral-500 mb-2">1️⃣ 소재 추천</div>
+        <GenerateButtons stage="materials" />
+        <PasteBox stage="materials" />
+        {draft.materials && draft.materials.length > 0 ? (
+          <div className="space-y-1">
+            {draft.materials.map((m, idx) => (
+              <label
+                key={idx}
+                className={`flex items-start gap-2 text-[11px] rounded-lg px-2.5 py-2 cursor-pointer border ${
+                  draft.selectedMaterial === m ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-neutral-100 hover:border-neutral-300'
+                }`}
+              >
+                <input type="radio" checked={draft.selectedMaterial === m} onChange={() => selectMaterial(m)} className="mt-0.5" />
+                <span className="leading-relaxed">{m}</span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-neutral-300">아직 추천받은 소재가 없어요.</p>
+        )}
+      </div>
+
+      {/* 2단계: 제목 추천 — 소재를 고른 다음에만 진행 */}
+      {draft.selectedMaterial && (
+        <div className="bg-white border border-neutral-100 rounded-lg p-3 mb-2">
+          <div className="text-[11px] font-black text-neutral-500 mb-1">2️⃣ 제목 추천</div>
+          <p className="text-[10px] text-neutral-400 mb-2">선택한 소재: {draft.selectedMaterial}</p>
+          <GenerateButtons stage="titles" />
+          <PasteBox stage="titles" />
+          {draft.titles && draft.titles.length > 0 ? (
+            <div className="space-y-1">
+              {draft.titles.map((t, idx) => (
+                <label
+                  key={idx}
+                  className={`flex items-start gap-2 text-[11px] rounded-lg px-2.5 py-2 cursor-pointer border ${
+                    draft.selectedTitle === t ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-neutral-100 hover:border-neutral-300'
+                  }`}
+                >
+                  <input type="radio" checked={draft.selectedTitle === t} onChange={() => selectTitle(t)} className="mt-0.5" />
+                  <span className="leading-relaxed font-bold">{t}</span>
+                </label>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-neutral-300">아직 추천받은 제목이 없어요.</p>
+          )}
+        </div>
+      )}
+
+      {/* 3단계: 대본 — 제목을 고른 다음에만 진행 */}
+      {draft.selectedTitle && (
+        <div className="bg-white border border-neutral-100 rounded-lg p-3">
+          <div className="text-[11px] font-black text-neutral-500 mb-1">3️⃣ 대본</div>
+          <p className="text-[10px] text-neutral-400 mb-2">선택한 제목: {draft.selectedTitle}</p>
+          <GenerateButtons stage="script" />
+          <PasteBox stage="script" />
+          <textarea
+            value={scriptDraftText}
+            onChange={(e) => setScriptDraftText(e.target.value)}
+            rows={8}
+            placeholder="위 버튼으로 대본을 만들거나 직접 작성하세요"
+            className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-neutral-300">{scriptDraftText.length.toLocaleString()}자</span>
+            <button
+              onClick={saveScript}
+              disabled={saving}
+              className="bg-black text-white text-[11px] font-black px-4 py-2 rounded-lg disabled:opacity-40"
+            >
+              {saving ? '저장 중...' : '대본 저장'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
   const s = status || '';
   if (/⚠️|막힘|막히는/.test(s)) return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-600', label: '막힘' };
@@ -1241,6 +1535,7 @@ function FlowChart({
           {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
           {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
           {isAnalysisStep(active) && <AnalysisPanel site={site} onRefresh={onRefreshSite} />}
+          {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
