@@ -78,6 +78,24 @@ function stepLink(step: Step): { href: string; label: string } | null {
   return null;
 }
 
+// 저장된 소재는 videoId 없이 유튜브 URL(source_url)만 갖고 있으므로, 미리보기 모달을 쓰려면
+// URL 형태(watch?v=, youtu.be/, shorts/)에서 videoId를 다시 뽑아내야 한다.
+function extractVideoId(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0] || null;
+    if (u.hostname.endsWith('youtube.com')) {
+      if (u.pathname === '/watch') return u.searchParams.get('v');
+      const shortsMatch = u.pathname.match(/^\/shorts\/([^/?]+)/);
+      if (shortsMatch) return shortsMatch[1];
+    }
+  } catch {
+    // URL 형식이 아니면 무시
+  }
+  return null;
+}
+
 function isChannelStep(step: Step): boolean {
   return /채널\s*발굴/.test(`${step.name} ${step.desc}`);
 }
@@ -419,6 +437,7 @@ function MaterialPanel({ siteName }: { siteName: string }) {
   const mineItems = items.filter((i) => i.channel_id && mineChannelIds.has(i.channel_id));
   const mineItemUrls = new Set(mineItems.map((i) => i.source_url).filter(Boolean));
   const mineItemByUrl = new Map(mineItems.map((i) => [i.source_url, i]));
+  const channelById = new Map(channels.map((c) => [c.id, c]));
 
   async function fetchTopVideos() {
     if (mineChannels.length === 0) {
@@ -566,22 +585,44 @@ function MaterialPanel({ siteName }: { siteName: string }) {
       {expanded && (
         <div className="space-y-1.5">
           {mineItems.length === 0 && <p className="text-[11px] text-neutral-300 px-1">등록된 소재 없음</p>}
-          {mineItems.map((i) => (
-            <div key={i.id} className="flex items-center gap-2 bg-white border border-neutral-100 rounded-lg px-3 py-2">
-              {i.thumbnail_url && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={i.thumbnail_url} alt="" className="w-10 h-10 object-cover rounded shrink-0 bg-neutral-100" />
-              )}
-              <span className="flex-1 min-w-0 text-[11px] font-bold truncate">{i.title || i.source_url}</span>
-              <button
-                onClick={() => deleteMaterial(i.id)}
-                className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1"
-                title="삭제"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
+          {mineItems.map((i) => {
+            const ch = i.channel_id ? channelById.get(i.channel_id) : undefined;
+            const videoId = extractVideoId(i.source_url);
+            return (
+              <div key={i.id} className="flex items-center gap-2 bg-white border border-neutral-100 rounded-lg px-3 py-2">
+                {i.thumbnail_url && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={i.thumbnail_url}
+                    alt=""
+                    onClick={() => videoId && setPreviewVideoId(videoId)}
+                    className={`w-10 h-10 object-cover rounded shrink-0 bg-neutral-100 ${videoId ? 'cursor-pointer' : ''}`}
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  {videoId ? (
+                    <button onClick={() => setPreviewVideoId(videoId)} className="text-[11px] font-bold truncate block hover:underline text-left">
+                      {i.title || i.source_url}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] font-bold truncate block">{i.title || i.source_url}</span>
+                  )}
+                  {ch && (
+                    <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
+                      {ch.name}
+                    </a>
+                  )}
+                </div>
+                <button
+                  onClick={() => deleteMaterial(i.id)}
+                  className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1"
+                  title="삭제"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
