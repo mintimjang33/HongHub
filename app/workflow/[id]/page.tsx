@@ -7,7 +7,7 @@ import { useParams } from 'next/navigation';
 type Site = { id: string; name: string; workflow_content: string | null };
 type Step = { n: string; name: string; desc: string; status: string };
 type Channel = { id: string; name: string; url: string | null; subscriber_count: string | null; notes: string | null };
-type SourceItem = { id: string; channel_id: string | null; source_url: string | null };
+type SourceItem = { id: string; channel_id: string | null; source_url: string | null; title: string; thumbnail_url: string | null };
 type ChannelVideoResult = { videoId: string; title: string; url: string; views: number; viewsLabel: string; thumbnail: string };
 type ChannelMaterialGroup = { channelId: string; channelName: string; videos: ChannelVideoResult[]; error?: string };
 type DiscoverResult = {
@@ -213,6 +213,11 @@ function ChannelPanel({ siteName }: { siteName: string }) {
     }
   }
 
+  async function deleteChannel(id: string) {
+    await fetch(`/api/source-channels/${id}`, { method: 'DELETE' });
+    load();
+  }
+
   return (
     <div className="border-t border-black/5 pt-3">
       <div className="flex items-center justify-between mb-2">
@@ -351,16 +356,27 @@ function ChannelPanel({ siteName }: { siteName: string }) {
       {expanded && mine.length > 0 && (
         <div className="space-y-1.5">
           {mine.map((c) => (
-            <a
+            <div
               key={c.id}
-              href={c.url || '#'}
-              target="_blank"
-              rel="noopener noreferrer"
               className="flex items-center justify-between gap-2 text-[11px] bg-white hover:bg-neutral-50 border border-neutral-100 rounded-lg px-3 py-2"
             >
-              <span className="font-bold truncate">{c.name}</span>
-              {c.subscriber_count && <span className="text-neutral-400 flex-shrink-0">{c.subscriber_count}</span>}
-            </a>
+              <a
+                href={c.url || '#'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 min-w-0 flex items-center gap-2 hover:underline"
+              >
+                <span className="font-bold truncate">{c.name}</span>
+                {c.subscriber_count && <span className="text-neutral-400 flex-shrink-0">{c.subscriber_count}</span>}
+              </a>
+              <button
+                onClick={() => deleteChannel(c.id)}
+                className="shrink-0 text-red-400 font-bold hover:text-red-600 px-1"
+                title="삭제"
+              >
+                ✕
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -402,6 +418,7 @@ function MaterialPanel({ siteName }: { siteName: string }) {
   const mineChannelIds = new Set(mineChannels.map((c) => c.id));
   const mineItems = items.filter((i) => i.channel_id && mineChannelIds.has(i.channel_id));
   const mineItemUrls = new Set(mineItems.map((i) => i.source_url).filter(Boolean));
+  const mineItemByUrl = new Map(mineItems.map((i) => [i.source_url, i]));
 
   async function fetchTopVideos() {
     if (mineChannels.length === 0) {
@@ -462,6 +479,11 @@ function MaterialPanel({ siteName }: { siteName: string }) {
     }
   }
 
+  async function deleteMaterial(id: string) {
+    await fetch(`/api/source-items/${id}`, { method: 'DELETE' });
+    load();
+  }
+
   return (
     <div className="border-t border-black/5 pt-3">
       <div className="flex items-center justify-between mb-2">
@@ -502,6 +524,7 @@ function MaterialPanel({ siteName }: { siteName: string }) {
               <div className="space-y-1.5">
                 {g.videos.map((r) => {
                   const already = mineItemUrls.has(r.url) || addedVideoIds.has(r.videoId);
+                  const existingItem = mineItemByUrl.get(r.url);
                   return (
                     <div key={r.videoId} className="flex items-center gap-2 bg-white border border-neutral-100 rounded-lg p-2">
                       {r.thumbnail && (
@@ -520,11 +543,15 @@ function MaterialPanel({ siteName }: { siteName: string }) {
                         <div className="text-[11px] text-neutral-400 mt-0.5">조회수 {r.viewsLabel}</div>
                       </div>
                       <button
-                        onClick={() => registerMaterial(g.channelId, r)}
-                        disabled={already}
-                        className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40 disabled:bg-neutral-300"
+                        onClick={() => (existingItem ? deleteMaterial(existingItem.id) : registerMaterial(g.channelId, r))}
+                        disabled={already && !existingItem}
+                        className={`shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg ${
+                          already
+                            ? 'bg-neutral-100 text-neutral-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-40'
+                            : 'bg-black text-white'
+                        }`}
                       >
-                        {already ? '등록됨' : '소재등록'}
+                        {already ? (existingItem ? '✕ 등록취소' : '등록됨') : '소재등록'}
                       </button>
                     </div>
                   );
@@ -536,11 +563,23 @@ function MaterialPanel({ siteName }: { siteName: string }) {
       )}
       {previewVideoId && <VideoPreviewModal videoId={previewVideoId} onClose={() => setPreviewVideoId(null)} />}
 
-      {expanded && groups.length === 0 && mineItems.length > 0 && (
+      {expanded && (
         <div className="space-y-1.5">
+          {mineItems.length === 0 && <p className="text-[11px] text-neutral-300 px-1">등록된 소재 없음</p>}
           {mineItems.map((i) => (
-            <div key={i.id} className="text-[11px] bg-white border border-neutral-100 rounded-lg px-3 py-2 truncate">
-              {i.source_url}
+            <div key={i.id} className="flex items-center gap-2 bg-white border border-neutral-100 rounded-lg px-3 py-2">
+              {i.thumbnail_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={i.thumbnail_url} alt="" className="w-10 h-10 object-cover rounded shrink-0 bg-neutral-100" />
+              )}
+              <span className="flex-1 min-w-0 text-[11px] font-bold truncate">{i.title || i.source_url}</span>
+              <button
+                onClick={() => deleteMaterial(i.id)}
+                className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1"
+                title="삭제"
+              >
+                ✕
+              </button>
             </div>
           ))}
         </div>
