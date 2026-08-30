@@ -677,6 +677,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
   const mineChannelIds = new Set(channels.filter((c) => (c.notes || '').match(CHANNEL_TAG_RE)?.[1] === siteName).map((c) => c.id));
   const mineItems = items.filter((i) => i.channel_id && mineChannelIds.has(i.channel_id));
   const withTranscript = mineItems.filter((i) => i.transcript && i.transcript.trim());
+  const channelById = new Map(channels.map((c) => [c.id, c]));
 
   function toggleOpen(item: SourceItem) {
     if (openItemId === item.id) {
@@ -767,6 +768,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
           {mineItems.map((i) => {
             const videoId = extractVideoId(i.source_url);
             const has = !!(i.transcript && i.transcript.trim());
+            const ch = i.channel_id ? channelById.get(i.channel_id) : undefined;
             return (
               <div key={i.id} className="bg-white border border-neutral-100 rounded-lg p-2">
                 <div className="flex items-center gap-2">
@@ -779,9 +781,16 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                       className={`w-10 h-10 object-cover rounded shrink-0 bg-neutral-100 ${videoId ? 'cursor-pointer' : ''}`}
                     />
                   )}
-                  <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="flex-1 min-w-0 text-[11px] font-bold truncate text-left hover:underline">
-                    {i.title || i.source_url}
-                  </button>
+                  <div className="flex-1 min-w-0">
+                    <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="text-[11px] font-bold truncate block text-left hover:underline">
+                      {i.title || i.source_url}
+                    </button>
+                    {ch && (
+                      <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
+                        {ch.name}
+                      </a>
+                    )}
+                  </div>
                   <button
                     onClick={() => autoFetch(i)}
                     disabled={fetchingIds.has(i.id)}
