@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../lib/supabase';
 import { callGeminiVision } from '../../../lib/aiProviders';
 
-// 5번(대본 작성) 단계 전용 — 소재 추천 → 제목 추천 → 대본, 3단계 파이프라인.
+// 5번(대본 작성) 단계 전용 — 소재 추천 → 제목 추천 → 대본(한국어+영어+일본어), 3단계 파이프라인.
+// + 완성된 콘텐츠 단위(unit)에 대한 AI 자동 검토(action=review).
 // 4번(analyze-materials)과 같은 이유로 pro 모델을 쓰고, 대본이 있는 소재만 신뢰해서 근거로 쓴다.
 export const maxDuration = 60;
 
@@ -14,13 +15,30 @@ type Stage = (typeof STAGES)[number];
 
 type Item = { title: string; transcript: string | null; duration_seconds: number | null; views: string | null };
 type AnalysisResult = { channel?: string; title?: string; script?: string; duration?: string; pace?: string };
-type ContentUnit = { id: string; material: string; title: string; script: string; createdAt: string };
+type UnitReview = { score?: number; feedback?: string; reviewedAt?: string };
+type ContentUnit = {
+  id: string;
+  material: string;
+  title: string;
+  script: string;
+  titleEn?: string;
+  scriptEn?: string;
+  titleJa?: string;
+  scriptJa?: string;
+  review?: UnitReview;
+  status?: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+};
 type ScriptDraft = {
   materials?: string[];
   selectedMaterial?: string;
   titles?: string[];
   selectedTitle?: string;
   script?: string;
+  titleEn?: string;
+  scriptEn?: string;
+  titleJa?: string;
+  scriptJa?: string;
   units?: ContentUnit[];
   updated_at?: string;
 };
@@ -34,6 +52,14 @@ function parseViews(label: string | null): number {
   if (m[2] === '만') return n * 10_000;
   if (m[2] === '천') return n * 1_000;
   return n;
+}
+
+// pace 분석 텍스트에 "380자" 같은 목표 글자수가 있으면 뽑아 쓰고, 없으면 380자를 기본값으로 쓴다
+// — 프롬프트에 "속도 패턴 참고해줘" 정도로 암시만 하면 실제로는 목표보다 짧게 나오는 경우가 많아서,
+// 목표 글자수를 명시적으로 박아넣기 위함.
+function extractTargetChars(pace: string | undefined): number {
+  const m = pace?.match(/(\d{3,4})\s*자/);
+  return m ? parseInt(m[1], 10) : 380;
 }
 
 // 단계별로 필요한 근거 자료 + 지시문을 한 군데서 만든다 — 유료(POST)/구독복사(GET) 둘 다 이 프롬프트를 그대로 쓴다.
@@ -97,8 +123,9 @@ ${analysis.title || '(제목 패턴 분석 없음 — 일반적인 유튜브 쇼
     return { prompt };
   }
 
-  // stage === 'script'
+  // stage === 'script' — 한국어 대본 + 영어/일본어 현지화 각색 버전까지 한 번에 요청한다.
   if (!title) return { prompt: '', error: 'title이 필요합니다.', status: 400 };
+  const targetChars = extractTargetChars(analysis.pace);
   const prompt = `"${site.name}" 파이프라인의 아래 제목으로 쇼츠 대본을 작성해줘.
 
 ## 제목
@@ -107,9 +134,86 @@ ${title}
 ## 4번 분석 결과 — 참고할 패턴
 ${analysis.script ? `[대본 구조 패턴]\n${analysis.script}\n` : ''}${analysis.pace ? `[속도 패턴]\n${analysis.pace}\n` : ''}${analysis.duration ? `[길이 패턴]\n${analysis.duration}\n` : ''}
 
-## 요청
-위 패턴(서사 구조, 문장 스타일, 속도/길이 기준)을 그대로 따라서 실제 나레이션 대본 전문을 작성해줘. 오프닝 훅부터 마무리까지 완결된 형태로, 컷 구분 없이 이어지는 나레이션 텍스트 하나로 줘. 대본 본문만 출력하고 다른 설명은 붙이지 마.`;
+## 한국어 대본 요청
+위 패턴(서사 구조, 문장 스타일)을 그대로 따라서 실제 나레이션 대본 전문을 작성해줘. 오프닝 훅부터 마무리까지 완결된 형태로,
+컷 구분 없이 이어지는 나레이션 텍스트 하나로. TTS가 빠른 속도로 읽는다는 걸 감안해서 숨 쉴 틈 없이 이어지는 문장으로 쓰고,
+분량은 공백 포함 정확히 ${targetChars}자 내외(±20자)로 맞춰줘 — 이게 가장 중요한 조건이야, 짧게 쓰지 마.
+4단 구조를 지키되 그걸 체크리스트처럼 딱딱 끊어 나열하지 말고, 접속사와 흐름을 살려서 하나의 이야기처럼 자연스럽게
+이어지도록 써줘 — 구조는 맞는데 문장이 뚝뚝 끊기는 게 제일 나쁜 결과야.
+
+## 영어/일본어 버전 요청
+같은 소재·같은 서사 구조·같은 정보를 담되, 한국어를 그대로 번역하지 말고 각 언어권 쇼츠 시청자에게 통하는 후킹 표현으로
+현지화 각색해줘(영어는 영어식 임팩트 있는 구어체, 일본어는 일본어식 쇼츠 어투). 제목도 각 언어에 맞게 새로 뽑아줘.
+분량은 한국어 버전과 비슷한 낭독 시간이 나오도록 맞춰줘.
+
+## 출력 형식 — 아래 형식을 정확히 지켜줘(다른 설명 붙이지 말고 이 형식만)
+[KO]
+(한국어 대본 본문)
+
+[EN]
+Title: (영어 제목)
+Script: (영어 대본 본문)
+
+[JA]
+Title: (일본어 제목)
+Script: (일본어 대본 본문)`;
   return { prompt };
+}
+
+// buildPrompt의 "출력 형식" 그대로 온 응답을 파싱한다. 구독-복사 경로(사람이 붙여넣는 답변)도
+// AI가 같은 형식으로 답하는 걸 전제로 동일하게 파싱한다 — 형식이 깨져 있으면 KO만이라도 최대한 살린다.
+function parseScriptResponse(text: string): { ko: string; titleEn?: string; scriptEn?: string; titleJa?: string; scriptJa?: string } {
+  const koMatch = text.match(/\[KO\]([\s\S]*?)(?=\[EN\]|\[JA\]|$)/);
+  const enMatch = text.match(/\[EN\]([\s\S]*?)(?=\[JA\]|$)/);
+  const jaMatch = text.match(/\[JA\]([\s\S]*?)$/);
+
+  const ko = (koMatch ? koMatch[1] : text).trim();
+
+  function pickField(block: string | undefined, field: 'Title' | 'Script'): string | undefined {
+    if (!block) return undefined;
+    const re = new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i');
+    const m = block.match(re);
+    return m ? m[1].trim() : undefined;
+  }
+
+  return {
+    ko,
+    titleEn: pickField(enMatch?.[1], 'Title'),
+    scriptEn: pickField(enMatch?.[1], 'Script'),
+    titleJa: pickField(jaMatch?.[1], 'Title'),
+    scriptJa: pickField(jaMatch?.[1], 'Script'),
+  };
+}
+
+function buildReviewPrompt(analysis: AnalysisResult, title: string, script: string): string {
+  const targetChars = extractTargetChars(analysis.pace);
+  return `아래 유튜브 쇼츠 제목/대본이 4번 분석에서 뽑은 패턴에 얼마나 잘 맞는지 냉정하게 평가해줘.
+
+## 평가 대상
+제목: ${title}
+대본(${script.length}자): ${script}
+
+## 기준으로 삼을 4번 분석 결과
+${analysis.title ? `[제목 패턴]\n${analysis.title}\n` : ''}${analysis.script ? `[대본 구조 패턴]\n${analysis.script}\n` : ''}${analysis.pace ? `[속도 패턴, 목표 분량 약 ${targetChars}자]\n${analysis.pace}\n` : ''}
+
+## 요청
+제목 구조/길이, 대본의 4단 구조(문제제기→1차해결+위기→발상전환→네이밍) 준수 여부, 어투, 분량(목표 ${targetChars}자 대비)을
+각각 짚어서 평가해줘. 특히 구조를 지키느라 문장이 뚝뚝 끊기거나 나열식으로 읽히지 않는지, 나레이션으로 쭉 읽었을 때
+자연스럽게 이어지는 흐름인지도 반드시 확인해줘 — 구조 체크리스트는 맞아도 문장이 끊기면 감점. 마지막에 아래 형식으로
+정확히 한 줄씩 출력해줘.
+
+SCORE: (10점 만점 정수)
+FEEDBACK: (2~4문장으로 구체적인 개선점 또는 통과 사유)`;
+}
+
+function parseReview(text: string): UnitReview {
+  const scoreMatch = text.match(/SCORE:\s*(\d+)/i);
+  const feedbackMatch = text.match(/FEEDBACK:\s*([\s\S]*)/i);
+  return {
+    score: scoreMatch ? parseInt(scoreMatch[1], 10) : undefined,
+    feedback: feedbackMatch ? feedbackMatch[1].trim() : text.trim(),
+    reviewedAt: new Date().toISOString(),
+  };
 }
 
 function parseStage(value: unknown): Stage | null {
@@ -117,11 +221,24 @@ function parseStage(value: unknown): Stage | null {
 }
 
 // "💬 구독으로 만들기" — 유료 API 없이 프롬프트만 만들어서 클립보드 복사용으로 돌려준다.
+// action=review일 땐 소재 추천/제목/대본과 무관하게 완성된 콘텐츠 하나의 검토용 프롬프트를 돌려준다.
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get('siteId');
+  if (!siteId) return NextResponse.json({ error: 'siteId가 필요합니다.' }, { status: 400 });
+
+  if (searchParams.get('action') === 'review') {
+    const title = searchParams.get('title');
+    const script = searchParams.get('script');
+    if (!title || !script) return NextResponse.json({ error: 'title/script가 필요합니다.' }, { status: 400 });
+    const supabase = getSupabaseServerClient();
+    const { data: site } = await supabase.from('hub_sites').select('analysis_result').eq('id', siteId).maybeSingle();
+    if (!site) return NextResponse.json({ error: '사이트를 찾을 수 없습니다.' }, { status: 404 });
+    return NextResponse.json({ prompt: buildReviewPrompt(site.analysis_result || {}, title, script) });
+  }
+
   const stage = parseStage(searchParams.get('stage'));
-  if (!siteId || !stage) return NextResponse.json({ error: 'siteId/stage가 필요합니다.' }, { status: 400 });
+  if (!stage) return NextResponse.json({ error: 'stage가 필요합니다.' }, { status: 400 });
   const material = searchParams.get('material') || undefined;
   const title = searchParams.get('title') || undefined;
 
@@ -131,11 +248,49 @@ export async function GET(request: Request) {
 }
 
 // "✨ Gemini Pro로 만들기" — 실제로 호출해서 결과를 script_draft에 저장까지 한다.
+// action=review일 땐 특정 unit 하나를 AI로 자동 검토해서 그 unit.review에 점수/피드백을 저장한다.
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const siteId = body?.siteId?.trim();
+  if (!siteId) return NextResponse.json({ error: 'siteId가 필요합니다.' }, { status: 400 });
+
+  const supabase = getSupabaseServerClient();
+
+  if (body?.action === 'review') {
+    const unitId: string | undefined = body?.unitId;
+    const title: string | undefined = body?.title;
+    const script: string | undefined = body?.script;
+    if (!unitId || !title || !script) return NextResponse.json({ error: 'unitId/title/script가 필요합니다.' }, { status: 400 });
+
+    const { data: site } = await supabase.from('hub_sites').select('analysis_result, script_draft').eq('id', siteId).maybeSingle();
+    if (!site) return NextResponse.json({ error: '사이트를 찾을 수 없습니다.' }, { status: 404 });
+
+    let reviewText: string;
+    try {
+      reviewText = await callGeminiVision({
+        systemPrompt: '너는 유튜브 쇼츠 콘텐츠 QA 담당자다. 냉정하고 구체적으로 평가한다.',
+        userPrompt: buildReviewPrompt(site.analysis_result || {}, title, script),
+        model: MODEL,
+      });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    }
+
+    const review = parseReview(reviewText);
+    const prevDraft: ScriptDraft = site.script_draft || {};
+    const units = (prevDraft.units || []).map((u) => (u.id === unitId ? { ...u, review } : u));
+    const nextDraft: ScriptDraft = { ...prevDraft, units, updated_at: new Date().toISOString() };
+
+    const { error: saveError } = await supabase
+      .from('hub_sites')
+      .update({ script_draft: nextDraft, updated_at: new Date().toISOString() })
+      .eq('id', siteId);
+    if (saveError) return NextResponse.json({ error: saveError.message }, { status: 500 });
+    return NextResponse.json({ script_draft: nextDraft });
+  }
+
   const stage = parseStage(body?.stage);
-  if (!siteId || !stage) return NextResponse.json({ error: 'siteId/stage가 필요합니다.' }, { status: 400 });
+  if (!stage) return NextResponse.json({ error: 'stage가 필요합니다.' }, { status: 400 });
   const material: string | undefined = body?.material || undefined;
   const title: string | undefined = body?.title || undefined;
 
@@ -153,7 +308,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 
-  const supabase = getSupabaseServerClient();
   const { data: site } = await supabase.from('hub_sites').select('script_draft').eq('id', siteId).maybeSingle();
   const prevDraft: ScriptDraft = site?.script_draft || {};
 
@@ -171,9 +325,10 @@ export async function POST(request: Request) {
       .split('\n')
       .map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim())
       .filter(Boolean);
-    nextDraft = { ...prevDraft, selectedMaterial: material, titles, selectedTitle: undefined, script: undefined };
+    nextDraft = { ...prevDraft, selectedMaterial: material, titles, selectedTitle: undefined, script: undefined, titleEn: undefined, scriptEn: undefined, titleJa: undefined, scriptJa: undefined };
   } else {
-    nextDraft = { ...prevDraft, selectedTitle: title, script: resultText.trim() };
+    const { ko, titleEn, scriptEn, titleJa, scriptJa } = parseScriptResponse(resultText);
+    nextDraft = { ...prevDraft, selectedTitle: title, script: ko, titleEn, scriptEn, titleJa, scriptJa };
   }
   nextDraft.updated_at = new Date().toISOString();
 
@@ -203,6 +358,10 @@ export async function PATCH(request: Request) {
   if ('titles' in body) patch.titles = body.titles;
   if ('selectedTitle' in body) patch.selectedTitle = body.selectedTitle;
   if ('script' in body) patch.script = body.script;
+  if ('titleEn' in body) patch.titleEn = body.titleEn;
+  if ('scriptEn' in body) patch.scriptEn = body.scriptEn;
+  if ('titleJa' in body) patch.titleJa = body.titleJa;
+  if ('scriptJa' in body) patch.scriptJa = body.scriptJa;
   if ('units' in body) patch.units = body.units;
 
   const nextDraft: ScriptDraft = { ...prevDraft, ...patch, updated_at: new Date().toISOString() };

@@ -16,13 +16,30 @@ type AnalysisResult = {
 // 5번은 소재 하나마다 별개의 완성 콘텐츠라서, 작업 중인 것 하나(소재→제목→대본 위저드)와
 // 별개로 완성된 것들을 units 배열에 콘텐츠 단위로 저장한다. 나중에 6~9번(영상/TTS/자막/렌더링)도
 // 여기 unit id를 기준으로 진행 상태를 붙일 수 있게 id를 갖고 있다.
-type ContentUnit = { id: string; material: string; title: string; script: string; createdAt: string };
+type UnitReview = { score?: number; feedback?: string; reviewedAt?: string };
+type ContentUnit = {
+  id: string;
+  material: string;
+  title: string;
+  script: string;
+  titleEn?: string;
+  scriptEn?: string;
+  titleJa?: string;
+  scriptJa?: string;
+  review?: UnitReview;
+  status?: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+};
 type ScriptDraft = {
   materials?: string[];
   selectedMaterial?: string;
   titles?: string[];
   selectedTitle?: string;
   script?: string;
+  titleEn?: string;
+  scriptEn?: string;
+  titleJa?: string;
+  scriptJa?: string;
   units?: ContentUnit[];
   updated_at?: string;
 };
@@ -1203,6 +1220,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
   const units = draft.units || [];
 
   useEffect(() => {
@@ -1265,7 +1283,21 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
       } else if (stage === 'titles') {
         patch.titles = pasteText.split('\n').map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
       } else {
-        patch.script = pasteText.trim();
+        // 구독 채팅도 [KO]/[EN]/[JA] 형식으로 답하게 프롬프트에 요청해뒀으니 같은 형식으로 파싱한다.
+        // 형식이 안 맞으면(사람이 그냥 대본만 붙여넣은 경우) 전체를 한국어 대본으로만 취급한다.
+        const koMatch = pasteText.match(/\[KO\]([\s\S]*?)(?=\[EN\]|\[JA\]|$)/);
+        const enMatch = pasteText.match(/\[EN\]([\s\S]*?)(?=\[JA\]|$)/);
+        const jaMatch = pasteText.match(/\[JA\]([\s\S]*?)$/);
+        const pickField = (block: string | undefined, field: 'Title' | 'Script') => {
+          if (!block) return undefined;
+          const m = block.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
+          return m ? m[1].trim() : undefined;
+        };
+        patch.script = (koMatch ? koMatch[1] : pasteText).trim();
+        patch.titleEn = pickField(enMatch?.[1], 'Title');
+        patch.scriptEn = pickField(enMatch?.[1], 'Script');
+        patch.titleJa = pickField(jaMatch?.[1], 'Title');
+        patch.scriptJa = pickField(jaMatch?.[1], 'Script');
       }
       const res = await fetch('/api/script-draft', {
         method: 'PATCH',
@@ -1337,6 +1369,11 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         material: draft.selectedMaterial,
         title: draft.selectedTitle,
         script: scriptDraftText.trim(),
+        titleEn: draft.titleEn,
+        scriptEn: draft.scriptEn,
+        titleJa: draft.titleJa,
+        scriptJa: draft.scriptJa,
+        status: 'pending',
         createdAt: new Date().toISOString(),
       };
       await fetch('/api/script-draft', {
@@ -1349,6 +1386,10 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
           titles: null,
           selectedTitle: null,
           script: null,
+          titleEn: null,
+          scriptEn: null,
+          titleJa: null,
+          scriptJa: null,
         }),
       });
       onRefresh();
@@ -1363,6 +1404,35 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId: site.id, units: units.filter((u) => u.id !== id) }),
+    });
+    onRefresh();
+  }
+
+  // AI 자동 검토 — Gemini Pro로 제목/대본을 4번 분석 패턴 기준으로 채점·평가해서 unit.review에 저장.
+  async function reviewUnit(unit: ContentUnit) {
+    setReviewingId(unit.id);
+    setError('');
+    try {
+      const res = await fetch('/api/script-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, action: 'review', unitId: unit.id, title: unit.title, script: unit.script }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '검토 실패');
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReviewingId(null);
+    }
+  }
+
+  async function setUnitStatus(id: string, status: ContentUnit['status']) {
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, status } : u)) }),
     });
     onRefresh();
   }
@@ -1443,28 +1513,85 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         <div className="bg-emerald-50/40 border border-emerald-100 rounded-lg p-3 mb-2">
           <div className="text-[11px] font-black text-emerald-700 mb-2">✅ 완성된 콘텐츠 ({units.length}개)</div>
           <div className="space-y-1.5">
-            {units.map((u) => (
-              <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
-                <div className="flex items-center gap-2 px-3 py-2">
-                  <button
-                    onClick={() => setOpenUnitId((cur) => (cur === u.id ? null : u.id))}
-                    className="flex-1 min-w-0 text-left"
-                  >
-                    <span className={`inline-block mr-1 transition-transform text-neutral-300 ${openUnitId === u.id ? 'rotate-90' : ''}`}>▶</span>
-                    <span className="text-[11px] font-bold">{u.title}</span>
-                  </button>
-                  <button onClick={() => deleteUnit(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="삭제">
-                    ✕
-                  </button>
-                </div>
-                {openUnitId === u.id && (
-                  <div className="px-3 pb-3 pt-1 border-t border-neutral-100">
-                    <p className="text-[10px] text-neutral-400 mb-1.5">소재: {u.material}</p>
-                    <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
+            {units.map((u) => {
+              const statusTag =
+                u.status === 'approved'
+                  ? { label: '승인됨', cls: 'bg-emerald-100 text-emerald-700' }
+                  : u.status === 'rejected'
+                    ? { label: '반려됨', cls: 'bg-red-100 text-red-600' }
+                    : { label: '검토대기', cls: 'bg-neutral-100 text-neutral-500' };
+              return (
+                <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2">
+                    <button onClick={() => setOpenUnitId((cur) => (cur === u.id ? null : u.id))} className="flex-1 min-w-0 text-left flex items-center gap-1.5">
+                      <span className={`inline-block transition-transform text-neutral-300 ${openUnitId === u.id ? 'rotate-90' : ''}`}>▶</span>
+                      <span className="text-[11px] font-bold truncate">{u.title}</span>
+                      {u.review?.score !== undefined && (
+                        <span className="shrink-0 text-[10px] font-black text-neutral-400">({u.review.score}/10)</span>
+                      )}
+                    </button>
+                    <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full ${statusTag.cls}`}>{statusTag.label}</span>
+                    <button onClick={() => deleteUnit(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="삭제">
+                      ✕
+                    </button>
                   </div>
-                )}
-              </div>
-            ))}
+                  {openUnitId === u.id && (
+                    <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
+                      <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+                      <div>
+                        <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇰🇷 한국어 ({u.script.length}자)</p>
+                        <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
+                      </div>
+                      {u.scriptEn && (
+                        <div className="pt-2 border-t border-neutral-50">
+                          <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇺🇸 {u.titleEn}</p>
+                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptEn}</p>
+                        </div>
+                      )}
+                      {u.scriptJa && (
+                        <div className="pt-2 border-t border-neutral-50">
+                          <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇯🇵 {u.titleJa}</p>
+                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptJa}</p>
+                        </div>
+                      )}
+                      {u.review && (
+                        <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
+                          <p className="text-[10px] font-black text-neutral-500 mb-1">
+                            🔍 AI 검토 {u.review.score !== undefined && `— ${u.review.score}/10점`}
+                          </p>
+                          <p className="text-[11px] text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.review.feedback}</p>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        <button
+                          onClick={() => reviewUnit(u)}
+                          disabled={reviewingId === u.id}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                        >
+                          {reviewingId === u.id ? '검토 중...' : u.review ? '🔍 다시 검토받기' : '🔍 AI 검토받기'}
+                        </button>
+                        <button
+                          onClick={() => setUnitStatus(u.id, 'approved')}
+                          className={`text-[11px] font-black px-3 py-1.5 rounded-lg border ${
+                            u.status === 'approved' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-neutral-200 hover:border-emerald-400 text-emerald-600'
+                          }`}
+                        >
+                          ✅ 승인
+                        </button>
+                        <button
+                          onClick={() => setUnitStatus(u.id, 'rejected')}
+                          className={`text-[11px] font-black px-3 py-1.5 rounded-lg border ${
+                            u.status === 'rejected' ? 'bg-red-500 text-white border-red-500' : 'bg-white border-neutral-200 hover:border-red-400 text-red-500'
+                          }`}
+                        >
+                          ❌ 반려
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1534,6 +1661,25 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
             placeholder="위 버튼으로 대본을 만들거나 직접 작성하세요"
             className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
           />
+          {(draft.scriptEn || draft.scriptJa) && (
+            <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 mb-1.5 space-y-2">
+              <p className="text-[10px] text-neutral-400">
+                영어/일본어는 번역이 아니라 현지화 각색이에요 — 완성 콘텐츠로 저장하면 이 버전도 같이 저장돼요.
+              </p>
+              {draft.scriptEn && (
+                <div>
+                  <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇺🇸 {draft.titleEn}</p>
+                  <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{draft.scriptEn}</p>
+                </div>
+              )}
+              {draft.scriptJa && (
+                <div className="pt-2 border-t border-neutral-100">
+                  <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇯🇵 {draft.titleJa}</p>
+                  <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{draft.scriptJa}</p>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-neutral-300">{scriptDraftText.length.toLocaleString()}자</span>
             <div className="flex gap-1.5">
