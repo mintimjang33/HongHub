@@ -761,13 +761,19 @@ const baseHandler = createMcpHandler(
         const items = itemsData || [];
         if (items.length === 0) return { content: [{ type: 'text', text: `"${site_name}"에 등록된 소재가 없습니다.` }] };
 
+        // 대본이 있는 소재만 분석 대상으로 쓴다 — 사용자가 직접 확인·저장한 것만 신뢰할 수 있어서다.
+        const withTranscript = items.filter((i) => i.transcript && i.transcript.trim().length > 20);
+        if (withTranscript.length === 0) {
+          return { content: [{ type: 'text', text: `"${site_name}"에 대본이 등록된 소재가 아직 없습니다. 3번 단계에서 대본을 먼저 채워주세요.` }] };
+        }
+
         function parseViews(label: string | null): number {
           const m = (label || '').match(/([\d.]+)\s*(억|만|천)?/);
           if (!m) return 0;
           const n = parseFloat(m[1]);
           return m[2] === '억' ? n * 1e8 : m[2] === '만' ? n * 1e4 : m[2] === '천' ? n * 1e3 : n;
         }
-        const top = [...items].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, limit || 15);
+        const top = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, limit || 15);
 
         const durations = items.map((i) => i.duration_seconds).filter((n): n is number => !!n);
         const paces = items.filter((i) => i.transcript && i.duration_seconds).map((i) => i.transcript!.length / i.duration_seconds!);
@@ -794,7 +800,7 @@ const baseHandler = createMcpHandler(
           content: [
             {
               type: 'text',
-              text: `"${site_name}" 조회수 상위 ${top.length}/${items.length}개:\n\n${lines.join('\n\n')}\n\n--- 계산된 통계 (참고용, 그대로 저장해도 됨) ---\n${statsText}`,
+              text: `"${site_name}" 대본까지 확보된 것 중 조회수 상위 ${top.length}개 (전체 ${items.length}개 중 대본 있는 건 ${withTranscript.length}개):\n\n${lines.join('\n\n')}\n\n--- 계산된 통계 (참고용, 그대로 저장해도 됨) ---\n${statsText}`,
             },
           ],
         };

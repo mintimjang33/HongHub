@@ -54,9 +54,14 @@ export async function POST(request: Request) {
   const items: Item[] = (itemsData || []) as Item[];
   if (items.length === 0) return NextResponse.json({ error: '등록된 소재가 없습니다.' }, { status: 400 });
 
-  const topItems = [...items].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
+  // 대본이 있는 소재만 분석 대상으로 쓴다 — 사용자가 직접 확인·저장한 것만 신뢰할 수 있어서다.
+  const withTranscript = items.filter((i) => i.transcript && i.transcript.trim().length > 20);
+  if (withTranscript.length === 0) {
+    return NextResponse.json({ error: '대본이 등록된 소재가 아직 없어요 — 3번 단계에서 먼저 대본을 채워주세요.' }, { status: 400 });
+  }
+  const topItems = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
   const titleList = topItems.map((i) => `- ${i.title}`).join('\n');
-  const scriptItems = topItems.filter((i) => i.transcript && i.transcript.trim().length > 20);
+  const scriptItems = topItems;
   const thumbItems = topItems.filter((i) => i.thumbnail_url).slice(0, MAX_THUMBNAILS);
 
   const durationValues = items.map((i) => i.duration_seconds).filter((n): n is number => !!n);

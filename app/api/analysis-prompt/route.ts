@@ -49,7 +49,12 @@ export async function GET(request: Request) {
   const items: Item[] = (itemsData || []) as Item[];
   if (items.length === 0) return NextResponse.json({ error: '등록된 소재가 없습니다.' }, { status: 400 });
 
-  const top = [...items].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
+  // 대본이 있는 소재만 분석 대상으로 쓴다 — 사용자가 직접 확인·저장한 것만 신뢰할 수 있어서다.
+  const withTranscript = items.filter((i) => i.transcript && i.transcript.trim().length > 20);
+  if (withTranscript.length === 0) {
+    return NextResponse.json({ error: '대본이 등록된 소재가 아직 없어요 — 3번 단계에서 먼저 대본을 채워주세요.' }, { status: 400 });
+  }
+  const top = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
 
   const lines = top.map((i, idx) => {
     const parts = [`[${idx + 1}] "${i.title}"`, `조회수 ${i.views || '?'}`];
@@ -60,9 +65,9 @@ export async function GET(request: Request) {
     return line;
   });
 
-  const prompt = `"${site.name}" 파이프라인 벤치마크 영상 ${top.length}/${items.length}개(조회수 상위)를 분석해줘.
+  const prompt = `"${site.name}" 파이프라인 벤치마크 영상 ${top.length}개(대본까지 확보된 것 중 조회수 상위, 전체 ${items.length}개 중 대본 있는 건 ${withTranscript.length}개)를 분석해줘.
 
-각 영상의 제목/조회수/길이/썸네일 이미지 링크/대본(있는 것만)이야:
+각 영상의 제목/조회수/길이/썸네일 이미지 링크/대본이야:
 
 ${lines.join('\n\n')}
 
@@ -75,5 +80,5 @@ ${lines.join('\n\n')}
 
 새 대본/썸네일 제작에 바로 참고할 수 있게 구체적으로 답해줘.`;
 
-  return NextResponse.json({ prompt, analyzedCount: top.length, totalCount: items.length });
+  return NextResponse.json({ prompt, analyzedCount: top.length, totalCount: items.length, withTranscriptCount: withTranscript.length });
 }
