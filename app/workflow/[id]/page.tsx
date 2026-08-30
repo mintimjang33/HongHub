@@ -1033,7 +1033,28 @@ type AnalysisTabKey = (typeof ANALYSIS_TABS)[number]['key'];
 // 여기(hub_sites.analysis_result)에 저장되고, 이 패널은 그 저장된 결과를 읽어서 탭으로 보여주기만 한다.
 function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const [tab, setTab] = useState<AnalysisTabKey>('title');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [error, setError] = useState('');
   const result = site.analysis_result;
+
+  async function analyzeWithGemini() {
+    setAnalyzing(true);
+    setError('');
+    try {
+      const res = await fetch('/api/analyze-materials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '분석 실패');
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   return (
     <div className="border-t border-black/5 pt-3">
@@ -1041,14 +1062,25 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
         <span className="text-xs font-black text-neutral-500">
           🔍 패턴 분석{result?.updated_at && ` — ${new Date(result.updated_at).toLocaleString('ko-KR')} 기준`}
         </span>
-        <button onClick={onRefresh} className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white">
-          🔄 새로고침
-        </button>
+        <div className="flex gap-1.5">
+          <button onClick={onRefresh} className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white">
+            🔄 새로고침
+          </button>
+          <button
+            onClick={analyzeWithGemini}
+            disabled={analyzing}
+            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
+          >
+            {analyzing ? '분석 중... (1분 정도)' : '✨ Gemini Pro로 분석하기'}
+          </button>
+        </div>
       </div>
       <p className="text-[10px] text-neutral-400 mb-3">
-        여기서 직접 분석하지 않아요 — Claude(이 대화)나 Gemini한테 "{site.name} 패턴 분석해줘"라고 요청하면
-        2번(제목/썸네일/조회수)·3번(대본)에서 모은 소재를 보고 분석해서 여기 저장해줘요. 유료 API 호출 없이 구독으로 처리돼요.
+        "✨ Gemini Pro로 분석하기"는 Gemini API(유료, gemini-3.1-pro-preview)를 호출해서 2·3번에서 모은
+        소재를 바로 분석·저장해요 — 썸네일 이미지까지 실제로 보고 분석합니다. 비용 없이 하고 싶으면
+        Claude(이 대화)한테 &quot;{site.name} 패턴 분석해줘&quot;라고 요청하셔도 됩니다(무료, 대신 이미지는 못 봄).
       </p>
+      {error && <p className="text-[11px] text-red-500 font-bold mb-3">{error}</p>}
 
       <div className="flex gap-1.5 mb-3 border-b border-neutral-100">
         {ANALYSIS_TABS.map((t) => (
