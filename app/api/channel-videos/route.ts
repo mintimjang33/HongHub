@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { resolveChannelId, getChannelTopVideos, fmtCount } from '../../../lib/youtubeSearch';
+import { resolveChannelId, getChannelTopVideos, fmtCount, fmtDuration } from '../../../lib/youtubeSearch';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -9,7 +9,9 @@ export async function GET(request: Request) {
   try {
     const channelId = await resolveChannelId(channelUrl);
     const results = await getChannelTopVideos({ channelId, maxResults: 10 });
-    return NextResponse.json({ results: results.map((r) => ({ ...r, viewsLabel: fmtCount(r.views) })) });
+    return NextResponse.json({
+      results: results.map((r) => ({ ...r, viewsLabel: fmtCount(r.views), durationLabel: fmtDuration(r.durationSeconds) })),
+    });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 502 });
   }

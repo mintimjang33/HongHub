@@ -12,7 +12,21 @@ export type ChannelVideo = {
   views: number;
   publishedAt: string;
   thumbnail: string;
+  durationSeconds: number;
 };
+
+// ISO 8601 재생시간(PT1M5S 등)을 초 단위로 바꾼다.
+export function parseDurationSeconds(iso: string | undefined): number {
+  const m = (iso || '').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!m) return 0;
+  return (parseInt(m[1] || '0') * 3600) + (parseInt(m[2] || '0') * 60) + parseInt(m[3] || '0');
+}
+
+export function fmtDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
 export type ShortsResult = {
   videoId: string;
@@ -90,11 +104,12 @@ export async function getChannelTopVideos({
   const videoIds: string[] = (search.items || []).map((it: { id: { videoId: string } }) => it.id.videoId).filter(Boolean);
   if (videoIds.length === 0) return [];
 
-  const videosData = await apiGet('videos', { part: 'snippet,statistics', id: videoIds.join(',') });
+  const videosData = await apiGet('videos', { part: 'snippet,statistics,contentDetails', id: videoIds.join(',') });
   type YoutubeVideo = {
     id: string;
     snippet: { title: string; publishedAt: string; thumbnails?: Record<string, { url: string }> };
     statistics: { viewCount?: string };
+    contentDetails?: { duration?: string };
   };
   const results: ChannelVideo[] = (videosData.items || []).map((v: YoutubeVideo) => ({
     videoId: v.id,
@@ -103,9 +118,16 @@ export async function getChannelTopVideos({
     views: Number(v.statistics.viewCount ?? 0),
     publishedAt: v.snippet.publishedAt,
     thumbnail: v.snippet.thumbnails?.high?.url ?? v.snippet.thumbnails?.medium?.url ?? v.snippet.thumbnails?.default?.url ?? '',
+    durationSeconds: parseDurationSeconds(v.contentDetails?.duration),
   }));
   results.sort((a, b) => b.views - a.views);
   return results;
+}
+
+// 이미 등록된 소재의 영상 길이만 나중에 채워 넣을 때 쓴다 (3번 패널의 "⏱ 길이 가져오기").
+export async function getVideoDuration(videoId: string): Promise<number> {
+  const data = await apiGet('videos', { part: 'contentDetails', id: videoId });
+  return parseDurationSeconds(data.items?.[0]?.contentDetails?.duration);
 }
 
 // 키워드로 최근 업로드된 쇼츠를 검색해서 채널당 1개씩만 추린다 (1번 채널 발굴용).

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../../lib/supabase';
 
-const FIELDS = ['title', 'source_url', 'thumbnail_url', 'transcript', 'views', 'content_type', 'raw_notes', 'status', 'channel_id'];
+const FIELDS = ['title', 'source_url', 'thumbnail_url', 'transcript', 'views', 'content_type', 'raw_notes', 'status', 'channel_id', 'duration_seconds'];
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

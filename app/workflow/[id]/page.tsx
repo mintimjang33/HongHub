@@ -14,8 +14,18 @@ type SourceItem = {
   title: string;
   thumbnail_url: string | null;
   transcript: string | null;
+  duration_seconds: number | null;
 };
-type ChannelVideoResult = { videoId: string; title: string; url: string; views: number; viewsLabel: string; thumbnail: string };
+type ChannelVideoResult = {
+  videoId: string;
+  title: string;
+  url: string;
+  views: number;
+  viewsLabel: string;
+  thumbnail: string;
+  durationSeconds: number;
+  durationLabel: string;
+};
 type ChannelMaterialGroup = { channelId: string; channelName: string; videos: ChannelVideoResult[]; error?: string };
 type DiscoverResult = {
   videoId: string;
@@ -104,6 +114,12 @@ function extractVideoId(url: string | null): string | null {
 
 function isChannelStep(step: Step): boolean {
   return /채널\s*발굴/.test(`${step.name} ${step.desc}`);
+}
+
+function fmtDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 // 영상을 새 탭으로 안 열고 페이지 안에서 바로 확인할 수 있게 하는 작은 모달.
@@ -489,6 +505,7 @@ function MaterialPanel({ siteName }: { siteName: string }) {
           source_url: r.url,
           thumbnail_url: r.thumbnail,
           views: r.viewsLabel,
+          duration_seconds: r.durationSeconds,
           content_type: 'TRIVIA',
           platform_fit: [],
           raw_notes: '',
@@ -565,7 +582,7 @@ function MaterialPanel({ siteName }: { siteName: string }) {
                         <button onClick={() => setPreviewVideoId(r.videoId)} className="text-xs font-bold truncate block hover:underline text-left">
                           {r.title}
                         </button>
-                        <div className="text-[11px] text-neutral-400 mt-0.5">조회수 {r.viewsLabel}</div>
+                        <div className="text-[11px] text-neutral-400 mt-0.5">조회수 {r.viewsLabel} · {r.durationLabel}</div>
                       </div>
                       <button
                         onClick={() => (existingItem ? deleteMaterial(existingItem.id) : registerMaterial(g.channelId, r))}
@@ -656,6 +673,9 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
   const [previewVideoId, setPreviewVideoId] = useState<string | null>(null);
   const [fetchingIds, setFetchingIds] = useState<Set<string>>(new Set());
   const [fetchErrors, setFetchErrors] = useState<Record<string, string>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [thumbFetchingIds, setThumbFetchingIds] = useState<Set<string>>(new Set());
+  const [durationFetchingIds, setDurationFetchingIds] = useState<Set<string>>(new Set());
 
   function load() {
     setLoading(true);
@@ -748,6 +768,63 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     }
   }
 
+  async function copyLink(item: SourceItem) {
+    if (!item.source_url) return;
+    try {
+      await navigator.clipboard.writeText(item.source_url);
+      setCopiedId(item.id);
+      setTimeout(() => setCopiedId((cur) => (cur === item.id ? null : cur)), 1500);
+    } catch {
+      // 클립보드 권한이 없는 브라우저 환경이면 조용히 무시
+    }
+  }
+
+  async function fetchThumbnail(item: SourceItem) {
+    if (!item.source_url) return;
+    setThumbFetchingIds((prev) => new Set(prev).add(item.id));
+    try {
+      const res = await fetch(`/api/fetch-thumbnail?url=${encodeURIComponent(item.source_url)}`);
+      const data = await res.json();
+      if (res.ok && data.image) {
+        await fetch(`/api/source-items/${item.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ thumbnail_url: data.image }),
+        });
+        load();
+      }
+    } finally {
+      setThumbFetchingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
+
+  async function fetchDuration(item: SourceItem) {
+    if (!item.source_url) return;
+    setDurationFetchingIds((prev) => new Set(prev).add(item.id));
+    try {
+      const res = await fetch(`/api/fetch-duration?url=${encodeURIComponent(item.source_url)}`);
+      const data = await res.json();
+      if (res.ok && data.seconds) {
+        await fetch(`/api/source-items/${item.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ duration_seconds: data.seconds }),
+        });
+        load();
+      }
+    } finally {
+      setDurationFetchingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
+
   return (
     <div className="border-t border-black/5 pt-3">
       <button
@@ -771,8 +848,8 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
             const ch = i.channel_id ? channelById.get(i.channel_id) : undefined;
             return (
               <div key={i.id} className="bg-white border border-neutral-100 rounded-lg p-2">
-                <div className="flex items-center gap-2">
-                  {i.thumbnail_url && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {i.thumbnail_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={i.thumbnail_url}
@@ -780,17 +857,46 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                       onClick={() => videoId && setPreviewVideoId(videoId)}
                       className={`w-10 h-10 object-cover rounded shrink-0 bg-neutral-100 ${videoId ? 'cursor-pointer' : ''}`}
                     />
+                  ) : (
+                    <button
+                      onClick={() => fetchThumbnail(i)}
+                      disabled={thumbFetchingIds.has(i.id)}
+                      title="썸네일 가져오기"
+                      className="w-10 h-10 shrink-0 rounded bg-neutral-50 border border-dashed border-neutral-200 text-neutral-300 hover:border-neutral-300 hover:text-neutral-400 flex items-center justify-center text-sm disabled:opacity-40"
+                    >
+                      {thumbFetchingIds.has(i.id) ? '...' : '🖼'}
+                    </button>
                   )}
                   <div className="flex-1 min-w-0">
                     <button onClick={() => (videoId ? setPreviewVideoId(videoId) : undefined)} className="text-[11px] font-bold truncate block text-left hover:underline">
                       {i.title || i.source_url}
                     </button>
-                    {ch && (
-                      <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
-                        {ch.name}
-                      </a>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {ch && (
+                        <a href={ch.url || '#'} target="_blank" rel="noopener noreferrer" className="text-[11px] text-neutral-400 hover:underline">
+                          {ch.name}
+                        </a>
+                      )}
+                      {i.duration_seconds ? (
+                        <span className="text-[11px] text-neutral-300">· ⏱ {fmtDuration(i.duration_seconds)}</span>
+                      ) : (
+                        <button
+                          onClick={() => fetchDuration(i)}
+                          disabled={durationFetchingIds.has(i.id)}
+                          className="text-[11px] text-neutral-300 hover:text-neutral-500 disabled:opacity-40"
+                        >
+                          · {durationFetchingIds.has(i.id) ? '...' : '⏱ 길이 가져오기'}
+                        </button>
+                      )}
+                    </div>
                   </div>
+                  <button
+                    onClick={() => copyLink(i)}
+                    title="링크 복사"
+                    className="shrink-0 text-[11px] font-bold px-2.5 py-1.5 rounded-full border bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300"
+                  >
+                    {copiedId === i.id ? '복사됨' : '🔗'}
+                  </button>
                   <button
                     onClick={() => autoFetch(i)}
                     disabled={fetchingIds.has(i.id)}
@@ -804,7 +910,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                       has ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300'
                     }`}
                   >
-                    📜 대본 {has ? '있음' : '없음'}
+                    📜 대본 {has ? `있음 (${i.transcript!.length.toLocaleString()}자)` : '없음'}
                   </button>
                 </div>
                 {fetchErrors[i.id] && <p className="text-[10px] text-red-500 font-bold mt-1.5">{fetchErrors[i.id]}</p>}
@@ -817,7 +923,8 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                       placeholder="이 영상의 대본/자막 전문을 붙여넣으세요 (U-Caption으로 뽑은 자막 등)"
                       className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed"
                     />
-                    <div className="flex justify-end mt-1.5">
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-[10px] text-neutral-300">{draft.length.toLocaleString()}자</span>
                       <button
                         onClick={() => saveTranscript(i.id)}
                         disabled={saving}

@@ -28,6 +28,7 @@ export async function POST(request: Request) {
       thumbnail_url: body.thumbnail_url?.trim() || null,
       transcript: body.transcript || null,
       views: body.views || null,
+      duration_seconds: body.duration_seconds || null,
       content_type: body.content_type || null,
       platform_fit: Array.isArray(body.platform_fit) ? body.platform_fit : [],
       raw_notes: body.raw_notes || null,
