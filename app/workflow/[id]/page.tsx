@@ -1230,6 +1230,10 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [error, setError] = useState('');
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
   const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [reviewCopyingId, setReviewCopyingId] = useState<string | null>(null);
+  const [reviewCopiedId, setReviewCopiedId] = useState<string | null>(null);
+  const [reviewPasteOpenId, setReviewPasteOpenId] = useState<string | null>(null);
+  const [reviewPasteText, setReviewPasteText] = useState('');
   const units = draft.units || [];
 
   useEffect(() => {
@@ -1460,6 +1464,57 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     }
   }
 
+  // 유료 API 없이, 검토 프롬프트(평가 기준+출력 형식 전부 포함)를 클립보드로 복사만 해준다.
+  // 사용자가 이걸 Gemini/Claude 구독 채팅에 붙여넣어 검토받고, 답변을 아래 붙여넣기 칸에 다시 넣으면 저장된다.
+  async function copyReviewPrompt(unit: ContentUnit) {
+    setReviewCopyingId(unit.id);
+    setError('');
+    try {
+      const q = new URLSearchParams({ siteId: site.id, action: 'review', title: unit.title, script: unit.script, category: unit.category || 'trivia' });
+      const res = await fetch(`/api/script-draft?${q}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '검토 프롬프트 생성 실패');
+      await navigator.clipboard.writeText(data.prompt);
+      setReviewCopiedId(unit.id);
+      setReviewPasteOpenId(unit.id);
+      setReviewPasteText('');
+      setTimeout(() => setReviewCopiedId((cur) => (cur === unit.id ? null : cur)), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReviewCopyingId(null);
+    }
+  }
+
+  async function savePastedReview(unitId: string) {
+    if (!reviewPasteText.trim()) return;
+    setSaving(true);
+    setError('');
+    try {
+      const scoreMatch = reviewPasteText.match(/SCORE:\s*(\d+)/i);
+      const feedbackMatch = reviewPasteText.match(/FEEDBACK:\s*([\s\S]*)/i);
+      const review = {
+        score: scoreMatch ? parseInt(scoreMatch[1], 10) : undefined,
+        feedback: feedbackMatch ? feedbackMatch[1].trim() : reviewPasteText.trim(),
+        reviewedAt: new Date().toISOString(),
+      };
+      const res = await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unitId ? { ...u, review } : u)) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '저장 실패');
+      setReviewPasteOpenId(null);
+      setReviewPasteText('');
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function setUnitStatus(id: string, status: ContentUnit['status']) {
     await fetch('/api/script-draft', {
       method: 'PATCH',
@@ -1664,7 +1719,37 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                           <p className="text-[11px] text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.review.feedback}</p>
                         </div>
                       )}
+                      {reviewPasteOpenId === u.id && (
+                        <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2">
+                          <textarea
+                            value={reviewPasteText}
+                            onChange={(e) => setReviewPasteText(e.target.value)}
+                            rows={4}
+                            placeholder="구독 채팅(Gemini/Claude)의 검토 답변을 여기에 붙여넣으세요 (SCORE:/FEEDBACK: 포함)"
+                            className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                          />
+                          <div className="flex justify-end gap-1.5">
+                            <button onClick={() => setReviewPasteOpenId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                              취소
+                            </button>
+                            <button
+                              onClick={() => savePastedReview(u.id)}
+                              disabled={saving || !reviewPasteText.trim()}
+                              className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                            >
+                              {saving ? '저장 중...' : '붙여넣기 저장'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex flex-wrap gap-1.5 pt-1">
+                        <button
+                          onClick={() => copyReviewPrompt(u)}
+                          disabled={reviewCopyingId === u.id}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                        >
+                          {reviewCopyingId === u.id ? '준비 중...' : reviewCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 검토하기'}
+                        </button>
                         <button
                           onClick={() => reviewUnit(u)}
                           disabled={reviewingId === u.id}
