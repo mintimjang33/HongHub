@@ -3016,13 +3016,15 @@ function FlowChart({
               <div key={i} className="flex items-center shrink-0">
                 <button
                   onClick={() => onSelect(i)}
-                  className={`flex items-center gap-2 border rounded-lg px-2.5 py-2 text-left whitespace-nowrap cursor-pointer transition ${
-                    isSelected ? `${tone.bg} ${tone.border} ring-2 ring-black/10` : 'bg-white border-neutral-200 hover:border-neutral-300'
+                  className={`group flex items-center gap-2 border rounded-lg px-2.5 py-2 text-left whitespace-nowrap cursor-pointer transition ${
+                    isSelected
+                      ? `${tone.bg} ${tone.border} ring-2 ring-black/10`
+                      : 'bg-white border-neutral-200 hover:bg-neutral-50 hover:border-neutral-400 hover:shadow-md hover:-translate-y-0.5'
                   }`}
                 >
                   <span
-                    className={`shrink-0 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center ${
-                      isSelected ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-500'
+                    className={`shrink-0 w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center transition ${
+                      isSelected ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-500 group-hover:bg-black group-hover:text-white'
                     }`}
                   >
                     {s.n}
