@@ -1240,6 +1240,9 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
+  // 2026-08-31 추가 — 6번(이미지/영상 생성) 장면 프롬프트를 이 콘텐츠 유닛에 직접 붙여넣기/수정하는 박스 상태.
+  const [scenePromptsEditId, setScenePromptsEditId] = useState<string | null>(null);
+  const [scenePromptsDraft, setScenePromptsDraft] = useState('');
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [reviewCopyingId, setReviewCopyingId] = useState<string | null>(null);
   const [reviewCopiedId, setReviewCopiedId] = useState<string | null>(null);
@@ -1417,6 +1420,22 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
       body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, topic } : u)) }),
     });
     onRefresh();
+  }
+
+  // 6번 장면 프롬프트를 이 콘텐츠 유닛에 저장 — Claude가 채팅으로 만들어준 프롬프트 전문을 그대로 붙여넣는 용도.
+  async function saveUnitScenePrompts(id: string, scenePrompts: string) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, scenePrompts } : u)) }),
+      });
+      setScenePromptsEditId(null);
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
   }
 
   // Gemini/Claude가 사실확인하면서 출처를 붙여주면(신문사명, 링크 등) 여기 한 줄씩 저장해서
@@ -2194,12 +2213,49 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                           <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptJa}</p>
                         </div>
                       )}
-                      {u.scenePrompts && (
-                        <div className="pt-2 border-t border-neutral-50">
-                          <p className="text-[10px] font-black text-neutral-400 mb-0.5">🎬 6번 이미지/영상 프롬프트 (이 콘텐츠 전용)</p>
-                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scenePrompts}</p>
+                      <div className="pt-2 border-t border-neutral-50">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <p className="text-[10px] font-black text-neutral-400">🎬 6번 이미지/영상 프롬프트 (이 콘텐츠 전용)</p>
+                          {scenePromptsEditId !== u.id && (
+                            <button
+                              onClick={() => {
+                                setScenePromptsEditId(u.id);
+                                setScenePromptsDraft(u.scenePrompts || '');
+                              }}
+                              className="text-[10px] font-bold text-blue-600 hover:underline shrink-0"
+                            >
+                              {u.scenePrompts ? '✏️ 수정' : '+ 붙여넣기'}
+                            </button>
+                          )}
                         </div>
-                      )}
+                        {scenePromptsEditId === u.id ? (
+                          <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 mt-1">
+                            <textarea
+                              value={scenePromptsDraft}
+                              onChange={(e) => setScenePromptsDraft(e.target.value)}
+                              rows={8}
+                              placeholder="장면별 CLEAN/INFO/영상 프롬프트 전문을 여기에 붙여넣으세요"
+                              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button onClick={() => setScenePromptsEditId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                                취소
+                              </button>
+                              <button
+                                onClick={() => saveUnitScenePrompts(u.id, scenePromptsDraft)}
+                                disabled={saving || !scenePromptsDraft.trim()}
+                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                              >
+                                {saving ? '저장 중...' : '저장'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : u.scenePrompts ? (
+                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scenePrompts}</p>
+                        ) : (
+                          <p className="text-[11px] text-neutral-300">아직 없음</p>
+                        )}
+                      </div>
                       {(u.sources && u.sources.length > 0) || u.factCheck ? (
                         <div className="pt-2 border-t border-neutral-50">
                           <p className="text-[10px] font-black text-neutral-400 mb-0.5">📎 출처/사실확인 기록</p>
