@@ -2122,6 +2122,14 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                       {u.category === 'disaster' && <span className="shrink-0 text-[10px]">🚨</span>}
                       <span className="text-[11px] font-bold truncate">{u.title}</span>
                       {u.topic && <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">{u.topic}</span>}
+                      {u.factCheck && (
+                        <span
+                          className="shrink-0 text-[10px] font-bold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5"
+                          title={u.factCheck}
+                        >
+                          ✅ 제미나이 크로스체크 완료
+                        </span>
+                      )}
                       {u.review?.score !== undefined && (
                         <span className="shrink-0 text-[10px] font-black text-neutral-400">({u.review.score}/10)</span>
                       )}
