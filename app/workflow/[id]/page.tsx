@@ -40,6 +40,10 @@ type ContentUnit = {
   sources?: string[];
   // 제미나이와 비교(action=compare)해서 받은 사실확인 결과 — 업그레이드 이후에도 근거로 남겨둔다.
   factCheck?: string;
+  // 2026-08-31 추가 — 6번(이미지/영상 생성) 단계의 장면별 CLEAN/INFO/영상 프롬프트 전문. 파이프라인
+  // 전체가 공유하는 workflow_content가 아니라 이 유닛(에피소드) 하나에 귀속시켜서, 소재가 바뀌어도
+  // "이게 어느 콘텐츠 프롬프트인지" 헷갈리지 않게 한다.
+  scenePrompts?: string;
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -2188,6 +2192,12 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                         <div className="pt-2 border-t border-neutral-50">
                           <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇯🇵 {u.titleJa}</p>
                           <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptJa}</p>
+                        </div>
+                      )}
+                      {u.scenePrompts && (
+                        <div className="pt-2 border-t border-neutral-50">
+                          <p className="text-[10px] font-black text-neutral-400 mb-0.5">🎬 6번 이미지/영상 프롬프트 (이 콘텐츠 전용)</p>
+                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scenePrompts}</p>
                         </div>
                       )}
                       {(u.sources && u.sources.length > 0) || u.factCheck ? (
