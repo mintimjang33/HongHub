@@ -1259,6 +1259,19 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [upgradeCopied, setUpgradeCopied] = useState(false);
   const [upgradePasteOpen, setUpgradePasteOpen] = useState(false);
   const [upgradePasteText, setUpgradePasteText] = useState('');
+  // 완성된 콘텐츠 유닛용 "제미나이와 비교→업그레이드" 상태 — 위저드 단계와 같은 방식이지만
+  // 유닛 하나마다 별개로 열릴 수 있어서 unitId를 같이 들고 있는다(2026-08-31).
+  const [unitCompareCopyingId, setUnitCompareCopyingId] = useState<string | null>(null);
+  const [unitCompareCopiedId, setUnitCompareCopiedId] = useState<string | null>(null);
+  const [unitComparePasteOpenId, setUnitComparePasteOpenId] = useState<string | null>(null);
+  const [unitComparePasteText, setUnitComparePasteText] = useState('');
+  const [unitCompareRunningId, setUnitCompareRunningId] = useState<string | null>(null);
+  const [unitCompareResult, setUnitCompareResult] = useState<{ unitId: string; factCheck: string; rewriteTitle?: string; rewriteScript?: string; sources?: string[] } | null>(null);
+  const [unitUpgradingId, setUnitUpgradingId] = useState<string | null>(null);
+  const [unitUpgradeCopyingId, setUnitUpgradeCopyingId] = useState<string | null>(null);
+  const [unitUpgradeCopiedId, setUnitUpgradeCopiedId] = useState<string | null>(null);
+  const [unitUpgradePasteOpenId, setUnitUpgradePasteOpenId] = useState<string | null>(null);
+  const [unitUpgradePasteText, setUnitUpgradePasteText] = useState('');
   const units = draft.units || [];
 
   useEffect(() => {
@@ -1815,6 +1828,164 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     }
   }
 
+  // 완성된 유닛용 "제미나이와 비교→업그레이드" — 위저드 단계 것과 똑같은 규칙이지만 draft가 아니라
+  // units 배열의 특정 유닛에 바로 적용한다. AI 검토(review)만 받고 끝나던 걸 개선한 revise와 별개로,
+  // "한쪽으로 교체가 아니라 둘을 합쳐서 업그레이드"해야 한다는 지시를 유닛에도 그대로 적용한다(2026-08-31).
+  async function copyUnitComparePrompt(unit: ContentUnit) {
+    setUnitCompareCopyingId(unit.id);
+    setError('');
+    try {
+      const q = new URLSearchParams({ siteId: site.id, action: 'compare', title: unit.title, script: unit.script, category: unit.category || 'trivia' });
+      const res = await fetch(`/api/script-draft?${q}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
+      await navigator.clipboard.writeText(data.prompt);
+      setUnitCompareCopiedId(unit.id);
+      setUnitComparePasteOpenId(unit.id);
+      setUnitComparePasteText('');
+      setTimeout(() => setUnitCompareCopiedId((cur) => (cur === unit.id ? null : cur)), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUnitCompareCopyingId(null);
+    }
+  }
+
+  function saveUnitComparePaste(unitId: string) {
+    if (!unitComparePasteText.trim()) return;
+    setUnitCompareResult({ unitId, ...parseComparePaste(unitComparePasteText) });
+    setUnitComparePasteOpenId(null);
+  }
+
+  async function runUnitCompare(unit: ContentUnit) {
+    setUnitCompareRunningId(unit.id);
+    setError('');
+    try {
+      const res = await fetch('/api/script-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, action: 'compare', title: unit.title, script: unit.script, category: unit.category || 'trivia' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '비교 실패');
+      setUnitCompareResult({ unitId: unit.id, factCheck: data.factCheck || '', rewriteTitle: data.rewriteTitle, rewriteScript: data.rewriteScript, sources: data.sources });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUnitCompareRunningId(null);
+    }
+  }
+
+  async function keepOriginalAfterUnitCompare(unitId: string) {
+    if (!unitCompareResult) return;
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unitId ? { ...u, factCheck: unitCompareResult.factCheck, sources: unitCompareResult.sources } : u)) }),
+      });
+      setUnitCompareResult(null);
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runUnitUpgrade(unit: ContentUnit) {
+    if (!unitCompareResult || unitCompareResult.unitId !== unit.id) return;
+    setUnitUpgradingId(unit.id);
+    setError('');
+    try {
+      const res = await fetch('/api/script-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId: site.id,
+          action: 'upgrade',
+          title: unit.title,
+          script: unit.script,
+          rewriteTitle: unitCompareResult.rewriteTitle,
+          rewriteScript: unitCompareResult.rewriteScript,
+          factCheck: unitCompareResult.factCheck,
+          category: unit.category || 'trivia',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '업그레이드 실패');
+      await applyUnitUpgrade(unit, data.title, data.script);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUnitUpgradingId(null);
+    }
+  }
+
+  async function copyUnitUpgradePrompt(unit: ContentUnit) {
+    if (!unitCompareResult || unitCompareResult.unitId !== unit.id) return;
+    setUnitUpgradeCopyingId(unit.id);
+    setError('');
+    try {
+      const q = new URLSearchParams({
+        siteId: site.id,
+        action: 'upgrade',
+        title: unit.title,
+        script: unit.script,
+        rewriteTitle: unitCompareResult.rewriteTitle || '',
+        rewriteScript: unitCompareResult.rewriteScript || '',
+        factCheck: unitCompareResult.factCheck || '',
+        category: unit.category || 'trivia',
+      });
+      const res = await fetch(`/api/script-draft?${q}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
+      await navigator.clipboard.writeText(data.prompt);
+      setUnitUpgradeCopiedId(unit.id);
+      setUnitUpgradePasteOpenId(unit.id);
+      setUnitUpgradePasteText('');
+      setTimeout(() => setUnitUpgradeCopiedId((cur) => (cur === unit.id ? null : cur)), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUnitUpgradeCopyingId(null);
+    }
+  }
+
+  async function saveUnitUpgradePaste(unit: ContentUnit) {
+    if (!unitUpgradePasteText.trim()) return;
+    const pickField = (field: 'Title' | 'Script') => {
+      const m = unitUpgradePasteText.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
+      return m ? m[1].trim() : undefined;
+    };
+    await applyUnitUpgrade(unit, pickField('Title'), pickField('Script'));
+    setUnitUpgradePasteOpenId(null);
+    setUnitUpgradePasteText('');
+  }
+
+  async function applyUnitUpgrade(unit: ContentUnit, title: string | undefined, script: string | undefined) {
+    const nextTitle = title || unit.title;
+    const nextScript = script || unit.script;
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId: site.id,
+          units: units.map((u) =>
+            u.id === unit.id
+              ? { ...u, title: nextTitle, script: nextScript, factCheck: unitCompareResult?.factCheck, sources: unitCompareResult?.sources, review: undefined, status: 'pending' }
+              : u
+          ),
+        }),
+      });
+      setUnitCompareResult(null);
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function setUnitStatus(id: string, status: ContentUnit['status']) {
     await fetch('/api/script-draft', {
       method: 'PATCH',
@@ -2011,6 +2182,126 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                           <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptJa}</p>
                         </div>
                       )}
+                      {(u.sources && u.sources.length > 0) || u.factCheck ? (
+                        <div className="pt-2 border-t border-neutral-50">
+                          <p className="text-[10px] font-black text-neutral-400 mb-0.5">📎 출처/사실확인 기록</p>
+                          {u.factCheck && <p className="text-[11px] text-neutral-500 whitespace-pre-wrap leading-relaxed mb-1">{u.factCheck}</p>}
+                          {u.sources && u.sources.length > 0 && (
+                            <ul className="text-[10px] text-neutral-400 space-y-0.5 list-disc list-inside">
+                              {u.sources.map((s, i) => (
+                                <li key={i}>{s}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ) : null}
+
+                      {/* 제미나이와 비교→업그레이드 — "교체"가 아니라 원본+제미나이 버전을 합쳐서 최종본을 만든다. */}
+                      <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
+                        <p className="text-[10px] font-black text-neutral-500 mb-1.5">🔍 제미나이와 비교해서 사실확인 (선택)</p>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          <button
+                            onClick={() => copyUnitComparePrompt(u)}
+                            disabled={unitCompareCopyingId === u.id}
+                            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                          >
+                            {unitCompareCopyingId === u.id ? '준비 중...' : unitCompareCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 비교하기'}
+                          </button>
+                          <button
+                            onClick={() => runUnitCompare(u)}
+                            disabled={unitCompareRunningId === u.id}
+                            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                          >
+                            {unitCompareRunningId === u.id ? '비교 중...' : '✨ 자동으로 비교하기'}
+                          </button>
+                        </div>
+                        {unitComparePasteOpenId === u.id && (
+                          <div className="mb-2">
+                            <textarea
+                              value={unitComparePasteText}
+                              onChange={(e) => setUnitComparePasteText(e.target.value)}
+                              rows={6}
+                              placeholder="구독 채팅 답변([FACT-CHECK]/[REWRITE]/[SOURCES])을 여기에 붙여넣으세요"
+                              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button onClick={() => setUnitComparePasteOpenId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                                취소
+                              </button>
+                              <button
+                                onClick={() => saveUnitComparePaste(u.id)}
+                                disabled={!unitComparePasteText.trim()}
+                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                              >
+                                결과 확인
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {unitCompareResult && unitCompareResult.unitId === u.id && (
+                          <div className="space-y-2">
+                            <div className="bg-white border border-neutral-200 rounded-lg p-2">
+                              <p className="text-[10px] font-black text-neutral-400 mb-1">사실확인 결과</p>
+                              <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{unitCompareResult.factCheck || '(내용 없음)'}</p>
+                            </div>
+                            {(unitCompareResult.rewriteTitle || unitCompareResult.rewriteScript) && (
+                              <div className="bg-white border border-neutral-200 rounded-lg p-2">
+                                <p className="text-[10px] font-black text-neutral-400 mb-1">제미나이가 다시 쓴 버전</p>
+                                {unitCompareResult.rewriteTitle && <p className="text-xs font-bold text-neutral-700 mb-1">{unitCompareResult.rewriteTitle}</p>}
+                                {unitCompareResult.rewriteScript && <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{unitCompareResult.rewriteScript}</p>}
+                              </div>
+                            )}
+                            <p className="text-[10px] text-neutral-400">둘 중 하나를 고르는 게 아니라, 두 버전의 장점을 합쳐서 업그레이드해요.</p>
+                            <div className="flex flex-wrap justify-end gap-1.5">
+                              <button
+                                onClick={() => keepOriginalAfterUnitCompare(u.id)}
+                                disabled={saving}
+                                className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                              >
+                                원본 유지
+                              </button>
+                              <button
+                                onClick={() => copyUnitUpgradePrompt(u)}
+                                disabled={unitUpgradeCopyingId === u.id}
+                                className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                              >
+                                {unitUpgradeCopyingId === u.id ? '준비 중...' : unitUpgradeCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 업그레이드'}
+                              </button>
+                              <button
+                                onClick={() => runUnitUpgrade(u)}
+                                disabled={unitUpgradingId === u.id}
+                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-emerald-600 text-white disabled:opacity-40"
+                              >
+                                {unitUpgradingId === u.id ? '업그레이드 중...' : '🔀 자동으로 업그레이드'}
+                              </button>
+                            </div>
+                            {unitUpgradePasteOpenId === u.id && (
+                              <div>
+                                <textarea
+                                  value={unitUpgradePasteText}
+                                  onChange={(e) => setUnitUpgradePasteText(e.target.value)}
+                                  rows={6}
+                                  placeholder="구독 채팅 답변(Title:/Script:)을 여기에 붙여넣으세요"
+                                  className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                                />
+                                <div className="flex justify-end gap-1.5">
+                                  <button onClick={() => setUnitUpgradePasteOpenId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                                    취소
+                                  </button>
+                                  <button
+                                    onClick={() => saveUnitUpgradePaste(u)}
+                                    disabled={saving || !unitUpgradePasteText.trim()}
+                                    className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                                  >
+                                    붙여넣기 적용
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
                       {u.review && (
                         <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
                           <p className="text-[10px] font-black text-neutral-500 mb-1">
