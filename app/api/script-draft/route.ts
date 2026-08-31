@@ -436,6 +436,30 @@ function parseStage(value: unknown): Stage | null {
   return typeof value === 'string' && STAGES.includes(value as Stage) ? (value as Stage) : null;
 }
 
+// 검토(review)는 점수/피드백만 주고 끝나서 "그래서 뭘 고쳐야 하는데" 상태로 남는 문제가 있었다.
+// 이 프롬프트는 그 피드백을 실제로 반영해서 대본을 다시 쓰게 시킨다 — 검토가 끝이 아니라 수정으로 이어지게.
+function buildRevisePrompt(title: string, script: string, feedback: string, category: Category): string {
+  const toneNote =
+    category === 'disaster'
+      ? '"정신 나간/환장할 노릇" 같은 트리비아 유행어는 여전히 쓰면 안 되고, 오프닝 훅+몰입감 있는 전개는 유지해줘.'
+      : '우리 채널 톤(정신 나간/환장할 노릇/발상을 뒤집어 버립니다 등)과 오프닝 훅 공식, 원리 설명은 그대로 유지해줘.';
+  return `아래 대본이 AI 검토에서 받은 피드백을 실제로 반영해서 대본을 다시 써줘. 지적받은 부분만 고치고
+나머지 잘 된 부분(오프닝 훅, 구조, 톤)은 그대로 유지해줘 — 처음부터 새로 쓰지 마.
+
+## 제목
+${title}
+
+## 기존 대본
+${script}
+
+## 검토 피드백 — 이걸 실제로 반영해줘
+${feedback}
+
+## 요청
+피드백에서 지적한 문제를 실제로 고친 완결된 대본을 다시 써줘. ${toneNote} 특정 사실이 불확실하다고
+지적됐다면 더 안전한(과장 없는) 표현으로 바꿔줘. 대본 본문만 출력하고 다른 설명은 붙이지 마.`;
+}
+
 // "💬 구독으로 만들기" — 유료 API 없이 프롬프트만 만들어서 클립보드 복사용으로 돌려준다.
 // action=review일 땐 소재 추천/제목/대본과 무관하게 완성된 콘텐츠 하나의 검토용 프롬프트를 돌려준다.
 export async function GET(request: Request) {
@@ -452,6 +476,14 @@ export async function GET(request: Request) {
     const { data: site } = await supabase.from('hub_sites').select('analysis_result').eq('id', siteId).maybeSingle();
     if (!site) return NextResponse.json({ error: '사이트를 찾을 수 없습니다.' }, { status: 404 });
     return NextResponse.json({ prompt: buildReviewPrompt(site.analysis_result || {}, title, script, category) });
+  }
+
+  if (searchParams.get('action') === 'revise') {
+    const title = searchParams.get('title');
+    const script = searchParams.get('script');
+    const feedback = searchParams.get('feedback');
+    if (!title || !script || !feedback) return NextResponse.json({ error: 'title/script/feedback이 필요합니다.' }, { status: 400 });
+    return NextResponse.json({ prompt: buildRevisePrompt(title, script, feedback, category) });
   }
 
   const stage = parseStage(searchParams.get('stage'));
@@ -502,6 +534,43 @@ export async function POST(request: Request) {
     const review = parseReview(reviewText);
     const units = (prevDraftForReview.units || []).map((u) => (u.id === unitId ? { ...u, review } : u));
     const nextDraft: ScriptDraft = { ...prevDraftForReview, units, updated_at: new Date().toISOString() };
+
+    const { error: saveError } = await supabase
+      .from('hub_sites')
+      .update({ script_draft: nextDraft, updated_at: new Date().toISOString() })
+      .eq('id', siteId);
+    if (saveError) return NextResponse.json({ error: saveError.message }, { status: 500 });
+    return NextResponse.json({ script_draft: nextDraft });
+  }
+
+  if (body?.action === 'revise') {
+    const unitId: string | undefined = body?.unitId;
+    const title: string | undefined = body?.title;
+    const script: string | undefined = body?.script;
+    const feedback: string | undefined = body?.feedback;
+    if (!unitId || !title || !script || !feedback) return NextResponse.json({ error: 'unitId/title/script/feedback이 필요합니다.' }, { status: 400 });
+
+    const { data: site } = await supabase.from('hub_sites').select('script_draft').eq('id', siteId).maybeSingle();
+    if (!site) return NextResponse.json({ error: '사이트를 찾을 수 없습니다.' }, { status: 404 });
+    const prevDraftForRevise: ScriptDraft = site.script_draft || {};
+    const unitCategory = prevDraftForRevise.units?.find((u) => u.id === unitId)?.category || category;
+
+    let revisedText: string;
+    try {
+      revisedText = await callGeminiVision({
+        systemPrompt: '너는 유튜브 쇼츠 콘텐츠 편집자다. 검토 피드백을 실제로 반영해서 대본을 고친다.',
+        userPrompt: buildRevisePrompt(title, script, feedback, unitCategory),
+        model: MODEL,
+      });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    }
+
+    // 대본이 바뀌었으니 기존 검토 결과는 더 이상 유효하지 않다 — 지우고 다시 검토받게 한다.
+    const units = (prevDraftForRevise.units || []).map((u) =>
+      u.id === unitId ? { ...u, script: revisedText.trim(), review: undefined, status: 'pending' as const } : u
+    );
+    const nextDraft: ScriptDraft = { ...prevDraftForRevise, units, updated_at: new Date().toISOString() };
 
     const { error: saveError } = await supabase
       .from('hub_sites')

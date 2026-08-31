@@ -1234,6 +1234,11 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [reviewCopiedId, setReviewCopiedId] = useState<string | null>(null);
   const [reviewPasteOpenId, setReviewPasteOpenId] = useState<string | null>(null);
   const [reviewPasteText, setReviewPasteText] = useState('');
+  const [revisingId, setRevisingId] = useState<string | null>(null);
+  const [reviseCopyingId, setReviseCopyingId] = useState<string | null>(null);
+  const [reviseCopiedId, setReviseCopiedId] = useState<string | null>(null);
+  const [revisePasteOpenId, setRevisePasteOpenId] = useState<string | null>(null);
+  const [revisePasteText, setRevisePasteText] = useState('');
   const units = draft.units || [];
 
   useEffect(() => {
@@ -1515,6 +1520,70 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     }
   }
 
+  // 검토 피드백을 실제로 반영해서 대본을 고쳐 쓴다 — 검토가 점수만 주고 끝나지 않게.
+  async function reviseUnit(unit: ContentUnit) {
+    if (!unit.review?.feedback) return;
+    setRevisingId(unit.id);
+    setError('');
+    try {
+      const res = await fetch('/api/script-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, action: 'revise', unitId: unit.id, title: unit.title, script: unit.script, feedback: unit.review.feedback, category: unit.category || 'trivia' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '수정 실패');
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRevisingId(null);
+    }
+  }
+
+  async function copyRevisePrompt(unit: ContentUnit) {
+    if (!unit.review?.feedback) return;
+    setReviseCopyingId(unit.id);
+    setError('');
+    try {
+      const q = new URLSearchParams({ siteId: site.id, action: 'revise', title: unit.title, script: unit.script, feedback: unit.review.feedback, category: unit.category || 'trivia' });
+      const res = await fetch(`/api/script-draft?${q}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
+      await navigator.clipboard.writeText(data.prompt);
+      setReviseCopiedId(unit.id);
+      setRevisePasteOpenId(unit.id);
+      setRevisePasteText('');
+      setTimeout(() => setReviseCopiedId((cur) => (cur === unit.id ? null : cur)), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReviseCopyingId(null);
+    }
+  }
+
+  async function savePastedRevise(unitId: string) {
+    if (!revisePasteText.trim()) return;
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unitId ? { ...u, script: revisePasteText.trim(), review: undefined, status: 'pending' } : u)) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '저장 실패');
+      setRevisePasteOpenId(null);
+      setRevisePasteText('');
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function setUnitStatus(id: string, status: ContentUnit['status']) {
     await fetch('/api/script-draft', {
       method: 'PATCH',
@@ -1716,7 +1785,46 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                           <p className="text-[10px] font-black text-neutral-500 mb-1">
                             🔍 AI 검토 {u.review.score !== undefined && `— ${u.review.score}/10점`}
                           </p>
-                          <p className="text-[11px] text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.review.feedback}</p>
+                          <p className="text-[11px] text-neutral-600 leading-relaxed whitespace-pre-wrap mb-2">{u.review.feedback}</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              onClick={() => copyRevisePrompt(u)}
+                              disabled={reviseCopyingId === u.id}
+                              className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                            >
+                              {reviseCopyingId === u.id ? '준비 중...' : reviseCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 피드백 반영 수정'}
+                            </button>
+                            <button
+                              onClick={() => reviseUnit(u)}
+                              disabled={revisingId === u.id}
+                              className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
+                            >
+                              {revisingId === u.id ? '수정 중...' : '🔧 피드백 반영해서 수정'}
+                            </button>
+                          </div>
+                          {revisePasteOpenId === u.id && (
+                            <div className="bg-white border border-neutral-200 rounded-lg p-2 mt-1.5">
+                              <textarea
+                                value={revisePasteText}
+                                onChange={(e) => setRevisePasteText(e.target.value)}
+                                rows={5}
+                                placeholder="구독 채팅이 다시 써준 대본 전문을 여기에 붙여넣으세요"
+                                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                              />
+                              <div className="flex justify-end gap-1.5">
+                                <button onClick={() => setRevisePasteOpenId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                                  취소
+                                </button>
+                                <button
+                                  onClick={() => savePastedRevise(u.id)}
+                                  disabled={saving || !revisePasteText.trim()}
+                                  className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                                >
+                                  {saving ? '저장 중...' : '붙여넣기 저장'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                       {reviewPasteOpenId === u.id && (
