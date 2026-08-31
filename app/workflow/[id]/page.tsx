@@ -1132,6 +1132,10 @@ function isScriptStep(step: Step): boolean {
   return /대본\s*작성/.test(step.name);
 }
 
+function isImageVideoStep(step: Step): boolean {
+  return /이미지/.test(step.name) && /영상/.test(step.name);
+}
+
 const ANALYSIS_TABS = [
   { key: 'channel', label: '채널' },
   { key: 'title', label: '제목' },
@@ -2824,6 +2828,153 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   );
 }
 
+// 6번(이미지/영상 생성) 단계 패널 — 완성된 콘텐츠 목록에서 이름을 클릭하면 펼쳐지면서
+// 그 콘텐츠의 장면별 CLEAN/INFO/영상 프롬프트가 타임라인 순서로 나온다. 데이터 자체는
+// 5번(대본 작성)의 콘텐츠 유닛(ContentUnit.scenePrompts)에 저장되지만, 실제로 이미지/영상을
+// 만들 때 찾는 곳은 6번이라서 여기서도 똑같이 보여주고 편집도 여기서 끝낼 수 있게 한다.
+function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const units = site.script_draft?.units || [];
+  const [openUnitId, setOpenUnitId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [draftText, setDraftText] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function save(id: string, scenePrompts: string) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, scenePrompts } : u)) }),
+      });
+      setEditId(null);
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (units.length === 0) {
+    return (
+      <div className="border-t border-black/5 pt-3">
+        <p className="text-xs text-neutral-300">아직 5번(대본 작성)에서 완성된 콘텐츠가 없어요 — 먼저 대본을 완성해주세요.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-black/5 pt-3">
+      <div className="text-xs font-black text-neutral-500 mb-2">🎬 콘텐츠별 이미지/영상 프롬프트</div>
+      <div className="space-y-1.5">
+        {units.map((u) => {
+          const scenes = u.scenePrompts ? parseSceneBlocks(u.scenePrompts) : [];
+          return (
+            <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+              <button
+                onClick={() => setOpenUnitId((cur) => (cur === u.id ? null : u.id))}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer"
+              >
+                <span className={`shrink-0 transition-transform text-neutral-300 ${openUnitId === u.id ? 'rotate-90' : ''}`}>▶</span>
+                {u.category === 'disaster' && <span className="shrink-0 text-[10px]">🚨</span>}
+                <span className="flex-1 min-w-0 truncate text-[11px] font-bold">{u.title}</span>
+                {u.scenePrompts ? (
+                  <span className="shrink-0 text-[10px] font-black text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
+                    {scenes.length > 0 ? `${scenes.length}개 장면` : '있음'}
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-[10px] font-black text-neutral-300 bg-neutral-50 rounded-full px-2 py-0.5">없음</span>
+                )}
+              </button>
+              {openUnitId === u.id && (
+                <div className="px-3 pb-3 pt-1 border-t border-neutral-50">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+                    {editId !== u.id && (
+                      <button
+                        onClick={() => {
+                          setEditId(u.id);
+                          setDraftText(u.scenePrompts || '');
+                        }}
+                        className="text-[10px] font-bold text-blue-600 hover:underline shrink-0"
+                      >
+                        {u.scenePrompts ? '✏️ 수정' : '+ 붙여넣기'}
+                      </button>
+                    )}
+                  </div>
+                  {editId === u.id ? (
+                    <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2">
+                      <textarea
+                        value={draftText}
+                        onChange={(e) => setDraftText(e.target.value)}
+                        rows={8}
+                        placeholder="장면별 CLEAN/INFO/영상 프롬프트 전문을 여기에 붙여넣으세요"
+                        className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <button onClick={() => setEditId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                          취소
+                        </button>
+                        <button
+                          onClick={() => save(u.id, draftText)}
+                          disabled={saving || !draftText.trim()}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                        >
+                          {saving ? '저장 중...' : '저장'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : u.scenePrompts ? (
+                    scenes.length === 0 ? (
+                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scenePrompts}</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {scenes.map((s) => (
+                          <details key={s.id} className="bg-neutral-50 border border-neutral-100 rounded-lg">
+                            <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-bold flex items-center gap-2 select-none">
+                              <span className="text-neutral-400 shrink-0">{s.id}</span>
+                              <span className="flex-1 min-w-0 truncate">{s.title}</span>
+                            </summary>
+                            <div className="px-2.5 pb-2.5 pt-1 border-t border-neutral-100 space-y-1.5">
+                              {s.script && <p className="text-[11px] text-neutral-500 italic">&quot;{s.script}&quot;</p>}
+                              {s.clean && (
+                                <div className="flex items-start gap-1.5">
+                                  <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">CLEAN</span>
+                                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.clean}</p>
+                                  <CopyButton text={s.clean} />
+                                </div>
+                              )}
+                              {s.info && (
+                                <div className="flex items-start gap-1.5">
+                                  <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">INFO</span>
+                                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.info}</p>
+                                  <CopyButton text={s.info} />
+                                </div>
+                              )}
+                              {s.video && (
+                                <div className="flex items-start gap-1.5">
+                                  <span className="shrink-0 text-[10px] font-black text-amber-600 mt-0.5 w-10">영상</span>
+                                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.video}</p>
+                                  <CopyButton text={s.video} />
+                                </div>
+                              )}
+                            </div>
+                          </details>
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    <p className="text-[11px] text-neutral-300">아직 없음 — 위 버튼으로 붙여넣어주세요.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
   const s = status || '';
   if (/⚠️|막힘|막히는/.test(s)) return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-600', label: '막힘' };
@@ -2902,6 +3053,7 @@ function FlowChart({
           {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
           {isAnalysisStep(active) && <AnalysisPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
+          {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
