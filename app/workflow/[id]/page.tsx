@@ -17,11 +17,16 @@ type AnalysisResult = {
 // 별개로 완성된 것들을 units 배열에 콘텐츠 단위로 저장한다. 나중에 6~9번(영상/TTS/자막/렌더링)도
 // 여기 unit id를 기준으로 진행 상태를 붙일 수 있게 id를 갖고 있다.
 type UnitReview = { score?: number; feedback?: string; reviewedAt?: string };
+type UnitCategory = 'trivia' | 'disaster';
 type ContentUnit = {
   id: string;
   material: string;
   title: string;
   script: string;
+  // 2026-08-31 추가 — 대참사/사건은 트리비아용 가벼운 톤을 쓰면 안 돼서 완전히 다른 프롬프트 세트를 쓴다.
+  category?: UnitCategory;
+  // 공학 파이프라인 내 세부 분야(건축/무기/토목/항공/자연재해 등) — 자유 텍스트, 프리셋 밖도 허용.
+  topic?: string;
   // 최종 선택된 것 외에 그때 같이 추천받았던 후보들 — 나중에 다시 참고하거나 다른 걸로 바꾸고 싶을 때를 위해 보존.
   materialCandidates?: string[];
   titleCandidates?: string[];
@@ -34,6 +39,7 @@ type ContentUnit = {
   createdAt: string;
 };
 type ScriptDraft = {
+  category?: UnitCategory;
   materials?: string[];
   selectedMaterial?: string;
   titles?: string[];
@@ -1235,7 +1241,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     setGenerating(stage);
     setError('');
     try {
-      const body: Record<string, string> = { siteId: site.id, stage };
+      const body: Record<string, string> = { siteId: site.id, stage, category: draft.category || 'trivia' };
       if (stage === 'titles') body.material = draft.selectedMaterial || '';
       if (stage === 'script') body.title = draft.selectedTitle || '';
       const res = await fetch('/api/script-draft', {
@@ -1257,7 +1263,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     setCopying(stage);
     setError('');
     try {
-      const q = new URLSearchParams({ siteId: site.id, stage });
+      const q = new URLSearchParams({ siteId: site.id, stage, category: draft.category || 'trivia' });
       if (stage === 'titles') q.set('material', draft.selectedMaterial || '');
       if (stage === 'script') q.set('title', draft.selectedTitle || '');
       const res = await fetch(`/api/script-draft?${q}`);
@@ -1328,6 +1334,26 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     onRefresh();
   }
 
+  // 트리비아(가벼운 톤)와 대참사/사건(진지한 톤)은 완전히 다른 프롬프트를 쓰므로, 소재 추천 전에 먼저 골라야 한다.
+  async function setCategory(category: UnitCategory) {
+    if (!confirm(category === 'disaster' ? '"대참사/사건" 모드로 바꿀까요? 지금까지 만든 소재/제목/대본은 초기화돼요.' : '"트리비아" 모드로 바꿀까요? 지금까지 만든 소재/제목/대본은 초기화돼요.')) return;
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, category, materials: null, selectedMaterial: null, titles: null, selectedTitle: null, script: null }),
+    });
+    onRefresh();
+  }
+
+  async function setUnitTopic(id: string, topic: string) {
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, topic } : u)) }),
+    });
+    onRefresh();
+  }
+
   async function selectTitle(t: string) {
     await fetch('/api/script-draft', {
       method: 'PATCH',
@@ -1372,6 +1398,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         material: draft.selectedMaterial,
         title: draft.selectedTitle,
         script: scriptDraftText.trim(),
+        category: draft.category || 'trivia',
         materialCandidates: draft.materials,
         titleCandidates: draft.titles,
         titleEn: draft.titleEn,
@@ -1522,6 +1549,32 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         </button>
       </div>
       <GenerateHint />
+      <div className="flex items-center gap-1.5 mb-2">
+        <span className="text-[10px] font-black text-neutral-400">카테고리:</span>
+        <button
+          onClick={() => setCategory('trivia')}
+          disabled={(draft.category || 'trivia') === 'trivia'}
+          className={`text-[11px] font-black px-3 py-1 rounded-full border ${
+            (draft.category || 'trivia') === 'trivia' ? 'bg-black text-white border-black' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'
+          }`}
+        >
+          🔧 트리비아
+        </button>
+        <button
+          onClick={() => setCategory('disaster')}
+          disabled={draft.category === 'disaster'}
+          className={`text-[11px] font-black px-3 py-1 rounded-full border ${
+            draft.category === 'disaster' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-red-300'
+          }`}
+        >
+          🚨 대참사·사건
+        </button>
+      </div>
+      {draft.category === 'disaster' && (
+        <p className="text-[10px] text-red-500 font-bold mb-2">
+          진지한 톤 전용 모드예요 — "정신 나간/환장할 노릇" 같은 트리비아 유행어는 안 나오고, 사실→원인→교훈/개선 구조로 만들어져요.
+        </p>
+      )}
       {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
 
       {units.length > 0 && (
@@ -1540,7 +1593,9 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                   <div className="flex items-center gap-2 px-3 py-2">
                     <button onClick={() => setOpenUnitId((cur) => (cur === u.id ? null : u.id))} className="flex-1 min-w-0 text-left flex items-center gap-1.5">
                       <span className={`inline-block transition-transform text-neutral-300 ${openUnitId === u.id ? 'rotate-90' : ''}`}>▶</span>
+                      {u.category === 'disaster' && <span className="shrink-0 text-[10px]">🚨</span>}
                       <span className="text-[11px] font-bold truncate">{u.title}</span>
+                      {u.topic && <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">{u.topic}</span>}
                       {u.review?.score !== undefined && (
                         <span className="shrink-0 text-[10px] font-black text-neutral-400">({u.review.score}/10)</span>
                       )}
@@ -1553,6 +1608,20 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                   {openUnitId === u.id && (
                     <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
                       <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-black text-neutral-400">분야:</span>
+                        {['건축', '토목', '무기', '항공', '자연재해', '기타'].map((t) => (
+                          <button
+                            key={t}
+                            onClick={() => setUnitTopic(u.id, u.topic === t ? '' : t)}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              u.topic === t ? 'bg-black text-white border-black' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400'
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
                       {u.titleCandidates && u.titleCandidates.filter((t) => t !== u.title).length > 0 && (
                         <div>
                           <p className="text-[10px] font-black text-neutral-400 mb-1">그때 같이 나온 다른 제목 후보 (클릭하면 교체)</p>
