@@ -970,6 +970,38 @@ ${PLATFORM_GUIDE[target_platform]}
       }
     );
 
+    server.registerTool(
+      'save_unit_scene_prompts',
+      {
+        description:
+          '5번(대본 작성) 완성 콘텐츠 목록(script_draft.units)의 특정 유닛 하나에 6번(이미지/영상 생성) 장면별 프롬프트 전문을 저장한다. ' +
+          '워크플로우 문서(workflow_content)는 파이프라인 전체가 공유하는 문서라 특정 에피소드 전용 프롬프트를 적을 곳이 아니다 — ' +
+          '반드시 이 툴로 해당 유닛에 붙여야 5번 탭에서 그 콘텐츠와 함께 보인다.',
+        inputSchema: z.object({
+          site_id: z.string().describe('파이프라인의 hub_sites id (list_sites로 확인)'),
+          unit_id: z.string().describe('script_draft.units 안의 유닛 id (list_sites 결과의 script_draft.units 참고)'),
+          scenePrompts: z.string().describe('장면별 CLEAN/INFO/영상 프롬프트 전문(마크다운/텍스트, 통째로 교체됨)'),
+        }),
+      },
+      async ({ site_id, unit_id, scenePrompts }) => {
+        const supabase = getSupabaseServerClient();
+        const { data: siteRow, error: fetchErr } = await supabase.from('hub_sites').select('script_draft').eq('id', site_id).single();
+        if (fetchErr) return { content: [{ type: 'text', text: `에러: ${fetchErr.message}` }] };
+        const draft = siteRow?.script_draft || {};
+        const units = Array.isArray(draft.units) ? draft.units : [];
+        const idx = units.findIndex((u) => u.id === unit_id);
+        if (idx === -1) return { content: [{ type: 'text', text: `해당 unit_id(${unit_id})를 찾을 수 없습니다.` }] };
+        const nextUnits = units.slice();
+        nextUnits[idx] = { ...nextUnits[idx], scenePrompts };
+        const { error } = await supabase
+          .from('hub_sites')
+          .update({ script_draft: { ...draft, units: nextUnits }, updated_at: new Date().toISOString() })
+          .eq('id', site_id);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: 'OK — 저장됨' }] };
+      }
+    );
+
     // ── 범용 유틸 (기존) ─────────────────────────────
 
     server.registerTool(
