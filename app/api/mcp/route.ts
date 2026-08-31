@@ -989,7 +989,7 @@ ${PLATFORM_GUIDE[target_platform]}
         if (fetchErr) return { content: [{ type: 'text', text: `에러: ${fetchErr.message}` }] };
         const draft = siteRow?.script_draft || {};
         const units = Array.isArray(draft.units) ? draft.units : [];
-        const idx = units.findIndex((u) => u.id === unit_id);
+        const idx = units.findIndex((u: { id: string }) => u.id === unit_id);
         if (idx === -1) return { content: [{ type: 'text', text: `해당 unit_id(${unit_id})를 찾을 수 없습니다.` }] };
         const nextUnits = units.slice();
         nextUnits[idx] = { ...nextUnits[idx], scenePrompts };
