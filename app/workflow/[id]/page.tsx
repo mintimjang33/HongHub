@@ -2865,7 +2865,7 @@ function FlowChart({
               <div key={i} className="flex items-center shrink-0">
                 <button
                   onClick={() => onSelect(i)}
-                  className={`flex items-center gap-2 border rounded-lg px-2.5 py-2 text-left whitespace-nowrap transition ${
+                  className={`flex items-center gap-2 border rounded-lg px-2.5 py-2 text-left whitespace-nowrap cursor-pointer transition ${
                     isSelected ? `${tone.bg} ${tone.border} ring-2 ring-black/10` : 'bg-white border-neutral-200 hover:border-neutral-300'
                   }`}
                 >
