@@ -143,6 +143,39 @@ const baseHandler = createMcpHandler(
     );
 
     server.registerTool(
+      'update_script_draft',
+      {
+        description:
+          '사이트의 script_draft(대본+씬별 CLEAN/INFO/영상 프롬프트가 담긴 JSON, units 배열 구조)를 통째로 교체한다. update_site로는 이 필드를 못 건드려서 별도로 만든 도구.',
+        inputSchema: z.object({
+          id: z.string().describe('사이트 id (list_sites로 확인)'),
+          script_draft: z
+            .string()
+            .describe(
+              'script_draft 전체를 JSON 문자열로 넘긴다. 기존 구조(units 배열 등)를 유지하려면 먼저 list_sites로 현재 값을 읽고, 필요한 부분만 고친 뒤 전체 객체를 다시 JSON.stringify해서 넘길 것.'
+            ),
+        }),
+      },
+      async ({ id, script_draft }) => {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(script_draft);
+        } catch (e) {
+          return { content: [{ type: 'text', text: `JSON 파싱 에러: ${(e as Error).message}` }] };
+        }
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase
+          .from('hub_sites')
+          .update({ script_draft: parsed, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .select()
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
       'delete_site',
       { description: 'HongHub에서 사이트 등록을 삭제한다.', inputSchema: z.object({ id: z.string().describe('삭제할 사이트의 id') }) },
       async ({ id }) => {
