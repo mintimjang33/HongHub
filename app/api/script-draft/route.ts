@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../lib/supabase';
-import { callGeminiVision } from '../../../lib/aiProviders';
+import { callGeminiVision, callGeminiGrounded } from '../../../lib/aiProviders';
 
 // 5번(대본 작성) 단계 전용 — 소재 추천 → 제목 추천 → 대본(한국어+영어+일본어), 3단계 파이프라인.
 // + 완성된 콘텐츠 단위(unit)에 대한 AI 자동 검토(action=review).
@@ -15,7 +15,7 @@ export const maxDuration = 60;
 const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 const MAX_ITEMS = 15;
 const MODEL = 'gemini-3.1-pro-preview';
-const STAGES = ['materials', 'titles', 'script'] as const;
+const STAGES = ['materials', 'titles', 'script', 'translate'] as const;
 type Stage = (typeof STAGES)[number];
 const CATEGORIES = ['trivia', 'disaster'] as const;
 type Category = (typeof CATEGORIES)[number];
@@ -39,6 +39,9 @@ type ContentUnit = {
   titleJa?: string;
   scriptJa?: string;
   review?: UnitReview;
+  sources?: string[];
+  // action=compare에서 받은 사실확인 결과 — 나중에 지적받을 때 근거로 남겨두려고 완성 콘텐츠까지 따라간다.
+  factCheck?: string;
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -53,6 +56,11 @@ type ScriptDraft = {
   scriptEn?: string;
   titleJa?: string;
   scriptJa?: string;
+  // 대본 생성 시 구글 검색 그라운딩으로 실제 근거를 찾으면 여기 임시로 담아뒀다가, 완성 콘텐츠로
+  // 저장할 때 그 unit.sources로 옮겨진다(finalizeUnit, 프론트엔드).
+  sources?: string[];
+  // action=compare(제미나이 사실확인) 결과 — action=upgrade로 합친 다음에도 근거 기록으로 남겨둔다.
+  factCheck?: string;
   units?: ContentUnit[];
   updated_at?: string;
 };
@@ -86,7 +94,8 @@ async function buildPrompt(
   siteId: string,
   material: string | undefined,
   title: string | undefined,
-  category: Category
+  category: Category,
+  script?: string
 ): Promise<{ prompt: string; error?: string; status?: number }> {
   const supabase = getSupabaseServerClient();
   const { data: site } = await supabase.from('hub_sites').select('id, name, analysis_result').eq('id', siteId).maybeSingle();
@@ -105,7 +114,7 @@ async function buildPrompt(
   const withTranscript = items.filter((i) => i.transcript && i.transcript.trim().length > 20);
   const topItems = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
 
-  if (category === 'disaster') return buildDisasterPrompt(stage, site.name, material, title);
+  if (category === 'disaster') return buildDisasterPrompt(stage, site.name, material, title, script);
 
   if (stage === 'materials') {
     if (!analysis.channel && !analysis.title) {
@@ -169,7 +178,37 @@ ${analysis.title || '(제목 패턴 분석 없음 — 일반적인 유튜브 쇼
     return { prompt };
   }
 
-  // stage === 'script' — 한국어 대본 + 영어/일본어 현지화 각색 버전까지 한 번에 요청한다.
+  // stage === 'translate' — 한국어 대본이 (비교/업그레이드까지 거쳐) 확정된 다음에만 실행한다.
+  // 영어/일본어는 새 사실을 만들어내는 단계가 아니라 확정된 한국어 내용을 현지화하는 단계라 그라운딩 없이도 된다.
+  if (stage === 'translate') {
+    if (!title || !script) return { prompt: '', error: 'title/script가 필요합니다.', status: 400 };
+    const prompt = `아래 확정된 한국어 제목/대본을 영어, 일본어로 현지화 각색해줘.
+
+## 한국어 제목
+${title}
+
+## 한국어 대본(확정본 — 사실관계는 이미 확인됨)
+${script}
+
+## 요청
+같은 소재·같은 서사 구조·같은 정보·같은 사실관계를 담되, 한국어를 그대로 번역하지 말고 각 언어권 쇼츠
+시청자에게 통하는 후킹 표현으로 현지화 각색해줘(영어는 영어식 임팩트 있는 구어체, 일본어는 일본어식 쇼츠
+어투). 제목도 각 언어에 맞게 새로 뽑아줘. 분량은 한국어 버전과 비슷한 낭독 시간이 나오도록 맞춰줘. 사실관계
+(수치·연도·이름 등)는 한국어 원문 그대로 유지하고 새로 바꾸지 마.
+
+## 출력 형식 — 아래 형식을 정확히 지켜줘(다른 설명 붙이지 말고 이 형식만)
+[EN]
+Title: (영어 제목)
+Script: (영어 대본 본문)
+
+[JA]
+Title: (일본어 제목)
+Script: (일본어 대본 본문)`;
+    return { prompt };
+  }
+
+  // stage === 'script' — 한국어 대본만 작성한다. 사실확인·업그레이드(action=compare/upgrade)를 거쳐
+  // 한국어가 확정된 다음에야 영어/일본어(stage=translate)로 넘어가는 구조로 2026-08-31 분리했다.
   if (!title) return { prompt: '', error: 'title이 필요합니다.', status: 400 };
   const targetChars = extractTargetChars(analysis.pace);
   const prompt = `"${site.name}" 파이프라인의 아래 제목으로 쇼츠 대본을 작성해줘.
@@ -215,22 +254,15 @@ ${analysis.script ? `[대본 구조 패턴]\n${analysis.script}\n` : ''}${analys
 - **현실적 대가/한계**: 네이밍으로 끝내지 말고, 그 직전이나 직후에 이 해결책의 실제 비용·유지보수·부작용·한계를
   한 문장이라도 짧게 인정해줘("물론 ~라는 단점도 있습니다" 같은 식으로). 완벽한 해결로만 끝나면 오히려 신뢰도가 떨어져.
 
-## 영어/일본어 버전 요청
-같은 소재·같은 서사 구조·같은 정보를 담되, 한국어를 그대로 번역하지 말고 각 언어권 쇼츠 시청자에게 통하는 후킹 표현으로
-현지화 각색해줘(영어는 영어식 임팩트 있는 구어체, 일본어는 일본어식 쇼츠 어투). 제목도 각 언어에 맞게 새로 뽑아줘.
-분량은 한국어 버전과 비슷한 낭독 시간이 나오도록 맞춰줘.
+## 출처 — 검색해서 답한 거면 반드시 남겨줘
+대본에 쓴 구체적인 사실(수치·연도·사건 등)을 실제로 검색해서 확인했다면, 어떤 자료(언론사명이나 사이트)를
+근거로 삼았는지 마지막에 [SOURCES]로 따로 남겨줘. 나중에 사실관계로 지적받을 때 근거로 쓸 거야.
 
 ## 출력 형식 — 아래 형식을 정확히 지켜줘(다른 설명 붙이지 말고 이 형식만)
-[KO]
-(한국어 대본 본문)
+(한국어 대본 본문만. 다른 설명 붙이지 말고)
 
-[EN]
-Title: (영어 제목)
-Script: (영어 대본 본문)
-
-[JA]
-Title: (일본어 제목)
-Script: (일본어 대본 본문)`;
+[SOURCES]
+(검색해서 확인한 출처를 한 줄에 하나씩. 검색 안 했으면 이 섹션은 비워도 됨)`;
   return { prompt };
 }
 
@@ -241,8 +273,35 @@ function buildDisasterPrompt(
   stage: Stage,
   siteName: string,
   material: string | undefined,
-  title: string | undefined
+  title: string | undefined,
+  script?: string
 ): { prompt: string; error?: string; status?: number } {
+  if (stage === 'translate') {
+    if (!title || !script) return { prompt: '', error: 'title/script가 필요합니다.', status: 400 };
+    const prompt = `아래 확정된 "대참사/사건" 카테고리 한국어 제목/대본을 영어, 일본어로 번역해줘.
+
+## 한국어 제목
+${title}
+
+## 한국어 대본(확정본 — 사실관계는 이미 확인됨)
+${script}
+
+## 요청
+같은 사실·구조·톤으로 영어, 일본어 버전을 만들어줘. 트리비아 카테고리와 달리 여기서는 "임팩트 있는 후킹
+문구"로 각색하지 말고, 한국어 버전과 마찬가지로 담백하고 존중하는 어조를 그대로 유지해줘 — 오락적으로
+과장하면 안 돼. 제목도 자극적이지 않게 각 언어로 자연스럽게 만들어줘. 사실관계(수치·연도·이름 등)는
+한국어 원문 그대로 유지하고 새로 바꾸지 마.
+
+## 출력 형식 — 아래 형식을 정확히 지켜줘(다른 설명 붙이지 말고 이 형식만)
+[EN]
+Title: (영어 제목)
+Script: (영어 대본 본문)
+
+[JA]
+Title: (일본어 제목)
+Script: (일본어 대본 본문)`;
+    return { prompt };
+  }
   if (stage === 'materials') {
     const prompt = `"${siteName}" 파이프라인의 "대참사/사건" 카테고리용 소재를 8개 추천해줘.
 
@@ -315,48 +374,69 @@ ${title}
 확신할 수 없는 구체적 수치(사망자 수, 날짜, 규모)는 쓰지 말고 애매하게 표현하거나 생략해줘. 지어낸 통계는
 절대 안 돼.
 
-## 영어/일본어 버전 요청
-같은 사실·구조·톤으로 영어, 일본어 버전도 만들어줘. 트리비아 카테고리와 달리 여기서는 "임팩트 있는 후킹
-문구"로 각색하지 말고, 한국어 버전과 마찬가지로 담백하고 존중하는 어조를 그대로 유지해줘 — 오락적으로
-과장하면 안 돼. 제목도 자극적이지 않게 각 언어로 자연스럽게 만들어줘.
+## 출처 — 검색해서 답한 거면 반드시 남겨줘
+대본에 쓴 구체적인 사실(수치·연도·사건 등)을 실제로 검색해서 확인했다면, 어떤 자료(언론사명이나 사이트)를
+근거로 삼았는지 마지막에 [SOURCES]로 따로 남겨줘. 나중에 사실관계로 지적받을 때 근거로 쓸 거야.
 
 ## 출력 형식 — 아래 형식을 정확히 지켜줘(다른 설명 붙이지 말고 이 형식만)
-[KO]
-(한국어 대본 본문)
+(한국어 대본 본문만. 다른 설명 붙이지 말고)
 
-[EN]
-Title: (영어 제목)
-Script: (영어 대본 본문)
-
-[JA]
-Title: (일본어 제목)
-Script: (일본어 대본 본문)`;
+[SOURCES]
+(검색해서 확인한 출처를 한 줄에 하나씩. 검색 안 했으면 이 섹션은 비워도 됨)`;
   return { prompt };
 }
 
-// buildPrompt의 "출력 형식" 그대로 온 응답을 파싱한다. 구독-복사 경로(사람이 붙여넣는 답변)도
-// AI가 같은 형식으로 답하는 걸 전제로 동일하게 파싱한다 — 형식이 깨져 있으면 KO만이라도 최대한 살린다.
-function parseScriptResponse(text: string): { ko: string; titleEn?: string; scriptEn?: string; titleJa?: string; scriptJa?: string } {
-  const koMatch = text.match(/\[KO\]([\s\S]*?)(?=\[EN\]|\[JA\]|$)/);
+function pickField(block: string | undefined, field: 'Title' | 'Script'): string | undefined {
+  if (!block) return undefined;
+  const re = new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i');
+  const m = block.match(re);
+  return m ? m[1].trim() : undefined;
+}
+
+function parseSources(text: string): string[] | undefined {
+  const sourcesMatch = text.match(/\[SOURCES\]([\s\S]*?)$/);
+  return sourcesMatch
+    ? sourcesMatch[1]
+        .split('\n')
+        .map((l) => l.replace(/^\s*[-*\d.)]+\s*/, '').trim())
+        .filter(Boolean)
+    : undefined;
+}
+
+// stage=script 응답 파싱 — 이제 한국어 대본 하나만 온다(2026-08-31, 영어/일본어는 stage=translate로 분리).
+function parseScriptResponse(text: string): { ko: string; sources?: string[] } {
+  const sources = parseSources(text);
+  const ko = text.replace(/\[SOURCES\][\s\S]*$/, '').trim();
+  return { ko, sources };
+}
+
+// stage=translate 응답 파싱 — [EN]/[JA] 형식.
+function parseTranslateResponse(text: string): { titleEn?: string; scriptEn?: string; titleJa?: string; scriptJa?: string } {
   const enMatch = text.match(/\[EN\]([\s\S]*?)(?=\[JA\]|$)/);
   const jaMatch = text.match(/\[JA\]([\s\S]*?)$/);
-
-  const ko = (koMatch ? koMatch[1] : text).trim();
-
-  function pickField(block: string | undefined, field: 'Title' | 'Script'): string | undefined {
-    if (!block) return undefined;
-    const re = new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i');
-    const m = block.match(re);
-    return m ? m[1].trim() : undefined;
-  }
-
   return {
-    ko,
     titleEn: pickField(enMatch?.[1], 'Title'),
     scriptEn: pickField(enMatch?.[1], 'Script'),
     titleJa: pickField(jaMatch?.[1], 'Title'),
     scriptJa: pickField(jaMatch?.[1], 'Script'),
   };
+}
+
+// action=compare 응답 파싱 — [FACT-CHECK]/[REWRITE](Title:/Script:)/[SOURCES].
+function parseCompareResponse(text: string): { factCheck: string; rewriteTitle?: string; rewriteScript?: string; sources?: string[] } {
+  const factMatch = text.match(/\[FACT-CHECK\]([\s\S]*?)(?=\[REWRITE\]|\[SOURCES\]|$)/);
+  const rewriteMatch = text.match(/\[REWRITE\]([\s\S]*?)(?=\[SOURCES\]|$)/);
+  return {
+    factCheck: (factMatch ? factMatch[1] : '').trim(),
+    rewriteTitle: pickField(rewriteMatch?.[1], 'Title'),
+    rewriteScript: pickField(rewriteMatch?.[1], 'Script'),
+    sources: parseSources(text),
+  };
+}
+
+// action=upgrade 응답 파싱 — Title:/Script: 두 줄.
+function parseUpgradeResponse(text: string): { title?: string; script?: string } {
+  return { title: pickField(text, 'Title'), script: pickField(text, 'Script') };
 }
 
 function buildReviewPrompt(analysis: AnalysisResult, title: string, script: string, category: Category): string {
@@ -460,6 +540,86 @@ ${feedback}
 지적됐다면 더 안전한(과장 없는) 표현으로 바꿔줘. 대본 본문만 출력하고 다른 설명은 붙이지 마.`;
 }
 
+// 대본을 완성한 다음 실제 검색 그라운딩이 붙은 제미나이에게 보내서 사실확인 + 제미나이 자체 버전을
+// 받아오는 프롬프트 — 2026-08-31 추가. 제목도 대본만큼이나 엉망일 수 있으니 같이 검증/재작성 대상이다.
+// 목적은 "교체"가 아니라 "비교" — 이 결과는 그대로 저장되지 않고, action=upgrade에서 원본과 함께
+// 합쳐서 업그레이드하는 데 쓰인다.
+function buildComparePrompt(title: string, script: string, category: Category): string {
+  const toneNote =
+    category === 'disaster'
+      ? '"정신 나간/환장할 노릇" 같은 유행어는 쓰지 말고 담백하고 존중하는 톤을 유지해줘.'
+      : '오프닝 훅 형식("여기 [역설적인 소품/상황]이 있습니다")과 구어체 나레이션 톤은 유지해줘.';
+  return `아래는 유튜브 공학 쇼츠용으로 작성한 제목과 한국어 대본이야. 두 가지를 해줘.
+
+1. 사실 확인: 실제로 검색해서 제목과 대본 속 구체적 사실(수치·연도·사건 경위·인명 피해·명칭 등)이 맞는지
+   확인해줘. 제목도 대본만큼 부정확하거나 과장됐을 수 있으니 같이 확인해줘. 틀렸거나 불확실한 부분은 어떤
+   자료를 근거로 그렇게 판단했는지 출처와 함께 구체적으로 짚어줘.
+2. 네 버전 작성: 같은 소재로 너라면 어떻게 쓸지 제목과 대본 모두 네 버전으로 새로 써줘. ${toneNote}
+   원본을 그대로 베끼지 말고, 네가 검색으로 확인한 사실관계를 반영해서 다시 써줘. 이건 원본을 대체하기
+   위한 게 아니라 — 나중에 원본과 네 버전 둘 다 놓고 비교해서 더 나은 최종본으로 합칠 재료로 쓸 거야.
+
+## 원본 제목
+${title}
+
+## 원본 한국어 대본
+${script}
+
+## 출력 형식 — 아래 형식을 정확히 지켜줘
+[FACT-CHECK]
+(확인 결과 — 문제없으면 "특이사항 없음", 있으면 제목/대본 어느 쪽 문제인지 구체적으로 + 출처)
+
+[REWRITE]
+Title: (네가 다시 쓴 제목)
+Script: (네가 다시 쓴 대본 전문)
+
+[SOURCES]
+(실제로 검색해서 참고한 출처, 한 줄에 하나씩)`;
+}
+
+// action=compare 결과(원본 vs 제미나이 버전)를 실제로 "합쳐서" 업그레이드한다 — 사용자가 명시적으로
+// "교체가 아니라 두 개를 보고 업그레이드해야지"라고 지적해서, 어느 한쪽을 고르는 게 아니라 둘의 장점을
+// 합친 세 번째 최종본을 만드는 단계로 분리했다(2026-08-31). 사실은 이미 검색으로 확인됐으니 그라운딩은
+// 다시 켤 필요 없다.
+function buildUpgradePrompt(
+  title: string,
+  script: string,
+  rewriteTitle: string | undefined,
+  rewriteScript: string | undefined,
+  factCheck: string,
+  category: Category
+): string {
+  const toneNote =
+    category === 'disaster'
+      ? '"정신 나간/환장할 노릇" 같은 유행어는 쓰지 말고 담백하고 존중하는 톤을 유지해줘.'
+      : '오프닝 훅 공식, 원리 설명, 우리 채널 특유의 어미 리듬·톤은 그대로 유지해줘.';
+  return `아래는 같은 콘텐츠의 두 버전이야 — 원본과, 제미나이가 검색해서 사실확인 후 다시 쓴 버전.
+어느 한쪽을 그대로 고르지 말고, 두 버전의 장점만 골라서 합친 최종 업그레이드 버전을 만들어줘. 원본의
+좋은 표현·구조·훅은 살리고, 제미나이 버전이 반영한 더 정확한 사실관계는 가져와서 합쳐줘.
+
+## 원본 제목
+${title}
+
+## 원본 대본
+${script}
+
+## 제미나이가 다시 쓴 제목
+${rewriteTitle || '(제목 재작성 없음 — 원본 제목 유지 가능)'}
+
+## 제미나이가 다시 쓴 대본
+${rewriteScript || '(대본 재작성 없음)'}
+
+## 사실확인 결과
+${factCheck || '(특이사항 없음)'}
+
+## 요청
+제목과 대본을 각각 업그레이드해서 완성본으로 출력해줘. ${toneNote} 사실관계는 더 정확한 쪽을 따르고,
+표현은 더 자연스럽고 몰입감 있는 쪽을 살려서 둘 중 하나가 아니라 진짜로 더 나은 제3의 버전을 만들어줘.
+
+## 출력 형식 — 아래 형식을 정확히 지켜줘(다른 설명 붙이지 말고 이 형식만)
+Title: (업그레이드된 제목)
+Script: (업그레이드된 대본 전문)`;
+}
+
 // "💬 구독으로 만들기" — 유료 API 없이 프롬프트만 만들어서 클립보드 복사용으로 돌려준다.
 // action=review일 땐 소재 추천/제목/대본과 무관하게 완성된 콘텐츠 하나의 검토용 프롬프트를 돌려준다.
 export async function GET(request: Request) {
@@ -486,12 +646,30 @@ export async function GET(request: Request) {
     return NextResponse.json({ prompt: buildRevisePrompt(title, script, feedback, category) });
   }
 
+  if (searchParams.get('action') === 'compare') {
+    const title = searchParams.get('title');
+    const script = searchParams.get('script');
+    if (!title || !script) return NextResponse.json({ error: 'title/script가 필요합니다.' }, { status: 400 });
+    return NextResponse.json({ prompt: buildComparePrompt(title, script, category) });
+  }
+
+  if (searchParams.get('action') === 'upgrade') {
+    const title = searchParams.get('title');
+    const script = searchParams.get('script');
+    const rewriteTitle = searchParams.get('rewriteTitle') || undefined;
+    const rewriteScript = searchParams.get('rewriteScript') || undefined;
+    const factCheck = searchParams.get('factCheck') || '';
+    if (!title || !script) return NextResponse.json({ error: 'title/script가 필요합니다.' }, { status: 400 });
+    return NextResponse.json({ prompt: buildUpgradePrompt(title, script, rewriteTitle, rewriteScript, factCheck, category) });
+  }
+
   const stage = parseStage(searchParams.get('stage'));
   if (!stage) return NextResponse.json({ error: 'stage가 필요합니다.' }, { status: 400 });
   const material = searchParams.get('material') || undefined;
   const title = searchParams.get('title') || undefined;
+  const script = searchParams.get('script') || undefined;
 
-  const { prompt, error, status } = await buildPrompt(stage, siteId, material, title, category);
+  const { prompt, error, status } = await buildPrompt(stage, siteId, material, title, category, script);
   if (error) return NextResponse.json({ error }, { status: status || 400 });
   return NextResponse.json({ prompt });
 }
@@ -580,24 +758,81 @@ export async function POST(request: Request) {
     return NextResponse.json({ script_draft: nextDraft });
   }
 
+  // 위저드 단계의 확정 전 KO 대본을 제미나이(그라운딩)로 사실확인 + 자체 버전 받아오기.
+  // "교체"가 아니라 "비교" 재료라서 여기선 저장하지 않고 파싱 결과만 돌려준다 — 사용자가
+  // action=upgrade에서 원본과 합쳐서 최종본을 만든 다음에야 draft에 저장된다.
+  if (body?.action === 'compare') {
+    const title: string | undefined = body?.title;
+    const script: string | undefined = body?.script;
+    if (!title || !script) return NextResponse.json({ error: 'title/script가 필요합니다.' }, { status: 400 });
+
+    let compareText: string;
+    try {
+      const grounded = await callGeminiGrounded({
+        systemPrompt: '너는 사실확인 전문 리서처 겸 유튜브 쇼츠 작가다. 실제로 검색해서 근거를 남긴다.',
+        userPrompt: buildComparePrompt(title, script, category),
+        model: MODEL,
+      });
+      compareText = grounded.text;
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    }
+
+    const parsed = parseCompareResponse(compareText);
+    return NextResponse.json(parsed);
+  }
+
+  // compare 결과(원본 vs 제미나이 버전)를 합쳐서 최종 업그레이드본을 만든다. 이미 확인된 사실을
+  // 다시 검색할 필요는 없어서 그라운딩 없는 일반 호출을 쓴다.
+  if (body?.action === 'upgrade') {
+    const title: string | undefined = body?.title;
+    const script: string | undefined = body?.script;
+    const rewriteTitle: string | undefined = body?.rewriteTitle;
+    const rewriteScript: string | undefined = body?.rewriteScript;
+    const factCheck: string = body?.factCheck || '';
+    if (!title || !script) return NextResponse.json({ error: 'title/script가 필요합니다.' }, { status: 400 });
+
+    let upgradeText: string;
+    try {
+      upgradeText = await callGeminiVision({
+        systemPrompt: '너는 유튜브 쇼츠 콘텐츠 편집장이다. 두 초안 중 하나를 고르지 않고 장점을 합쳐 더 나은 버전을 만든다.',
+        userPrompt: buildUpgradePrompt(title, script, rewriteTitle, rewriteScript, factCheck, category),
+        model: MODEL,
+      });
+    } catch (err) {
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    }
+
+    const parsed = parseUpgradeResponse(upgradeText);
+    return NextResponse.json(parsed);
+  }
+
   const stage = parseStage(body?.stage);
   if (!stage) return NextResponse.json({ error: 'stage가 필요합니다.' }, { status: 400 });
   const material: string | undefined = body?.material || undefined;
   const title: string | undefined = body?.title || undefined;
+  const script: string | undefined = body?.script || undefined;
 
-  const { prompt, error, status } = await buildPrompt(stage, siteId, material, title, category);
+  const { prompt, error, status } = await buildPrompt(stage, siteId, material, title, category, script);
   if (error) return NextResponse.json({ error }, { status: status || 400 });
 
+  const systemPrompt =
+    category === 'disaster'
+      ? '너는 재난·사고 콘텐츠 전문 저널리스트다. 사실 위주로, 존중하는 톤으로 작성한다.'
+      : '너는 유튜브 쇼츠 콘텐츠 기획자 겸 작가다.';
+
   let resultText: string;
+  let groundedSources: { title: string; url: string }[] = [];
   try {
-    resultText = await callGeminiVision({
-      systemPrompt:
-        category === 'disaster'
-          ? '너는 재난·사고 콘텐츠 전문 저널리스트다. 사실 위주로, 존중하는 톤으로 작성한다.'
-          : '너는 유튜브 쇼츠 콘텐츠 기획자 겸 작가다.',
-      userPrompt: prompt,
-      model: MODEL,
-    });
+    // 소재/대본은 실제 사실에 근거해야 하므로 구글 검색 그라운딩을 켜서 출처까지 같이 받아온다.
+    // 제목/번역은 새 사실을 만들지 않으니 일반 호출로 충분하다.
+    if (stage === 'materials' || stage === 'script') {
+      const grounded = await callGeminiGrounded({ systemPrompt, userPrompt: prompt, model: MODEL });
+      resultText = grounded.text;
+      groundedSources = grounded.sources;
+    } else {
+      resultText = await callGeminiVision({ systemPrompt, userPrompt: prompt, model: MODEL });
+    }
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -619,10 +854,25 @@ export async function POST(request: Request) {
       .split('\n')
       .map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim())
       .filter(Boolean);
-    nextDraft = { ...prevDraft, selectedMaterial: material, titles, selectedTitle: undefined, script: undefined, titleEn: undefined, scriptEn: undefined, titleJa: undefined, scriptJa: undefined };
+    nextDraft = { ...prevDraft, selectedMaterial: material, titles, selectedTitle: undefined, script: undefined, titleEn: undefined, scriptEn: undefined, titleJa: undefined, scriptJa: undefined, sources: undefined, factCheck: undefined };
+  } else if (stage === 'translate') {
+    const { titleEn, scriptEn, titleJa, scriptJa } = parseTranslateResponse(resultText);
+    nextDraft = { ...prevDraft, titleEn, scriptEn, titleJa, scriptJa };
   } else {
-    const { ko, titleEn, scriptEn, titleJa, scriptJa } = parseScriptResponse(resultText);
-    nextDraft = { ...prevDraft, selectedTitle: title, script: ko, titleEn, scriptEn, titleJa, scriptJa };
+    const { ko, sources } = parseScriptResponse(resultText);
+    const groundedList = groundedSources.length > 0 ? groundedSources.map((s) => `${s.title} — ${s.url}`) : undefined;
+    // 대본이 새로 나오면 이전 번역/사실확인 기록은 더 이상 그 대본 것이 아니므로 같이 비운다.
+    nextDraft = {
+      ...prevDraft,
+      selectedTitle: title,
+      script: ko,
+      sources: groundedList || sources,
+      titleEn: undefined,
+      scriptEn: undefined,
+      titleJa: undefined,
+      scriptJa: undefined,
+      factCheck: undefined,
+    };
   }
   nextDraft.updated_at = new Date().toISOString();
 
@@ -657,6 +907,8 @@ export async function PATCH(request: Request) {
   if ('scriptEn' in body) patch.scriptEn = body.scriptEn;
   if ('titleJa' in body) patch.titleJa = body.titleJa;
   if ('scriptJa' in body) patch.scriptJa = body.scriptJa;
+  if ('sources' in body) patch.sources = body.sources;
+  if ('factCheck' in body) patch.factCheck = body.factCheck;
   if ('units' in body) patch.units = body.units;
 
   const nextDraft: ScriptDraft = { ...prevDraft, ...patch, updated_at: new Date().toISOString() };

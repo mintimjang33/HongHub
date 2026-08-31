@@ -35,6 +35,11 @@ type ContentUnit = {
   titleJa?: string;
   scriptJa?: string;
   review?: UnitReview;
+  // 2026-08-31 추가 — 특히 사실관계 검증이 중요한(대참사/사건) 콘텐츠는 나중에 "그거 어디서 봤냐"고
+  // 따지고 들 때 근거로 내밀 수 있게 출처를 같이 저장해둔다. 문장 단위까지는 아니고 콘텐츠 단위로.
+  sources?: string[];
+  // 제미나이와 비교(action=compare)해서 받은 사실확인 결과 — 업그레이드 이후에도 근거로 남겨둔다.
+  factCheck?: string;
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -49,6 +54,8 @@ type ScriptDraft = {
   scriptEn?: string;
   titleJa?: string;
   scriptJa?: string;
+  sources?: string[];
+  factCheck?: string;
   units?: ContentUnit[];
   updated_at?: string;
 };
@@ -1220,10 +1227,10 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
 // 각 단계는 4번과 동일한 하이브리드 방식(유료 Gemini Pro / 무료 구독-복사)을 쓴다.
 function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const draft = site.script_draft || {};
-  const [generating, setGenerating] = useState<'materials' | 'titles' | 'script' | null>(null);
-  const [copying, setCopying] = useState<'materials' | 'titles' | 'script' | null>(null);
-  const [copied, setCopied] = useState<'materials' | 'titles' | 'script' | null>(null);
-  const [pasteOpen, setPasteOpen] = useState<'materials' | 'titles' | 'script' | null>(null);
+  const [generating, setGenerating] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
+  const [copying, setCopying] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
+  const [copied, setCopied] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
+  const [pasteOpen, setPasteOpen] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
   const [pasteText, setPasteText] = useState('');
   const [scriptDraftText, setScriptDraftText] = useState(draft.script || '');
   const [saving, setSaving] = useState(false);
@@ -1239,6 +1246,19 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [reviseCopiedId, setReviseCopiedId] = useState<string | null>(null);
   const [revisePasteOpenId, setRevisePasteOpenId] = useState<string | null>(null);
   const [revisePasteText, setRevisePasteText] = useState('');
+  // 한국어 대본 확정 전 "제미나이와 비교" 단계용 상태 — 결과는 고르는 게 아니라 합칠 재료라서
+  // draft에 바로 저장하지 않고 여기 임시로만 들고 있는다(2026-08-31).
+  const [compareCopying, setCompareCopying] = useState(false);
+  const [compareCopied, setCompareCopied] = useState(false);
+  const [comparePasteOpen, setComparePasteOpen] = useState(false);
+  const [comparePasteText, setComparePasteText] = useState('');
+  const [compareRunning, setCompareRunning] = useState(false);
+  const [compareResult, setCompareResult] = useState<{ factCheck: string; rewriteTitle?: string; rewriteScript?: string; sources?: string[] } | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
+  const [upgradeCopying, setUpgradeCopying] = useState(false);
+  const [upgradeCopied, setUpgradeCopied] = useState(false);
+  const [upgradePasteOpen, setUpgradePasteOpen] = useState(false);
+  const [upgradePasteText, setUpgradePasteText] = useState('');
   const units = draft.units || [];
 
   useEffect(() => {
@@ -1246,13 +1266,17 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.script]);
 
-  async function generate(stage: 'materials' | 'titles' | 'script') {
+  async function generate(stage: 'materials' | 'titles' | 'script' | 'translate') {
     setGenerating(stage);
     setError('');
     try {
       const body: Record<string, string> = { siteId: site.id, stage, category: draft.category || 'trivia' };
       if (stage === 'titles') body.material = draft.selectedMaterial || '';
       if (stage === 'script') body.title = draft.selectedTitle || '';
+      if (stage === 'translate') {
+        body.title = draft.selectedTitle || '';
+        body.script = scriptDraftText;
+      }
       const res = await fetch('/api/script-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1268,13 +1292,17 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     }
   }
 
-  async function copyPrompt(stage: 'materials' | 'titles' | 'script') {
+  async function copyPrompt(stage: 'materials' | 'titles' | 'script' | 'translate') {
     setCopying(stage);
     setError('');
     try {
       const q = new URLSearchParams({ siteId: site.id, stage, category: draft.category || 'trivia' });
       if (stage === 'titles') q.set('material', draft.selectedMaterial || '');
       if (stage === 'script') q.set('title', draft.selectedTitle || '');
+      if (stage === 'translate') {
+        q.set('title', draft.selectedTitle || '');
+        q.set('script', scriptDraftText);
+      }
       const res = await fetch(`/api/script-draft?${q}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
@@ -1290,7 +1318,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     }
   }
 
-  async function savePasted(stage: 'materials' | 'titles' | 'script') {
+  async function savePasted(stage: 'materials' | 'titles' | 'script' | 'translate') {
     if (!pasteText.trim()) return;
     setSaving(true);
     setError('');
@@ -1300,10 +1328,8 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         patch.materials = pasteText.split('\n').map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
       } else if (stage === 'titles') {
         patch.titles = pasteText.split('\n').map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
-      } else {
-        // 구독 채팅도 [KO]/[EN]/[JA] 형식으로 답하게 프롬프트에 요청해뒀으니 같은 형식으로 파싱한다.
-        // 형식이 안 맞으면(사람이 그냥 대본만 붙여넣은 경우) 전체를 한국어 대본으로만 취급한다.
-        const koMatch = pasteText.match(/\[KO\]([\s\S]*?)(?=\[EN\]|\[JA\]|$)/);
+      } else if (stage === 'translate') {
+        // stage=translate 응답은 [EN]/[JA]만 온다(한국어는 이미 확정된 상태).
         const enMatch = pasteText.match(/\[EN\]([\s\S]*?)(?=\[JA\]|$)/);
         const jaMatch = pasteText.match(/\[JA\]([\s\S]*?)$/);
         const pickField = (block: string | undefined, field: 'Title' | 'Script') => {
@@ -1311,11 +1337,24 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
           const m = block.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
           return m ? m[1].trim() : undefined;
         };
-        patch.script = (koMatch ? koMatch[1] : pasteText).trim();
-        patch.titleEn = pickField(enMatch?.[1], 'Title');
-        patch.scriptEn = pickField(enMatch?.[1], 'Script');
-        patch.titleJa = pickField(jaMatch?.[1], 'Title');
-        patch.scriptJa = pickField(jaMatch?.[1], 'Script');
+        patch.titleEn = pickField(enMatch?.[1], 'Title') || null;
+        patch.scriptEn = pickField(enMatch?.[1], 'Script') || null;
+        patch.titleJa = pickField(jaMatch?.[1], 'Title') || null;
+        patch.scriptJa = pickField(jaMatch?.[1], 'Script') || null;
+      } else {
+        // stage=script 응답은 이제 한국어 대본 + 선택적 [SOURCES]만 온다(영어/일본어는 stage=translate로 분리).
+        const sourcesMatch = pasteText.match(/\[SOURCES\]([\s\S]*?)$/);
+        patch.script = pasteText.replace(/\[SOURCES\][\s\S]*$/, '').trim();
+        patch.sources = sourcesMatch
+          ? sourcesMatch[1].split('\n').map((s) => s.replace(/^\s*[-*\d.)]+\s*/, '').trim()).filter(Boolean)
+          : null;
+        // 새 한국어 대본이 나오면 이전 번역/사실확인은 이제 그 대본 것이 아니므로 같이 비운다.
+        // (JSON.stringify가 undefined 키는 그냥 통째로 빼먹어서 PATCH에 반영이 안 되니 null로 보내야 한다.)
+        patch.titleEn = null;
+        patch.scriptEn = null;
+        patch.titleJa = null;
+        patch.scriptJa = null;
+        patch.factCheck = null;
       }
       const res = await fetch('/api/script-draft', {
         method: 'PATCH',
@@ -1349,7 +1388,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     await fetch('/api/script-draft', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, category, materials: null, selectedMaterial: null, titles: null, selectedTitle: null, script: null }),
+      body: JSON.stringify({ siteId: site.id, category, materials: null, selectedMaterial: null, titles: null, selectedTitle: null, script: null, titleEn: null, scriptEn: null, titleJa: null, scriptJa: null, sources: null, factCheck: null }),
     });
     onRefresh();
   }
@@ -1363,6 +1402,18 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     onRefresh();
   }
 
+  // Gemini/Claude가 사실확인하면서 출처를 붙여주면(신문사명, 링크 등) 여기 한 줄씩 저장해서
+  // 나중에 "그거 어디서 봤냐"는 지적에 근거로 내밀 수 있게 한다.
+  async function saveSources(id: string, sourcesText: string) {
+    const sources = sourcesText.split('\n').map((s) => s.trim()).filter(Boolean);
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources } : u)) }),
+    });
+    onRefresh();
+  }
+
   async function selectTitle(t: string) {
     await fetch('/api/script-draft', {
       method: 'PATCH',
@@ -1370,6 +1421,182 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
       body: JSON.stringify({ siteId: site.id, selectedTitle: t }),
     });
     onRefresh();
+  }
+
+  function parseComparePaste(text: string): { factCheck: string; rewriteTitle?: string; rewriteScript?: string; sources?: string[] } {
+    const factMatch = text.match(/\[FACT-CHECK\]([\s\S]*?)(?=\[REWRITE\]|\[SOURCES\]|$)/);
+    const rewriteMatch = text.match(/\[REWRITE\]([\s\S]*?)(?=\[SOURCES\]|$)/);
+    const sourcesMatch = text.match(/\[SOURCES\]([\s\S]*?)$/);
+    const pickField = (block: string | undefined, field: 'Title' | 'Script') => {
+      if (!block) return undefined;
+      const m = block.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
+      return m ? m[1].trim() : undefined;
+    };
+    return {
+      factCheck: (factMatch ? factMatch[1] : '').trim(),
+      rewriteTitle: pickField(rewriteMatch?.[1], 'Title'),
+      rewriteScript: pickField(rewriteMatch?.[1], 'Script'),
+      sources: sourcesMatch ? sourcesMatch[1].split('\n').map((s) => s.replace(/^\s*[-*\d.)]+\s*/, '').trim()).filter(Boolean) : undefined,
+    };
+  }
+
+  // "제미나이와 비교" — 확정 전 제목/대본을 실제 검색 그라운딩으로 사실확인 + 제미나이 자체 버전을 받아온다.
+  // 결과는 고르는 게 아니라 다음 단계(업그레이드)에서 원본과 합칠 재료라서 draft에 바로 저장하지 않는다.
+  async function copyComparePrompt() {
+    setCompareCopying(true);
+    setError('');
+    try {
+      const q = new URLSearchParams({ siteId: site.id, action: 'compare', title: draft.selectedTitle || '', script: scriptDraftText, category: draft.category || 'trivia' });
+      const res = await fetch(`/api/script-draft?${q}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
+      await navigator.clipboard.writeText(data.prompt);
+      setCompareCopied(true);
+      setComparePasteOpen(true);
+      setComparePasteText('');
+      setTimeout(() => setCompareCopied(false), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCompareCopying(false);
+    }
+  }
+
+  function saveComparePaste() {
+    if (!comparePasteText.trim()) return;
+    setCompareResult(parseComparePaste(comparePasteText));
+    setComparePasteOpen(false);
+  }
+
+  async function runCompare() {
+    setCompareRunning(true);
+    setError('');
+    try {
+      const res = await fetch('/api/script-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, action: 'compare', title: draft.selectedTitle, script: scriptDraftText, category: draft.category || 'trivia' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '비교 실패');
+      setCompareResult({ factCheck: data.factCheck || '', rewriteTitle: data.rewriteTitle, rewriteScript: data.rewriteScript, sources: data.sources });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCompareRunning(false);
+    }
+  }
+
+  // 원본 유지 — 비교는 했지만 제미나이 버전을 반영할 필요가 없다고 판단했을 때. 그래도 사실확인/출처는 남겨둔다.
+  async function keepOriginalAfterCompare() {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, factCheck: compareResult?.factCheck || null, sources: compareResult?.sources || null }),
+      });
+      setCompareResult(null);
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // "업그레이드" — 원본과 제미나이 버전 중 하나를 고르는 게 아니라, 둘의 장점을 합친 제3의 최종본을 만든다.
+  // (사용자 지적: "교체가 아니라 두개를 보고 업그레이드를 해야지" — 2026-08-31)
+  async function runUpgrade() {
+    if (!compareResult) return;
+    setUpgrading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/script-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId: site.id,
+          action: 'upgrade',
+          title: draft.selectedTitle,
+          script: scriptDraftText,
+          rewriteTitle: compareResult.rewriteTitle,
+          rewriteScript: compareResult.rewriteScript,
+          factCheck: compareResult.factCheck,
+          category: draft.category || 'trivia',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '업그레이드 실패');
+      await applyUpgrade(data.title, data.script);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUpgrading(false);
+    }
+  }
+
+  async function copyUpgradePrompt() {
+    if (!compareResult) return;
+    setUpgradeCopying(true);
+    setError('');
+    try {
+      const q = new URLSearchParams({
+        siteId: site.id,
+        action: 'upgrade',
+        title: draft.selectedTitle || '',
+        script: scriptDraftText,
+        rewriteTitle: compareResult.rewriteTitle || '',
+        rewriteScript: compareResult.rewriteScript || '',
+        factCheck: compareResult.factCheck || '',
+        category: draft.category || 'trivia',
+      });
+      const res = await fetch(`/api/script-draft?${q}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
+      await navigator.clipboard.writeText(data.prompt);
+      setUpgradeCopied(true);
+      setUpgradePasteOpen(true);
+      setUpgradePasteText('');
+      setTimeout(() => setUpgradeCopied(false), 2500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUpgradeCopying(false);
+    }
+  }
+
+  async function saveUpgradePaste() {
+    if (!upgradePasteText.trim()) return;
+    const pickField = (field: 'Title' | 'Script') => {
+      const m = upgradePasteText.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
+      return m ? m[1].trim() : undefined;
+    };
+    await applyUpgrade(pickField('Title'), pickField('Script'));
+    setUpgradePasteOpen(false);
+    setUpgradePasteText('');
+  }
+
+  async function applyUpgrade(title: string | undefined, script: string | undefined) {
+    const nextTitle = title || draft.selectedTitle || '';
+    const nextScript = script || scriptDraftText;
+    setScriptDraftText(nextScript);
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId: site.id,
+          selectedTitle: nextTitle,
+          script: nextScript,
+          factCheck: compareResult?.factCheck || null,
+          sources: compareResult?.sources || null,
+        }),
+      });
+      setCompareResult(null);
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function saveScript() {
@@ -1391,7 +1618,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     await fetch('/api/script-draft', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, materials: null, selectedMaterial: null, titles: null, selectedTitle: null, script: null }),
+      body: JSON.stringify({ siteId: site.id, materials: null, selectedMaterial: null, titles: null, selectedTitle: null, script: null, titleEn: null, scriptEn: null, titleJa: null, scriptJa: null, sources: null, factCheck: null }),
     });
     onRefresh();
   }
@@ -1414,6 +1641,8 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         scriptEn: draft.scriptEn,
         titleJa: draft.titleJa,
         scriptJa: draft.scriptJa,
+        sources: draft.sources,
+        factCheck: draft.factCheck,
         status: 'pending',
         createdAt: new Date().toISOString(),
       };
@@ -1431,6 +1660,8 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
           scriptEn: null,
           titleJa: null,
           scriptJa: null,
+          sources: null,
+          factCheck: null,
         }),
       });
       onRefresh();
@@ -1603,7 +1834,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     onRefresh();
   }
 
-  function GenerateButtons({ stage }: { stage: 'materials' | 'titles' | 'script' }) {
+  function GenerateButtons({ stage }: { stage: 'materials' | 'titles' | 'script' | 'translate' }) {
     return (
       <div className="flex gap-1.5 mb-2">
         <button
@@ -1635,7 +1866,7 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
     );
   }
 
-  function PasteBox({ stage }: { stage: 'materials' | 'titles' | 'script' }) {
+  function PasteBox({ stage }: { stage: 'materials' | 'titles' | 'script' | 'translate' }) {
     if (pasteOpen !== stage) return null;
     return (
       <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 mb-2">
@@ -1956,44 +2187,179 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
             placeholder="위 버튼으로 대본을 만들거나 직접 작성하세요"
             className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
           />
-          {(draft.scriptEn || draft.scriptJa) && (
-            <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 mb-1.5 space-y-2">
-              <p className="text-[10px] text-neutral-400">
-                영어/일본어는 번역이 아니라 현지화 각색이에요 — 완성 콘텐츠로 저장하면 이 버전도 같이 저장돼요.
-              </p>
-              {draft.scriptEn && (
-                <div>
-                  <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇺🇸 {draft.titleEn}</p>
-                  <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{draft.scriptEn}</p>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] text-neutral-300">{scriptDraftText.length.toLocaleString()}자</span>
+            <button
+              onClick={saveScript}
+              disabled={saving}
+              className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+            >
+              {saving ? '저장 중...' : '대본 저장'}
+            </button>
+          </div>
+
+          {/* 3-1단계: 제미나이와 비교해서 사실확인 (제목도 대본만큼 엉망일 수 있어서 같이 확인) */}
+          {scriptDraftText.trim() && (
+            <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 mb-1.5">
+              <p className="text-[10px] font-black text-neutral-500 mb-1.5">🔍 제미나이와 비교해서 사실확인 (선택)</p>
+              <div className="flex gap-1.5 mb-2">
+                <button
+                  onClick={copyComparePrompt}
+                  disabled={compareCopying}
+                  className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                >
+                  {compareCopying ? '준비 중...' : compareCopied ? '✅ 복사됨!' : '💬 구독으로 비교하기'}
+                </button>
+                <button
+                  onClick={runCompare}
+                  disabled={compareRunning}
+                  className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                >
+                  {compareRunning ? '비교 중...' : '✨ 자동으로 비교하기'}
+                </button>
+              </div>
+              {comparePasteOpen && (
+                <div className="mb-2">
+                  <textarea
+                    value={comparePasteText}
+                    onChange={(e) => setComparePasteText(e.target.value)}
+                    rows={6}
+                    placeholder="구독 채팅 답변을 여기에 붙여넣으세요"
+                    className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                  />
+                  <div className="flex justify-end gap-1.5">
+                    <button onClick={() => setComparePasteOpen(false)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                      취소
+                    </button>
+                    <button
+                      onClick={saveComparePaste}
+                      disabled={!comparePasteText.trim()}
+                      className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                    >
+                      결과 확인
+                    </button>
+                  </div>
                 </div>
               )}
-              {draft.scriptJa && (
-                <div className="pt-2 border-t border-neutral-100">
-                  <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇯🇵 {draft.titleJa}</p>
-                  <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{draft.scriptJa}</p>
+              {compareResult && (
+                <div className="space-y-2">
+                  <div className="bg-white border border-neutral-200 rounded-lg p-2">
+                    <p className="text-[10px] font-black text-neutral-400 mb-1">사실확인 결과</p>
+                    <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{compareResult.factCheck || '(내용 없음)'}</p>
+                  </div>
+                  {(compareResult.rewriteTitle || compareResult.rewriteScript) && (
+                    <div className="bg-white border border-neutral-200 rounded-lg p-2">
+                      <p className="text-[10px] font-black text-neutral-400 mb-1">제미나이가 다시 쓴 버전</p>
+                      {compareResult.rewriteTitle && <p className="text-xs font-bold text-neutral-700 mb-1">{compareResult.rewriteTitle}</p>}
+                      {compareResult.rewriteScript && <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{compareResult.rewriteScript}</p>}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-neutral-400">
+                    둘 중 하나를 고르는 게 아니라, 두 버전의 장점을 합쳐서 업그레이드해요.
+                  </p>
+                  <div className="flex justify-end gap-1.5">
+                    <button
+                      onClick={keepOriginalAfterCompare}
+                      disabled={saving}
+                      className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                    >
+                      원본 유지
+                    </button>
+                    <button
+                      onClick={copyUpgradePrompt}
+                      disabled={upgradeCopying}
+                      className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                    >
+                      {upgradeCopying ? '준비 중...' : upgradeCopied ? '✅ 복사됨!' : '💬 구독으로 업그레이드'}
+                    </button>
+                    <button
+                      onClick={runUpgrade}
+                      disabled={upgrading}
+                      className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-emerald-600 text-white disabled:opacity-40"
+                    >
+                      {upgrading ? '업그레이드 중...' : '🔀 자동으로 업그레이드'}
+                    </button>
+                  </div>
+                  {upgradePasteOpen && (
+                    <div>
+                      <textarea
+                        value={upgradePasteText}
+                        onChange={(e) => setUpgradePasteText(e.target.value)}
+                        rows={6}
+                        placeholder="구독 채팅 답변(Title:/Script:)을 여기에 붙여넣으세요"
+                        className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <button onClick={() => setUpgradePasteOpen(false)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                          취소
+                        </button>
+                        <button
+                          onClick={saveUpgradePaste}
+                          disabled={saving || !upgradePasteText.trim()}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                        >
+                          붙여넣기 적용
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-neutral-300">{scriptDraftText.length.toLocaleString()}자</span>
-            <div className="flex gap-1.5">
-              <button
-                onClick={saveScript}
-                disabled={saving}
-                className="text-[11px] font-black px-4 py-2 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-              >
-                {saving ? '저장 중...' : '대본 저장'}
-              </button>
-              <button
-                onClick={finalizeUnit}
-                disabled={saving || !scriptDraftText.trim()}
-                className="bg-black text-white text-[11px] font-black px-4 py-2 rounded-lg disabled:opacity-40"
-                title="완성 목록에 저장하고 다음 소재로 넘어가기"
-              >
-                ✅ 완성 콘텐츠로 저장 → 다음 소재
-              </button>
+
+          {/* 3-2단계: 한국어가 확정된 다음 영어/일본어 */}
+          {scriptDraftText.trim() && (
+            <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 mb-1.5">
+              <p className="text-[10px] font-black text-neutral-500 mb-1.5">🌐 영어/일본어 대본 생성</p>
+              <div className="flex gap-1.5 mb-2">
+                <button
+                  onClick={() => copyPrompt('translate')}
+                  disabled={copying === 'translate'}
+                  className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                >
+                  {copying === 'translate' ? '준비 중...' : copied === 'translate' ? '✅ 복사됨!' : '💬 구독으로 번역하기'}
+                </button>
+                <button
+                  onClick={() => generate('translate')}
+                  disabled={generating === 'translate'}
+                  className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                >
+                  {generating === 'translate' ? '만드는 중...' : '✨ Gemini Pro로 번역하기'}
+                </button>
+              </div>
+              <PasteBox stage="translate" />
+              {(draft.scriptEn || draft.scriptJa) && (
+                <div className="space-y-2">
+                  <p className="text-[10px] text-neutral-400">
+                    번역은 그대로 옮기지 않고 현지화 각색이에요 — 완성 콘텐츠로 저장하면 이 버전도 같이 저장돼요.
+                  </p>
+                  {draft.scriptEn && (
+                    <div>
+                      <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇺🇸 {draft.titleEn}</p>
+                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{draft.scriptEn}</p>
+                    </div>
+                  )}
+                  {draft.scriptJa && (
+                    <div className="pt-2 border-t border-neutral-100">
+                      <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇯🇵 {draft.titleJa}</p>
+                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{draft.scriptJa}</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              onClick={finalizeUnit}
+              disabled={saving || !scriptDraftText.trim()}
+              className="bg-black text-white text-[11px] font-black px-4 py-2 rounded-lg disabled:opacity-40"
+              title="완성 목록에 저장하고 다음 소재로 넘어가기"
+            >
+              ✅ 완성 콘텐츠로 저장 → 다음 소재
+            </button>
           </div>
         </div>
       )}
