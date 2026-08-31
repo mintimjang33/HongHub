@@ -5,6 +5,11 @@ import { callGeminiVision } from '../../../lib/aiProviders';
 // 5번(대본 작성) 단계 전용 — 소재 추천 → 제목 추천 → 대본(한국어+영어+일본어), 3단계 파이프라인.
 // + 완성된 콘텐츠 단위(unit)에 대한 AI 자동 검토(action=review).
 // 4번(analyze-materials)과 같은 이유로 pro 모델을 쓰고, 대본이 있는 소재만 신뢰해서 근거로 쓴다.
+//
+// category('trivia'|'disaster') — 2026-08-31 추가. 대참사·사고 소재는 우리 채널 특유의 가벼운 톤
+// ("정신 나간", "환장할 노릇이죠", 발상 뒤집기식 카타르시스)을 쓰면 안 되고, 오락이 아니라
+// "무엇이 일어났나 → 왜 일어났나(원인) → 무엇이 바뀌었거나 바뀌어야 하나(교훈/개선)" 구조로 다뤄야
+// 한다는 사용자 지시에 따라 완전히 별도의 프롬프트 세트를 쓴다.
 export const maxDuration = 60;
 
 const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
@@ -12,6 +17,8 @@ const MAX_ITEMS = 15;
 const MODEL = 'gemini-3.1-pro-preview';
 const STAGES = ['materials', 'titles', 'script'] as const;
 type Stage = (typeof STAGES)[number];
+const CATEGORIES = ['trivia', 'disaster'] as const;
+type Category = (typeof CATEGORIES)[number];
 
 type Item = { title: string; transcript: string | null; duration_seconds: number | null; views: string | null };
 type AnalysisResult = { channel?: string; title?: string; script?: string; duration?: string; pace?: string };
@@ -21,6 +28,10 @@ type ContentUnit = {
   material: string;
   title: string;
   script: string;
+  category?: Category;
+  // 공학 파이프라인 내 세부 분야 분류(건축/무기/토목/항공/자연재해 등) — 사용자가 늘어나는 콘텐츠를
+  // 분야별로 훑어보고 싶어해서 추가. 자유 텍스트라 프리셋 밖의 값도 허용한다.
+  topic?: string;
   materialCandidates?: string[];
   titleCandidates?: string[];
   titleEn?: string;
@@ -32,6 +43,7 @@ type ContentUnit = {
   createdAt: string;
 };
 type ScriptDraft = {
+  category?: Category;
   materials?: string[];
   selectedMaterial?: string;
   titles?: string[];
@@ -64,12 +76,17 @@ function extractTargetChars(pace: string | undefined): number {
   return m ? parseInt(m[1], 10) : 380;
 }
 
+function parseCategory(value: unknown): Category {
+  return typeof value === 'string' && CATEGORIES.includes(value as Category) ? (value as Category) : 'trivia';
+}
+
 // 단계별로 필요한 근거 자료 + 지시문을 한 군데서 만든다 — 유료(POST)/구독복사(GET) 둘 다 이 프롬프트를 그대로 쓴다.
 async function buildPrompt(
   stage: Stage,
   siteId: string,
   material: string | undefined,
-  title: string | undefined
+  title: string | undefined,
+  category: Category
 ): Promise<{ prompt: string; error?: string; status?: number }> {
   const supabase = getSupabaseServerClient();
   const { data: site } = await supabase.from('hub_sites').select('id, name, analysis_result').eq('id', siteId).maybeSingle();
@@ -87,6 +104,8 @@ async function buildPrompt(
   // 대본까지 있는 것만 "확인된 소재"로 취급 — 4번과 동일한 기준.
   const withTranscript = items.filter((i) => i.transcript && i.transcript.trim().length > 20);
   const topItems = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
+
+  if (category === 'disaster') return buildDisasterPrompt(stage, site.name, material, title);
 
   if (stage === 'materials') {
     if (!analysis.channel && !analysis.title) {
@@ -123,7 +142,8 @@ ${itemLines || '(없음)'}
 배경 원리 등. 다만 이런 최신 이슈는 특히 조심해야 해 — 최근 며칠~몇 주 안에 일어난 사건은 네가 정확한
 세부사항(날짜, 피해 규모, 원인)을 모를 수도 있으니, 구체적 수치를 확신 없이 쓰지 말고 "최근 [나라]에서
 발생한 [현상]" 정도로만 소재를 제안하고, 실제 대본 작성 전에 사람이 뉴스를 직접 검색해서 사실관계를
-확인해야 한다고 명시해줘.
+확인해야 한다고 명시해줘. 다만 사상자가 크게 발생한 인명 피해 위주의 사건이면 여기(트리비아 톤) 대신
+"대참사/사건" 카테고리로 다루라고 알려줘 — 그쪽은 톤이 완전히 다르다.
 
 **중요 — 이건 어그로가 아니라 사실 검증의 문제야**: 여기 적는 수치·연도·기록은 그냥 그럴듯하게 지어내면 안 돼.
 네가 실제로 알고 있는(확신할 수 있는) 과학적·역사적 사실만 써줘. 정확한 숫자가 기억나지 않으면 "약 100년",
@@ -205,6 +225,81 @@ Script: (일본어 대본 본문)`;
   return { prompt };
 }
 
+// "대참사/사건" 전용 프롬프트 — 4번 분석(오락용 트리비아 패턴)을 참고하지 않는다. 오락이 아니라
+// "무엇이 일어났나 → 왜 일어났나 → 무엇이 바뀌었거나 바뀌어야 하나"를 전달하는 게 목적이고,
+// "정신 나간/환장할 노릇/발상을 뒤집어버립니다" 같은 트리비아 톤은 절대 쓰지 않는다.
+function buildDisasterPrompt(
+  stage: Stage,
+  siteName: string,
+  material: string | undefined,
+  title: string | undefined
+): { prompt: string; error?: string; status?: number } {
+  if (stage === 'materials') {
+    const prompt = `"${siteName}" 파이프라인의 "대참사/사건" 카테고리용 소재를 8개 추천해줘.
+
+## 기준
+실제로 일어났던(또는 지금 진행 중인) 대형 사고·재난·참사 사례를 찾아줘. 반드시 구체적으로 특정 가능한 실제
+사건이어야 하고, 이 콘텐츠의 목적은 오락이 아니라 "무엇이 일어났는지 → 왜 일어났는지(공학적/구조적/시스템적
+원인) → 그 이후 무엇이 바뀌었는지 또는 무엇이 바뀌어야 하는지(교훈과 개선)"를 전달하는 것임을 명심해줘.
+과거에 종료된 사건(설계 결함으로 인한 붕괴 사고, 대형 화재, 산업재해 등)과 최근 진행 중인 재난(자연재해,
+기후 관련 사고 등) 둘 다 가능해.
+
+## 사실 검증 — 가장 중요한 기준
+숫자·연도·사망자 수·원인을 절대 지어내지 마. 확신할 수 있는 사실만 쓰고, 불확실하면 "정확한 시점은 확인이
+필요합니다" 처럼 애매하게 표현하거나 후보에서 빼줘. 특히 최근 며칠~몇 주 안에 일어난 사건은 네 지식이
+최신이 아닐 수 있으니 세부 수치 확신 없이 제안하고, 실제 대본 작성 전 사람이 직접 뉴스를 검색해서 확인해야
+한다고 명시해줘.
+
+각 항목은 "[사건명/대상] 한 줄 설명(발생 시기·장소 포함)" 형식으로, 번호 매겨서 8개만 출력해줘. 다른 설명 없이 목록만.`;
+    return { prompt };
+  }
+
+  if (stage === 'titles') {
+    if (!material) return { prompt: '', error: 'material이 필요합니다.', status: 400 };
+    const prompt = `"${siteName}" 파이프라인의 "대참사/사건" 카테고리에서 아래 소재로 쓸 제목 후보를 추천해줘.
+
+## 소재
+${material}
+
+## 요청
+자극적이거나 선정적인 표현("충격", "경악", 느낌표 남발 등) 없이, 사실을 있는 그대로 전달하는 담백한 제목으로
+6개 추천해줘. 사건과 핵심 원인이 궁금해지도록 만들되, 피해자·유가족을 자극하거나 가볍게 다루는 인상을 주면
+안 돼. 번호 매겨서 제목만 6개, 다른 설명 없이.`;
+    return { prompt };
+  }
+
+  // stage === 'script'
+  if (!title) return { prompt: '', error: 'title이 필요합니다.', status: 400 };
+  const prompt = `"${siteName}" 파이프라인의 "대참사/사건" 카테고리 대본을 작성해줘.
+
+## 제목
+${title}
+
+## 대본 구조 — 반드시 이 순서로
+1. **사실 전달**: 무엇이, 언제, 어디서 일어났는지 검증된 사실만 담백하게 서술.
+2. **원인 분석**: 왜 일어났는지 — 공학적·구조적·시스템적 원인을 알기 쉽게 설명.
+3. **교훈과 개선**: 이 사건 이후 실제로 무엇이 바뀌었는지(제도, 설계 기준, 안전 규정 등), 또는 아직 진행
+   중이거나 반복될 위험이 있다면 무엇이 바뀌어야 하는지.
+4. **마무리**: 사건이 이미 종료됐다면 이 교훈이 지금 우리에게 주는 의미로 마무리하고, 아직 진행 중인 재난
+   (수색·복구 중 등)이라면 계속된 관심과 지원을 부탁하는 문장으로 마무리해줘.
+
+## 절대 쓰지 말 것
+"정신 나간", "환장할 노릇", "~을 냅다", "발상을 뒤집어 버립니다" 같은 우리 채널의 트리비아용 가벼운 유행어와
+장난스러운 어투는 이 카테고리에서 절대 쓰지 마. 담백하고 차분한 서술체("~습니다") 위주로 써줘. 피해 규모나
+사망자 수를 과장하거나 자극적으로 표현하지 말고, 사실을 존중하는 톤을 유지해줘.
+
+## 분량
+공백 포함 400~600자 정도로, 위 4단계를 각각 성실히 다룰 수 있는 만큼 충분히 써줘 — 여기선 글자수를 딱
+맞추는 것보다 내용을 제대로 전달하는 게 우선이야.
+
+## 사실 검증
+확신할 수 없는 구체적 수치(사망자 수, 날짜, 규모)는 쓰지 말고 애매하게 표현하거나 생략해줘. 지어낸 통계는
+절대 안 돼.
+
+대본 본문만 출력하고 다른 설명은 붙이지 마. 영어/일본어 버전은 필요 없어, 한국어만.`;
+  return { prompt };
+}
+
 // buildPrompt의 "출력 형식" 그대로 온 응답을 파싱한다. 구독-복사 경로(사람이 붙여넣는 답변)도
 // AI가 같은 형식으로 답하는 걸 전제로 동일하게 파싱한다 — 형식이 깨져 있으면 KO만이라도 최대한 살린다.
 function parseScriptResponse(text: string): { ko: string; titleEn?: string; scriptEn?: string; titleJa?: string; scriptJa?: string } {
@@ -230,7 +325,29 @@ function parseScriptResponse(text: string): { ko: string; titleEn?: string; scri
   };
 }
 
-function buildReviewPrompt(analysis: AnalysisResult, title: string, script: string): string {
+function buildReviewPrompt(analysis: AnalysisResult, title: string, script: string, category: Category): string {
+  if (category === 'disaster') {
+    return `아래 "대참사/사건" 카테고리 유튜브 쇼츠 제목/대본을 냉정하게 평가해줘.
+
+## 평가 대상
+제목: ${title}
+대본(${script.length}자): ${script}
+
+## 요청
+아래 기준으로 평가해줘:
+1. 사실 전달 → 원인 분석 → 교훈/개선 → 마무리, 이 4단계 구조를 제대로 갖췄는지.
+2. "정신 나간", "환장할 노릇" 같은 트리비아용 가벼운 표현이나 장난스러운 어투가 하나라도 섞여있지 않은지 —
+   하나라도 있으면 반드시 지적해줘.
+3. 제목/대본이 자극적이거나 선정적이지 않고, 피해자·유가족을 존중하는 톤을 유지하는지.
+4. 구체적인 사실(사망자 수·날짜·원인 등)에 근거가 불확실해 보이는 부분이 있는지 — 있다면 FEEDBACK에
+   "(사실확인 필요)"라고 짚어줘.
+
+마지막에 아래 형식으로 정확히 한 줄씩 출력해줘.
+
+SCORE: (10점 만점 정수)
+FEEDBACK: (2~4문장으로 구체적인 개선점 또는 통과 사유. 트리비아 톤 잔존이나 사실 오류가 있으면 반드시 포함)`;
+  }
+
   const targetChars = extractTargetChars(analysis.pace);
   return `아래 유튜브 쇼츠 제목/대본이 4번 분석에서 뽑은 패턴에 얼마나 잘 맞는지 냉정하게 평가해줘.
 
@@ -283,6 +400,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const siteId = searchParams.get('siteId');
   if (!siteId) return NextResponse.json({ error: 'siteId가 필요합니다.' }, { status: 400 });
+  const category = parseCategory(searchParams.get('category'));
 
   if (searchParams.get('action') === 'review') {
     const title = searchParams.get('title');
@@ -291,7 +409,7 @@ export async function GET(request: Request) {
     const supabase = getSupabaseServerClient();
     const { data: site } = await supabase.from('hub_sites').select('analysis_result').eq('id', siteId).maybeSingle();
     if (!site) return NextResponse.json({ error: '사이트를 찾을 수 없습니다.' }, { status: 404 });
-    return NextResponse.json({ prompt: buildReviewPrompt(site.analysis_result || {}, title, script) });
+    return NextResponse.json({ prompt: buildReviewPrompt(site.analysis_result || {}, title, script, category) });
   }
 
   const stage = parseStage(searchParams.get('stage'));
@@ -299,7 +417,7 @@ export async function GET(request: Request) {
   const material = searchParams.get('material') || undefined;
   const title = searchParams.get('title') || undefined;
 
-  const { prompt, error, status } = await buildPrompt(stage, siteId, material, title);
+  const { prompt, error, status } = await buildPrompt(stage, siteId, material, title, category);
   if (error) return NextResponse.json({ error }, { status: status || 400 });
   return NextResponse.json({ prompt });
 }
@@ -310,6 +428,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const siteId = body?.siteId?.trim();
   if (!siteId) return NextResponse.json({ error: 'siteId가 필요합니다.' }, { status: 400 });
+  const category = parseCategory(body?.category);
 
   const supabase = getSupabaseServerClient();
 
@@ -321,12 +440,17 @@ export async function POST(request: Request) {
 
     const { data: site } = await supabase.from('hub_sites').select('analysis_result, script_draft').eq('id', siteId).maybeSingle();
     if (!site) return NextResponse.json({ error: '사이트를 찾을 수 없습니다.' }, { status: 404 });
+    const prevDraftForReview: ScriptDraft = site.script_draft || {};
+    const unitCategory = prevDraftForReview.units?.find((u) => u.id === unitId)?.category || category;
 
     let reviewText: string;
     try {
       reviewText = await callGeminiVision({
-        systemPrompt: '너는 유튜브 쇼츠 콘텐츠 QA 담당자다. 냉정하고 구체적으로 평가한다.',
-        userPrompt: buildReviewPrompt(site.analysis_result || {}, title, script),
+        systemPrompt:
+          unitCategory === 'disaster'
+            ? '너는 재난·사고 보도 콘텐츠의 팩트체커 겸 편집장이다. 자극적인 표현이나 부적절한 톤을 엄격하게 걸러낸다.'
+            : '너는 유튜브 쇼츠 콘텐츠 QA 담당자다. 냉정하고 구체적으로 평가한다.',
+        userPrompt: buildReviewPrompt(site.analysis_result || {}, title, script, unitCategory),
         model: MODEL,
       });
     } catch (err) {
@@ -334,9 +458,8 @@ export async function POST(request: Request) {
     }
 
     const review = parseReview(reviewText);
-    const prevDraft: ScriptDraft = site.script_draft || {};
-    const units = (prevDraft.units || []).map((u) => (u.id === unitId ? { ...u, review } : u));
-    const nextDraft: ScriptDraft = { ...prevDraft, units, updated_at: new Date().toISOString() };
+    const units = (prevDraftForReview.units || []).map((u) => (u.id === unitId ? { ...u, review } : u));
+    const nextDraft: ScriptDraft = { ...prevDraftForReview, units, updated_at: new Date().toISOString() };
 
     const { error: saveError } = await supabase
       .from('hub_sites')
@@ -351,13 +474,16 @@ export async function POST(request: Request) {
   const material: string | undefined = body?.material || undefined;
   const title: string | undefined = body?.title || undefined;
 
-  const { prompt, error, status } = await buildPrompt(stage, siteId, material, title);
+  const { prompt, error, status } = await buildPrompt(stage, siteId, material, title, category);
   if (error) return NextResponse.json({ error }, { status: status || 400 });
 
   let resultText: string;
   try {
     resultText = await callGeminiVision({
-      systemPrompt: '너는 유튜브 쇼츠 콘텐츠 기획자 겸 작가다.',
+      systemPrompt:
+        category === 'disaster'
+          ? '너는 재난·사고 콘텐츠 전문 저널리스트다. 사실 위주로, 존중하는 톤으로 작성한다.'
+          : '너는 유튜브 쇼츠 콘텐츠 기획자 겸 작가다.',
       userPrompt: prompt,
       model: MODEL,
     });
@@ -376,13 +502,15 @@ export async function POST(request: Request) {
       .filter(Boolean);
     // 소재를 새로 뽑으면 그 아래(제목/대본 선택)는 더 이상 유효하지 않으므로 같이 초기화하되,
     // 이미 완성해서 기록해둔 units(콘텐츠 단위)는 그대로 보존한다.
-    nextDraft = { units: prevDraft.units, materials };
+    nextDraft = { units: prevDraft.units, materials, category };
   } else if (stage === 'titles') {
     const titles = resultText
       .split('\n')
       .map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim())
       .filter(Boolean);
     nextDraft = { ...prevDraft, selectedMaterial: material, titles, selectedTitle: undefined, script: undefined, titleEn: undefined, scriptEn: undefined, titleJa: undefined, scriptJa: undefined };
+  } else if (category === 'disaster') {
+    nextDraft = { ...prevDraft, selectedTitle: title, script: resultText.trim(), titleEn: undefined, scriptEn: undefined, titleJa: undefined, scriptJa: undefined };
   } else {
     const { ko, titleEn, scriptEn, titleJa, scriptJa } = parseScriptResponse(resultText);
     nextDraft = { ...prevDraft, selectedTitle: title, script: ko, titleEn, scriptEn, titleJa, scriptJa };
@@ -410,6 +538,7 @@ export async function PATCH(request: Request) {
   const prevDraft: ScriptDraft = site.script_draft || {};
 
   const patch: Partial<ScriptDraft> = {};
+  if ('category' in body) patch.category = parseCategory(body.category);
   if ('materials' in body) patch.materials = body.materials;
   if ('selectedMaterial' in body) patch.selectedMaterial = body.selectedMaterial;
   if ('titles' in body) patch.titles = body.titles;
