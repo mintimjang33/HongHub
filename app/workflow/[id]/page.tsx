@@ -153,7 +153,9 @@ function parseSteps(markdown: string): Step[] {
 // scenePrompts 텍스트("### S01A 제목 (4초)\n대본: ...\n- CLEAN: ...\n- INFO: ...\n- 영상: ..." 형식,
 // 6번 워크시트/워크플로우 문서에서 쓰는 것과 동일한 포맷)를 장면 카드 배열로 파싱한다.
 // 형식이 안 맞으면(자유 텍스트로 붙여넣은 경우 등) 빈 배열을 반환하고, 그때는 원문 그대로 보여준다.
-function parseSceneBlocks(text: string): { id: string; title: string; script: string; clean: string; info: string; video: string }[] {
+function parseSceneBlocks(
+  text: string
+): { id: string; title: string; script: string; note: string; clean: string; info: string; video: string }[] {
   if (!text) return [];
   const blocks = text
     .split(/\n(?=###\s)/)
@@ -166,16 +168,18 @@ function parseSceneBlocks(text: string): { id: string; title: string; script: st
     const id = headerMatch ? headerMatch[1] : `S${idx + 1}`;
     const title = headerMatch ? headerMatch[2] : header;
     let script = '';
+    let note = '';
     let clean = '';
     let info = '';
     let video = '';
     for (const line of lines.slice(1)) {
       if (line.startsWith('대본:')) script = line.replace(/^대본:\s*/, '');
+      else if (line.startsWith('- 해석:')) note = line.replace(/^- 해석:\s*/, '');
       else if (line.startsWith('- CLEAN:')) clean = line.replace(/^- CLEAN:\s*/, '');
       else if (line.startsWith('- INFO:')) info = line.replace(/^- INFO:\s*/, '');
       else if (line.startsWith('- 영상:')) video = line.replace(/^- 영상:\s*/, '');
     }
-    return { id, title, script, clean, info, video };
+    return { id, title, script, note, clean, info, video };
   });
 }
 
@@ -2321,6 +2325,11 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                                     </summary>
                                     <div className="px-2.5 pb-2.5 pt-1 border-t border-neutral-50 space-y-1.5">
                                       {s.script && <p className="text-[11px] text-neutral-500 italic">&quot;{s.script}&quot;</p>}
+                                      {s.note && (
+                                        <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-md px-2 py-1 leading-relaxed">
+                                          🇰🇷 {s.note}
+                                        </p>
+                                      )}
                                       {s.clean && (
                                         <div className="flex items-start gap-1.5">
                                           <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">CLEAN</span>
@@ -2936,6 +2945,11 @@ function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                             </summary>
                             <div className="px-2.5 pb-2.5 pt-1 border-t border-neutral-100 space-y-1.5">
                               {s.script && <p className="text-[11px] text-neutral-500 italic">&quot;{s.script}&quot;</p>}
+                              {s.note && (
+                                <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-md px-2 py-1 leading-relaxed">
+                                  🇰🇷 {s.note}
+                                </p>
+                              )}
                               {s.clean && (
                                 <div className="flex items-start gap-1.5">
                                   <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">CLEAN</span>
