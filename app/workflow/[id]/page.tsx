@@ -155,7 +155,7 @@ function parseSteps(markdown: string): Step[] {
 // 형식이 안 맞으면(자유 텍스트로 붙여넣은 경우 등) 빈 배열을 반환하고, 그때는 원문 그대로 보여준다.
 function parseSceneBlocks(
   text: string
-): { id: string; title: string; script: string; note: string; clean: string; info: string; video: string }[] {
+): { id: string; title: string; script: string; note: string; clean: string; info: string; video: string; media: string[] }[] {
   if (!text) return [];
   const blocks = text
     .split(/\n(?=###\s)/)
@@ -172,19 +172,38 @@ function parseSceneBlocks(
     let clean = '';
     let info = '';
     let video = '';
+    const media: string[] = [];
     for (const line of lines.slice(1)) {
       if (line.startsWith('대본:')) script = line.replace(/^대본:\s*/, '');
       else if (line.startsWith('- 해석:')) note = line.replace(/^- 해석:\s*/, '');
       else if (line.startsWith('- CLEAN:')) clean = line.replace(/^- CLEAN:\s*/, '');
       else if (line.startsWith('- INFO:')) info = line.replace(/^- INFO:\s*/, '');
       else if (line.startsWith('- 영상:')) video = line.replace(/^- 영상:\s*/, '');
+      else if (line.startsWith('- 자료:')) media.push(line.replace(/^- 자료:\s*/, '').trim());
     }
-    return { id, title, script, note, clean, info, video };
+    return { id, title, script, note, clean, info, video, media };
   });
 }
 
-type SceneBlock = { id: string; title: string; script: string; note: string; clean: string; info: string; video: string };
-const EMPTY_SCENE_DRAFT: SceneBlock = { id: '', title: '', script: '', note: '', clean: '', info: '', video: '' };
+type SceneBlock = { id: string; title: string; script: string; note: string; clean: string; info: string; video: string; media: string[] };
+const EMPTY_SCENE_DRAFT: SceneBlock = { id: '', title: '', script: '', note: '', clean: '', info: '', video: '', media: [] };
+
+// 첨부 URL의 확장자로 이미지/영상을 구분해서 썸네일 또는 인라인 플레이어로 보여준다.
+function isVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
+}
+
+// Flow 등에서 만든 이미지/영상을 다운로드해서 여기로 업로드하면 /api/upload가 honghub-files
+// Storage에 영구 저장하고 공개 URL을 돌려준다(Flow 자체 링크는 구글 로그인 세션에 묶이거나
+// 임시 CDN이라 나중에 깨질 수 있어서, 항상 우리 쪽에 실물을 복사해두는 것).
+async function uploadSceneMedia(file: File): Promise<string> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/api/upload', { method: 'POST', body: form });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '업로드 실패');
+  return data.url as string;
+}
 
 // parseSceneBlocks의 역함수 — 장면 배열을 다시 "### id title\n대본: ...\n- CLEAN: ...\n- INFO: ...\n- 영상: ..." 텍스트로 합친다.
 // 값이 비어있는 필드는 그 줄 자체를 안 씀(예: 텍스트→영상 직접 생성 방식은 CLEAN/INFO 없이 영상 한 줄만 있어도 됨).
@@ -197,6 +216,7 @@ function serializeSceneBlocks(scenes: SceneBlock[]): string {
       if (s.clean) lines.push(`- CLEAN: ${s.clean}`);
       if (s.info) lines.push(`- INFO: ${s.info}`);
       if (s.video) lines.push(`- 영상: ${s.video}`);
+      for (const m of s.media || []) if (m) lines.push(`- 자료: ${m}`);
       return lines.join('\n');
     })
     .join('\n\n');
@@ -226,6 +246,23 @@ function SceneDraftForm({
   onSave: () => void | Promise<void>;
   saving: boolean;
 }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setUploadError('');
+    try {
+      const urls = await Promise.all(Array.from(files).map(uploadSceneMedia));
+      setDraft({ ...draft, media: [...draft.media, ...urls] });
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 space-y-1.5">
       <div className="flex gap-1.5">
@@ -275,6 +312,45 @@ function SceneDraftForm({
           />
         </div>
       </details>
+      <div className="border-t border-neutral-200 pt-1.5">
+        <p className="text-[10px] font-black text-neutral-400 mb-1">📎 자료 (Flow에서 다운로드한 이미지/영상 첨부)</p>
+        {draft.media.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-1.5">
+            {draft.media.map((url, mi) => (
+              <div key={mi} className="relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 group">
+                {isVideoUrl(url) ? (
+                  <video src={url} className="w-full h-full object-cover" muted />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                )}
+                <button
+                  onClick={() => setDraft({ ...draft, media: draft.media.filter((_, i) => i !== mi) })}
+                  title="첨부 삭제"
+                  className="absolute top-0 right-0 bg-black/60 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
+          {uploading ? '업로드 중...' : '+ 파일 선택'}
+          <input
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            disabled={uploading}
+            onChange={(e) => {
+              handleFiles(e.target.files);
+              e.target.value = '';
+            }}
+            className="hidden"
+          />
+        </label>
+        {uploadError && <p className="text-[10px] text-red-500 font-bold mt-1">{uploadError}</p>}
+      </div>
       <div className="flex justify-end gap-1.5">
         <button onClick={onCancel} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
           취소
@@ -328,6 +404,11 @@ function SceneEditorList({
   async function removeScene(idx: number) {
     if (!confirm(`${scenes[idx].id} 장면을 삭제할까요?`)) return;
     await onSave(serializeSceneBlocks(scenes.filter((_, i) => i !== idx)));
+  }
+  // 장면 편집 폼에 안 들어가고, 보기 화면에서 첨부 하나만 바로 뗄 수 있게(수정 모드까지 안 열어도 되게).
+  async function removeSceneMedia(sceneIdx: number, mediaIdx: number) {
+    const next = scenes.map((s, i) => (i === sceneIdx ? { ...s, media: s.media.filter((_, j) => j !== mediaIdx) } : s));
+    await onSave(serializeSceneBlocks(next));
   }
 
   // 형식이 안 맞는 예전 자유 텍스트 — 그대로 보여주되 장면 추가는 여전히 가능하게 둔다.
@@ -402,6 +483,40 @@ function SceneEditorList({
                   <span className="shrink-0 text-[10px] font-black text-amber-600 mt-0.5 w-10">영상</span>
                   <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.video}</p>
                   <CopyButton text={s.video} />
+                </div>
+              )}
+              {s.media.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-black text-neutral-400 mb-1">📎 자료</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.media.map((url, mi) => (
+                      <div key={mi} className="relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100">
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                          {isVideoUrl(url) ? (
+                            <video src={url} className="w-full h-full object-cover" muted />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={url} alt="" className="w-full h-full object-cover" />
+                          )}
+                        </a>
+                        <a
+                          href={url}
+                          download
+                          title="다운로드"
+                          className="absolute bottom-0 left-0 bg-black/60 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center"
+                        >
+                          ⬇
+                        </a>
+                        <button
+                          onClick={() => removeSceneMedia(idx, mi)}
+                          title="첨부 삭제"
+                          className="absolute top-0 right-0 bg-black/60 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
