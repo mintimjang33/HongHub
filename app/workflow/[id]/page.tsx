@@ -183,6 +183,246 @@ function parseSceneBlocks(
   });
 }
 
+type SceneBlock = { id: string; title: string; script: string; note: string; clean: string; info: string; video: string };
+const EMPTY_SCENE_DRAFT: SceneBlock = { id: '', title: '', script: '', note: '', clean: '', info: '', video: '' };
+
+// parseSceneBlocks의 역함수 — 장면 배열을 다시 "### id title\n대본: ...\n- CLEAN: ...\n- INFO: ...\n- 영상: ..." 텍스트로 합친다.
+// 값이 비어있는 필드는 그 줄 자체를 안 씀(예: 텍스트→영상 직접 생성 방식은 CLEAN/INFO 없이 영상 한 줄만 있어도 됨).
+function serializeSceneBlocks(scenes: SceneBlock[]): string {
+  return scenes
+    .map((s) => {
+      const lines = [`### ${s.id}${s.title ? ` ${s.title}` : ''}`];
+      if (s.script) lines.push(`대본: ${s.script}`);
+      if (s.note) lines.push(`- 해석: ${s.note}`);
+      if (s.clean) lines.push(`- CLEAN: ${s.clean}`);
+      if (s.info) lines.push(`- INFO: ${s.info}`);
+      if (s.video) lines.push(`- 영상: ${s.video}`);
+      return lines.join('\n');
+    })
+    .join('\n\n');
+}
+
+// 기존 장면 id(S01A, S02A...)에서 숫자 부분 최댓값+1로 다음 장면 id를 제안한다.
+function nextSceneId(scenes: SceneBlock[]): string {
+  let max = 0;
+  for (const s of scenes) {
+    const m = s.id.match(/(\d+)/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `S${String(max + 1).padStart(2, '0')}A`;
+}
+
+// 장면 하나를 추가/수정하는 폼 — id/제목/대본/영상 프롬프트가 기본, CLEAN/INFO는 이미지 2장 방식을 쓸 때만 펼쳐서 채운다.
+function SceneDraftForm({
+  draft,
+  setDraft,
+  onCancel,
+  onSave,
+  saving,
+}: {
+  draft: SceneBlock;
+  setDraft: (d: SceneBlock) => void;
+  onCancel: () => void;
+  onSave: () => void | Promise<void>;
+  saving: boolean;
+}) {
+  return (
+    <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 space-y-1.5">
+      <div className="flex gap-1.5">
+        <input
+          value={draft.id}
+          onChange={(e) => setDraft({ ...draft, id: e.target.value })}
+          placeholder="장면 ID (예: S01A)"
+          className="w-24 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
+        />
+        <input
+          value={draft.title}
+          onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+          placeholder="장면 제목 (예: 오프닝훅·4초)"
+          className="flex-1 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+        />
+      </div>
+      <textarea
+        value={draft.script}
+        onChange={(e) => setDraft({ ...draft, script: e.target.value })}
+        rows={2}
+        placeholder="대본 문장 (선택)"
+        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+      />
+      <textarea
+        value={draft.video}
+        onChange={(e) => setDraft({ ...draft, video: e.target.value })}
+        rows={4}
+        placeholder="영상 생성 프롬프트 — 텍스트→영상 직접 생성 방식이면 이 칸 하나만 채우면 됨"
+        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed"
+      />
+      <details className="text-[10px]">
+        <summary className="cursor-pointer text-neutral-400 font-bold">CLEAN/INFO 이미지 프롬프트 (이미지 2장 방식 쓸 때만)</summary>
+        <div className="space-y-1.5 mt-1.5">
+          <textarea
+            value={draft.clean}
+            onChange={(e) => setDraft({ ...draft, clean: e.target.value })}
+            rows={2}
+            placeholder="CLEAN 이미지 프롬프트"
+            className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
+          />
+          <textarea
+            value={draft.info}
+            onChange={(e) => setDraft({ ...draft, info: e.target.value })}
+            rows={2}
+            placeholder="INFO 이미지 프롬프트"
+            className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
+          />
+        </div>
+      </details>
+      <div className="flex justify-end gap-1.5">
+        <button onClick={onCancel} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+          취소
+        </button>
+        <button
+          onClick={onSave}
+          disabled={saving || !draft.id.trim() || !draft.video.trim()}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+        >
+          {saving ? '저장 중...' : '저장'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 6번 장면 프롬프트 편집 UI — 예전엔 전체를 통짜 텍스트로 붙여넣는 방식뿐이었는데, 장면 하나씩
+// 추가/수정/삭제할 수 있게 바꿨다. 저장 시엔 여전히 scenePrompts 문자열 전체를 부모에 돌려준다
+// (백엔드/파싱 로직은 그대로 두고 편집 UX만 바꾼 것).
+function SceneEditorList({
+  scenePrompts,
+  onSave,
+  saving,
+}: {
+  scenePrompts: string;
+  onSave: (text: string) => void | Promise<void>;
+  saving: boolean;
+}) {
+  const scenes = parseSceneBlocks(scenePrompts);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 장면 추가 중
+  const [draft, setDraft] = useState<SceneBlock>(EMPTY_SCENE_DRAFT);
+
+  function startEdit(idx: number) {
+    setEditingIndex(idx);
+    setDraft(scenes[idx]);
+  }
+  function startAdd() {
+    setEditingIndex(-1);
+    setDraft({ ...EMPTY_SCENE_DRAFT, id: nextSceneId(scenes) });
+  }
+  function cancel() {
+    setEditingIndex(null);
+    setDraft(EMPTY_SCENE_DRAFT);
+  }
+  async function saveDraft() {
+    const next = editingIndex === -1 ? [...scenes, draft] : scenes.map((s, i) => (i === editingIndex ? draft : s));
+    await onSave(serializeSceneBlocks(next));
+    setEditingIndex(null);
+    setDraft(EMPTY_SCENE_DRAFT);
+  }
+  async function removeScene(idx: number) {
+    if (!confirm(`${scenes[idx].id} 장면을 삭제할까요?`)) return;
+    await onSave(serializeSceneBlocks(scenes.filter((_, i) => i !== idx)));
+  }
+
+  // 형식이 안 맞는 예전 자유 텍스트 — 그대로 보여주되 장면 추가는 여전히 가능하게 둔다.
+  if (scenes.length === 0 && scenePrompts.trim()) {
+    return (
+      <div className="space-y-1.5 mt-1">
+        <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap bg-neutral-50 rounded-lg p-2">{scenePrompts}</p>
+        {editingIndex === -1 ? (
+          <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
+        ) : (
+          <button onClick={startAdd} className="text-[10px] font-bold text-blue-600 hover:underline">
+            + 장면 추가
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5 mt-1">
+      {scenes.length === 0 && editingIndex === null && <p className="text-[11px] text-neutral-300">아직 없음</p>}
+      {scenes.map((s, idx) =>
+        editingIndex === idx ? (
+          <SceneDraftForm key={s.id || idx} draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
+        ) : (
+          <details key={s.id || idx} className="bg-white border border-neutral-100 rounded-lg">
+            <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-bold flex items-center gap-2 select-none">
+              <span className="text-neutral-400 shrink-0">{s.id}</span>
+              <span className="flex-1 min-w-0 truncate">{s.title}</span>
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  startEdit(idx);
+                }}
+                className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
+              >
+                ✏️
+              </span>
+              <span
+                role="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  removeScene(idx);
+                }}
+                className="shrink-0 text-[10px] font-bold text-red-500 hover:underline"
+              >
+                🗑
+              </span>
+            </summary>
+            <div className="px-2.5 pb-2.5 pt-1 border-t border-neutral-50 space-y-1.5">
+              {s.script && <p className="text-[11px] text-neutral-500 italic">&quot;{s.script}&quot;</p>}
+              {s.note && (
+                <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-md px-2 py-1 leading-relaxed">🇰🇷 {s.note}</p>
+              )}
+              {s.clean && (
+                <div className="flex items-start gap-1.5">
+                  <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">CLEAN</span>
+                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.clean}</p>
+                  <CopyButton text={s.clean} />
+                </div>
+              )}
+              {s.info && (
+                <div className="flex items-start gap-1.5">
+                  <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">INFO</span>
+                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.info}</p>
+                  <CopyButton text={s.info} />
+                </div>
+              )}
+              {s.video && (
+                <div className="flex items-start gap-1.5">
+                  <span className="shrink-0 text-[10px] font-black text-amber-600 mt-0.5 w-10">영상</span>
+                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.video}</p>
+                  <CopyButton text={s.video} />
+                </div>
+              )}
+            </div>
+          </details>
+        )
+      )}
+      {editingIndex === -1 && (
+        <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
+      )}
+      {editingIndex === null && (
+        <button
+          onClick={startAdd}
+          className="w-full text-[11px] font-bold text-blue-600 hover:underline border border-dashed border-blue-200 rounded-lg py-2"
+        >
+          + 장면 추가
+        </button>
+      )}
+    </div>
+  );
+}
+
 // 단계 이름/내용에 등장하는 키워드로 실제 작업 페이지 바로가기 링크를 만들어준다.
 // "채널 발굴"(1번), "소재 수집"(2번), "대본 수집"(3번) 단계는 이 페이지에서 바로 처리할 수 있게
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
@@ -1300,8 +1540,6 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [error, setError] = useState('');
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
   // 2026-08-31 추가 — 6번(이미지/영상 생성) 장면 프롬프트를 이 콘텐츠 유닛에 직접 붙여넣기/수정하는 박스 상태.
-  const [scenePromptsEditId, setScenePromptsEditId] = useState<string | null>(null);
-  const [scenePromptsDraft, setScenePromptsDraft] = useState('');
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [reviewCopyingId, setReviewCopyingId] = useState<string | null>(null);
   const [reviewCopiedId, setReviewCopiedId] = useState<string | null>(null);
@@ -1490,7 +1728,6 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, scenePrompts } : u)) }),
       });
-      setScenePromptsEditId(null);
       onRefresh();
     } finally {
       setSaving(false);
@@ -2273,93 +2510,8 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
                         </div>
                       )}
                       <div className="pt-2 border-t border-neutral-50">
-                        <div className="flex items-center justify-between mb-0.5">
-                          <p className="text-[10px] font-black text-neutral-400">🎬 6번 이미지/영상 프롬프트 (이 콘텐츠 전용)</p>
-                          {scenePromptsEditId !== u.id && (
-                            <button
-                              onClick={() => {
-                                setScenePromptsEditId(u.id);
-                                setScenePromptsDraft(u.scenePrompts || '');
-                              }}
-                              className="text-[10px] font-bold text-blue-600 hover:underline shrink-0"
-                            >
-                              {u.scenePrompts ? '✏️ 수정' : '+ 붙여넣기'}
-                            </button>
-                          )}
-                        </div>
-                        {scenePromptsEditId === u.id ? (
-                          <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 mt-1">
-                            <textarea
-                              value={scenePromptsDraft}
-                              onChange={(e) => setScenePromptsDraft(e.target.value)}
-                              rows={8}
-                              placeholder="장면별 CLEAN/INFO/영상 프롬프트 전문을 여기에 붙여넣으세요"
-                              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <button onClick={() => setScenePromptsEditId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
-                                취소
-                              </button>
-                              <button
-                                onClick={() => saveUnitScenePrompts(u.id, scenePromptsDraft)}
-                                disabled={saving || !scenePromptsDraft.trim()}
-                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                              >
-                                {saving ? '저장 중...' : '저장'}
-                              </button>
-                            </div>
-                          </div>
-                        ) : u.scenePrompts ? (
-                          (() => {
-                            const scenes = parseSceneBlocks(u.scenePrompts);
-                            if (scenes.length === 0) {
-                              return <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scenePrompts}</p>;
-                            }
-                            return (
-                              <div className="space-y-1.5 mt-1">
-                                {scenes.map((s) => (
-                                  <details key={s.id} className="bg-white border border-neutral-100 rounded-lg">
-                                    <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-bold flex items-center gap-2 select-none">
-                                      <span className="text-neutral-400 shrink-0">{s.id}</span>
-                                      <span className="flex-1 min-w-0 truncate">{s.title}</span>
-                                    </summary>
-                                    <div className="px-2.5 pb-2.5 pt-1 border-t border-neutral-50 space-y-1.5">
-                                      {s.script && <p className="text-[11px] text-neutral-500 italic">&quot;{s.script}&quot;</p>}
-                                      {s.note && (
-                                        <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-md px-2 py-1 leading-relaxed">
-                                          🇰🇷 {s.note}
-                                        </p>
-                                      )}
-                                      {s.clean && (
-                                        <div className="flex items-start gap-1.5">
-                                          <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">CLEAN</span>
-                                          <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.clean}</p>
-                                          <CopyButton text={s.clean} />
-                                        </div>
-                                      )}
-                                      {s.info && (
-                                        <div className="flex items-start gap-1.5">
-                                          <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">INFO</span>
-                                          <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.info}</p>
-                                          <CopyButton text={s.info} />
-                                        </div>
-                                      )}
-                                      {s.video && (
-                                        <div className="flex items-start gap-1.5">
-                                          <span className="shrink-0 text-[10px] font-black text-amber-600 mt-0.5 w-10">영상</span>
-                                          <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.video}</p>
-                                          <CopyButton text={s.video} />
-                                        </div>
-                                      )}
-                                    </div>
-                                  </details>
-                                ))}
-                              </div>
-                            );
-                          })()
-                        ) : (
-                          <p className="text-[11px] text-neutral-300">아직 없음</p>
-                        )}
+                        <p className="text-[10px] font-black text-neutral-400 mb-0.5">🎬 6번 이미지/영상 프롬프트 (이 콘텐츠 전용) — 장면별로 추가/수정</p>
+                        <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => saveUnitScenePrompts(u.id, text)} />
                       </div>
                       {(u.sources && u.sources.length > 0) || u.factCheck ? (
                         <div className="pt-2 border-t border-neutral-50">
@@ -2844,8 +2996,6 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
 function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const units = site.script_draft?.units || [];
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [draftText, setDraftText] = useState('');
   const [saving, setSaving] = useState(false);
 
   async function save(id: string, scenePrompts: string) {
@@ -2856,7 +3006,6 @@ function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, scenePrompts } : u)) }),
       });
-      setEditId(null);
       onRefresh();
     } finally {
       setSaving(false);
@@ -2896,89 +3045,8 @@ function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
               </button>
               {openUnitId === u.id && (
                 <div className="px-3 pb-3 pt-1 border-t border-neutral-50">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
-                    {editId !== u.id && (
-                      <button
-                        onClick={() => {
-                          setEditId(u.id);
-                          setDraftText(u.scenePrompts || '');
-                        }}
-                        className="text-[10px] font-bold text-blue-600 hover:underline shrink-0"
-                      >
-                        {u.scenePrompts ? '✏️ 수정' : '+ 붙여넣기'}
-                      </button>
-                    )}
-                  </div>
-                  {editId === u.id ? (
-                    <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2">
-                      <textarea
-                        value={draftText}
-                        onChange={(e) => setDraftText(e.target.value)}
-                        rows={8}
-                        placeholder="장면별 CLEAN/INFO/영상 프롬프트 전문을 여기에 붙여넣으세요"
-                        className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-                      />
-                      <div className="flex justify-end gap-1.5">
-                        <button onClick={() => setEditId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
-                          취소
-                        </button>
-                        <button
-                          onClick={() => save(u.id, draftText)}
-                          disabled={saving || !draftText.trim()}
-                          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                        >
-                          {saving ? '저장 중...' : '저장'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : u.scenePrompts ? (
-                    scenes.length === 0 ? (
-                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scenePrompts}</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {scenes.map((s) => (
-                          <details key={s.id} className="bg-neutral-50 border border-neutral-100 rounded-lg">
-                            <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-bold flex items-center gap-2 select-none">
-                              <span className="text-neutral-400 shrink-0">{s.id}</span>
-                              <span className="flex-1 min-w-0 truncate">{s.title}</span>
-                            </summary>
-                            <div className="px-2.5 pb-2.5 pt-1 border-t border-neutral-100 space-y-1.5">
-                              {s.script && <p className="text-[11px] text-neutral-500 italic">&quot;{s.script}&quot;</p>}
-                              {s.note && (
-                                <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-md px-2 py-1 leading-relaxed">
-                                  🇰🇷 {s.note}
-                                </p>
-                              )}
-                              {s.clean && (
-                                <div className="flex items-start gap-1.5">
-                                  <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">CLEAN</span>
-                                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.clean}</p>
-                                  <CopyButton text={s.clean} />
-                                </div>
-                              )}
-                              {s.info && (
-                                <div className="flex items-start gap-1.5">
-                                  <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">INFO</span>
-                                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.info}</p>
-                                  <CopyButton text={s.info} />
-                                </div>
-                              )}
-                              {s.video && (
-                                <div className="flex items-start gap-1.5">
-                                  <span className="shrink-0 text-[10px] font-black text-amber-600 mt-0.5 w-10">영상</span>
-                                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.video}</p>
-                                  <CopyButton text={s.video} />
-                                </div>
-                              )}
-                            </div>
-                          </details>
-                        ))}
-                      </div>
-                    )
-                  ) : (
-                    <p className="text-[11px] text-neutral-300">아직 없음 — 위 버튼으로 붙여넣어주세요.</p>
-                  )}
+                  <p className="text-[10px] text-neutral-400 mb-1">소재: {u.material}</p>
+                  <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => save(u.id, text)} />
                 </div>
               )}
             </div>
