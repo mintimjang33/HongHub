@@ -188,11 +188,6 @@ function parseSceneBlocks(
 type SceneBlock = { id: string; title: string; script: string; note: string; clean: string; info: string; video: string; media: string[] };
 const EMPTY_SCENE_DRAFT: SceneBlock = { id: '', title: '', script: '', note: '', clean: '', info: '', video: '', media: [] };
 
-// 첨부 URL의 확장자로 이미지/영상을 구분해서 썸네일 또는 인라인 플레이어로 보여준다.
-function isVideoUrl(url: string): boolean {
-  return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
-}
-
 // Flow 등에서 만든 이미지/영상을 다운로드해서 여기로 업로드하면 /api/upload가 honghub-files
 // Storage에 영구 저장하고 공개 URL을 돌려준다(Flow 자체 링크는 구글 로그인 세션에 묶이거나
 // 임시 CDN이라 나중에 깨질 수 있어서, 항상 우리 쪽에 실물을 복사해두는 것).
@@ -325,19 +320,16 @@ function SceneDraftForm({
       <div className="border-t border-neutral-200 pt-1.5">
         <p className="text-[10px] font-black text-neutral-400 mb-1">📎 자료 (Flow에서 다운로드한 이미지/영상 첨부)</p>
         {draft.media.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-1.5">
+          <div className="space-y-1 mb-1.5">
             {draft.media.map((url, mi) => (
-              <div key={mi} className="relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 group">
-                {isVideoUrl(url) ? (
-                  <video src={url} className="w-full h-full object-cover" muted />
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={url} alt="" className="w-full h-full object-cover" />
-                )}
+              <div key={mi} className="flex items-center gap-1.5 bg-white border border-neutral-200 rounded-lg px-2 py-1">
+                <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
+                  {url}
+                </a>
                 <button
                   onClick={() => setDraft({ ...draft, media: draft.media.filter((_, i) => i !== mi) })}
                   title="첨부 삭제"
-                  className="absolute top-0 right-0 bg-black/60 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center"
+                  className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500"
                 >
                   ✕
                 </button>
@@ -498,29 +490,17 @@ function SceneEditorList({
               {s.media.length > 0 && (
                 <div>
                   <p className="text-[10px] font-black text-neutral-400 mb-1">📎 자료</p>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="space-y-1">
                     {s.media.map((url, mi) => (
-                      <div key={mi} className="relative shrink-0 w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100">
-                        <a href={url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
-                          {isVideoUrl(url) ? (
-                            <video src={url} className="w-full h-full object-cover" muted />
-                          ) : (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={url} alt="" className="w-full h-full object-cover" />
-                          )}
+                      <div key={mi} className="flex items-center gap-1.5 bg-white border border-neutral-200 rounded-lg px-2 py-1">
+                        <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
+                          {url}
                         </a>
-                        <a
-                          href={url}
-                          download
-                          title="다운로드"
-                          className="absolute bottom-0 left-0 bg-black/60 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center"
-                        >
-                          ⬇
-                        </a>
+                        <CopyButton text={url} />
                         <button
                           onClick={() => removeSceneMedia(idx, mi)}
                           title="첨부 삭제"
-                          className="absolute top-0 right-0 bg-black/60 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center"
+                          className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500"
                         >
                           ✕
                         </button>
