@@ -47,7 +47,8 @@ type ContentUnit = {
   // 2026-09-01 추가 — 8번(나레이션 TTS) 단계의 음성 파일/링크. 씬별(scenePrompts)과 달리 나레이션은
   // 콘텐츠 대본 전체에 대해 하나(또는 후보 여러 개) 나오는 거라 유닛에 바로 붙인다. 링크를 직접
   // 붙여넣거나, 파일을 업로드하면(uploadSceneMedia 재사용) 그 URL이 여기 같이 쌓인다.
-  narrationUrls?: string[];
+  // label — 예: "원본"/"1.3배속" 같은 후보 구분용(2026-09-01 추가, 링크만으로는 뭐가 뭔지 구분이 안 돼서).
+  narrationUrls?: { label: string; url: string }[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -3170,24 +3171,35 @@ function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   );
 }
 
+type NarrationItem = { label: string; url: string };
+
+// 2026-09-01 이전엔 문자열 배열(narrationUrls: string[])이었다 — 이미 저장된 예전 데이터를
+// 위해 문자열이 그대로 오면 라벨 없는 항목으로 취급한다.
+function normalizeNarration(raw: unknown): NarrationItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => (typeof item === 'string' ? { label: '', url: item } : (item as NarrationItem)));
+}
+
 // 8번(나레이션 TTS) 단계 — 6번(Step6Panel)과 같은 콘텐츠별 리스트 구조를 쓰되, 씬 단위가 아니라
 // 유닛 하나에 음성 링크/파일을 통째로 붙인다. 링크 붙여넣기와 파일 업로드(uploadSceneMedia 재사용)
-// 둘 다 지원 — 어느 쪽이든 결과는 같은 narrationUrls 배열에 쌓인다.
+// 둘 다 지원 — 어느 쪽이든 결과는 같은 narrationUrls 배열에 쌓인다. 라벨(예: "원본"/"1.3배속")을
+// 붙여서 여러 후보를 구분할 수 있게 한다.
 function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const units = site.script_draft?.units || [];
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
   const [linkDraft, setLinkDraft] = useState('');
+  const [linkLabelDraft, setLinkLabelDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
-  async function saveUrls(id: string, urls: string[]) {
+  async function saveItems(id: string, items: NarrationItem[]) {
     setSaving(true);
     try {
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, narrationUrls: urls } : u)) }),
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, narrationUrls: items } : u)) }),
       });
       onRefresh();
     } finally {
@@ -3198,8 +3210,10 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
   async function addLink(unit: ContentUnit) {
     const value = linkDraft.trim();
     if (!value) return;
+    const label = linkLabelDraft.trim();
     setLinkDraft('');
-    await saveUrls(unit.id, [...(unit.narrationUrls || []), value]);
+    setLinkLabelDraft('');
+    await saveItems(unit.id, [...normalizeNarration(unit.narrationUrls), { label, url: value }]);
   }
 
   async function handleUpload(unit: ContentUnit, files: FileList | null) {
@@ -3207,8 +3221,10 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
     setUploading(true);
     setUploadError('');
     try {
-      const urls = await Promise.all(Array.from(files).map(uploadSceneMedia));
-      await saveUrls(unit.id, [...(unit.narrationUrls || []), ...urls]);
+      const uploaded = await Promise.all(
+        Array.from(files).map(async (f) => ({ label: f.name.replace(/\.[^./]+$/, ''), url: await uploadSceneMedia(f) }))
+      );
+      await saveItems(unit.id, [...normalizeNarration(unit.narrationUrls), ...uploaded]);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -3216,8 +3232,12 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
     }
   }
 
-  async function removeUrl(unit: ContentUnit, idx: number) {
-    await saveUrls(unit.id, (unit.narrationUrls || []).filter((_, i) => i !== idx));
+  async function removeItem(unit: ContentUnit, idx: number) {
+    await saveItems(unit.id, normalizeNarration(unit.narrationUrls).filter((_, i) => i !== idx));
+  }
+
+  async function relabelItem(unit: ContentUnit, idx: number, label: string) {
+    await saveItems(unit.id, normalizeNarration(unit.narrationUrls).map((item, i) => (i === idx ? { ...item, label } : item)));
   }
 
   if (units.length === 0) {
@@ -3233,7 +3253,7 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
       <div className="text-xs font-black text-neutral-500 mb-2">🎙 콘텐츠별 나레이션(TTS)</div>
       <div className="space-y-1.5">
         {units.map((u) => {
-          const urls = u.narrationUrls || [];
+          const items = normalizeNarration(u.narrationUrls);
           const isOpen = openUnitId === u.id;
           return (
             <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
@@ -3248,9 +3268,9 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
                 <span className={`shrink-0 transition-transform text-neutral-300 ${isOpen ? 'rotate-90' : ''}`}>▶</span>
                 {u.category === 'disaster' && <span className="shrink-0 text-[10px]">🚨</span>}
                 <span className="flex-1 min-w-0 truncate text-[11px] font-bold">{u.title}</span>
-                {urls.length > 0 ? (
+                {items.length > 0 ? (
                   <span className="shrink-0 text-[10px] font-black text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
-                    {urls.length}개
+                    {items.length}개
                   </span>
                 ) : (
                   <span className="shrink-0 text-[10px] font-black text-neutral-300 bg-neutral-50 rounded-full px-2 py-0.5">없음</span>
@@ -3259,16 +3279,22 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
               {isOpen && (
                 <div className="px-3 pb-3 pt-1 border-t border-neutral-50 space-y-1.5">
                   <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
-                  {urls.length > 0 && (
+                  {items.length > 0 && (
                     <div className="space-y-1">
-                      {urls.map((url, idx) => (
+                      {items.map((item, idx) => (
                         <div key={idx} className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1">
-                          <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
-                            {url}
+                          <input
+                            defaultValue={item.label}
+                            onBlur={(e) => e.target.value !== item.label && relabelItem(u, idx, e.target.value)}
+                            placeholder="라벨(예: 원본, 1.3배속)"
+                            className="w-28 shrink-0 border border-neutral-200 rounded px-1.5 py-1 text-[10px] font-bold bg-white"
+                          />
+                          <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
+                            {item.url}
                           </a>
-                          <CopyButton text={url} />
+                          <CopyButton text={item.url} />
                           <button
-                            onClick={() => removeUrl(u, idx)}
+                            onClick={() => removeItem(u, idx)}
                             title="삭제"
                             className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500"
                           >
@@ -3279,6 +3305,12 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
                     </div>
                   )}
                   <div className="flex gap-1.5">
+                    <input
+                      value={linkLabelDraft}
+                      onChange={(e) => setLinkLabelDraft(e.target.value)}
+                      placeholder="라벨"
+                      className="w-24 shrink-0 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                    />
                     <input
                       value={linkDraft}
                       onChange={(e) => setLinkDraft(e.target.value)}
