@@ -232,6 +232,16 @@ function nextSceneId(scenes: SceneBlock[]): string {
   return `S${String(max + 1).padStart(2, '0')}A`;
 }
 
+// id에 든 숫자(S01A → 1) 기준 오름차순 정렬 — 순서를 만든 시점이 아니라 항상 번호 순서로 보이게.
+function sortScenesById(scenes: SceneBlock[]): SceneBlock[] {
+  return [...scenes].sort((a, b) => {
+    const na = parseInt((a.id.match(/(\d+)/) || ['', '0'])[1], 10);
+    const nb = parseInt((b.id.match(/(\d+)/) || ['', '0'])[1], 10);
+    if (na !== nb) return na - nb;
+    return a.id.localeCompare(b.id);
+  });
+}
+
 // 장면 하나를 추가/수정하는 폼 — id/제목/대본/영상 프롬프트가 기본, CLEAN/INFO는 이미지 2장 방식을 쓸 때만 펼쳐서 채운다.
 function SceneDraftForm({
   draft,
@@ -357,7 +367,7 @@ function SceneDraftForm({
         </button>
         <button
           onClick={onSave}
-          disabled={saving || !draft.id.trim() || !draft.video.trim()}
+          disabled={saving || !draft.id.trim()}
           className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
         >
           {saving ? '저장 중...' : '저장'}
@@ -396,8 +406,8 @@ function SceneEditorList({
     setDraft(EMPTY_SCENE_DRAFT);
   }
   async function saveDraft() {
-    const next = editingIndex === -1 ? [...scenes, draft] : scenes.map((s, i) => (i === editingIndex ? draft : s));
-    await onSave(serializeSceneBlocks(next));
+    const merged = editingIndex === -1 ? [...scenes, draft] : scenes.map((s, i) => (i === editingIndex ? draft : s));
+    await onSave(serializeSceneBlocks(sortScenesById(merged)));
     setEditingIndex(null);
     setDraft(EMPTY_SCENE_DRAFT);
   }
