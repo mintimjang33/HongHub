@@ -49,6 +49,9 @@ type ContentUnit = {
   // 붙여넣거나, 파일을 업로드하면(uploadSceneMedia 재사용) 그 URL이 여기 같이 쌓인다.
   // label — 예: "원본"/"1.3배속" 같은 후보 구분용(2026-09-01 추가, 링크만으로는 뭐가 뭔지 구분이 안 돼서).
   narrationUrls?: { label: string; url: string }[];
+  // 2026-09-01 추가 — 9번(자막) 단계. narrationUrls와 구조·용도가 완전히 같아서(콘텐츠 하나에
+  // 라벨 붙은 링크/파일 여러 개) 같은 LabeledLinksPanel 컴포넌트를 재사용한다.
+  subtitleUrls?: { label: string; url: string }[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -1492,6 +1495,11 @@ function isImageVideoStep(step: Step): boolean {
 
 function isNarrationStep(step: Step): boolean {
   return /나레이션|TTS/i.test(step.name);
+}
+
+// 3번("대본(자막) 수집")에도 "자막"이 들어있어서 이름 전체가 정확히 "자막"일 때만 매칭한다.
+function isSubtitleStep(step: Step): boolean {
+  return step.name.trim() === '자막';
 }
 
 const ANALYSIS_TABS = [
@@ -3171,20 +3179,36 @@ function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   );
 }
 
-type NarrationItem = { label: string; url: string };
+type LabeledItem = { label: string; url: string };
+type LabeledField = 'narrationUrls' | 'subtitleUrls';
 
-// 2026-09-01 이전엔 문자열 배열(narrationUrls: string[])이었다 — 이미 저장된 예전 데이터를
-// 위해 문자열이 그대로 오면 라벨 없는 항목으로 취급한다.
-function normalizeNarration(raw: unknown): NarrationItem[] {
+// 2026-09-01 이전엔 narrationUrls가 문자열 배열이었다 — 이미 저장된 예전 데이터를 위해
+// 문자열이 그대로 오면 라벨 없는 항목으로 취급한다.
+function normalizeLabeledItems(raw: unknown): LabeledItem[] {
   if (!Array.isArray(raw)) return [];
-  return raw.map((item) => (typeof item === 'string' ? { label: '', url: item } : (item as NarrationItem)));
+  return raw.map((item) => (typeof item === 'string' ? { label: '', url: item } : (item as LabeledItem)));
 }
 
-// 8번(나레이션 TTS) 단계 — 6번(Step6Panel)과 같은 콘텐츠별 리스트 구조를 쓰되, 씬 단위가 아니라
-// 유닛 하나에 음성 링크/파일을 통째로 붙인다. 링크 붙여넣기와 파일 업로드(uploadSceneMedia 재사용)
-// 둘 다 지원 — 어느 쪽이든 결과는 같은 narrationUrls 배열에 쌓인다. 라벨(예: "원본"/"1.3배속")을
-// 붙여서 여러 후보를 구분할 수 있게 한다.
-function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+// 8번(나레이션)·9번(자막) 공용 — 6번(Step6Panel)과 같은 콘텐츠별 리스트 구조를 쓰되, 씬 단위가
+// 아니라 유닛 하나에 링크/파일을 통째로 붙인다. 링크 붙여넣기와 파일 업로드(uploadSceneMedia
+// 재사용) 둘 다 지원, 라벨(예: "원본"/"1.3배속", "SRT"/"수정본")로 여러 후보를 구분한다.
+function LabeledLinksPanel({
+  site,
+  onRefresh,
+  fieldKey,
+  heading,
+  linkPlaceholder,
+  fileAccept,
+  uploadLabel,
+}: {
+  site: Site;
+  onRefresh: () => void;
+  fieldKey: LabeledField;
+  heading: string;
+  linkPlaceholder: string;
+  fileAccept: string;
+  uploadLabel: string;
+}) {
   const units = site.script_draft?.units || [];
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
   const [linkDraft, setLinkDraft] = useState('');
@@ -3193,13 +3217,13 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
-  async function saveItems(id: string, items: NarrationItem[]) {
+  async function saveItems(id: string, items: LabeledItem[]) {
     setSaving(true);
     try {
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, narrationUrls: items } : u)) }),
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, [fieldKey]: items } : u)) }),
       });
       onRefresh();
     } finally {
@@ -3213,7 +3237,7 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
     const label = linkLabelDraft.trim();
     setLinkDraft('');
     setLinkLabelDraft('');
-    await saveItems(unit.id, [...normalizeNarration(unit.narrationUrls), { label, url: value }]);
+    await saveItems(unit.id, [...normalizeLabeledItems(unit[fieldKey]), { label, url: value }]);
   }
 
   async function handleUpload(unit: ContentUnit, files: FileList | null) {
@@ -3224,7 +3248,7 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
       const uploaded = await Promise.all(
         Array.from(files).map(async (f) => ({ label: f.name.replace(/\.[^./]+$/, ''), url: await uploadSceneMedia(f) }))
       );
-      await saveItems(unit.id, [...normalizeNarration(unit.narrationUrls), ...uploaded]);
+      await saveItems(unit.id, [...normalizeLabeledItems(unit[fieldKey]), ...uploaded]);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -3233,11 +3257,11 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
   }
 
   async function removeItem(unit: ContentUnit, idx: number) {
-    await saveItems(unit.id, normalizeNarration(unit.narrationUrls).filter((_, i) => i !== idx));
+    await saveItems(unit.id, normalizeLabeledItems(unit[fieldKey]).filter((_, i) => i !== idx));
   }
 
   async function relabelItem(unit: ContentUnit, idx: number, label: string) {
-    await saveItems(unit.id, normalizeNarration(unit.narrationUrls).map((item, i) => (i === idx ? { ...item, label } : item)));
+    await saveItems(unit.id, normalizeLabeledItems(unit[fieldKey]).map((item, i) => (i === idx ? { ...item, label } : item)));
   }
 
   if (units.length === 0) {
@@ -3250,10 +3274,10 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
 
   return (
     <div className="border-t border-black/5 pt-3">
-      <div className="text-xs font-black text-neutral-500 mb-2">🎙 콘텐츠별 나레이션(TTS)</div>
+      <div className="text-xs font-black text-neutral-500 mb-2">{heading}</div>
       <div className="space-y-1.5">
         {units.map((u) => {
-          const items = normalizeNarration(u.narrationUrls);
+          const items = normalizeLabeledItems(u[fieldKey]);
           const isOpen = openUnitId === u.id;
           return (
             <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
@@ -3315,7 +3339,7 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
                       value={linkDraft}
                       onChange={(e) => setLinkDraft(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && addLink(u)}
-                      placeholder="음성 링크 붙여넣기 (ElevenLabs/AI Studio 공유 링크 등)"
+                      placeholder={linkPlaceholder}
                       className="flex-1 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
                     />
                     <button
@@ -3327,10 +3351,10 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
                     </button>
                   </div>
                   <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
-                    {uploading ? '업로드 중...' : '+ 음성 파일 업로드'}
+                    {uploading ? '업로드 중...' : uploadLabel}
                     <input
                       type="file"
-                      accept="audio/*"
+                      accept={fileAccept}
                       multiple
                       disabled={uploading}
                       onChange={(e) => {
@@ -3348,6 +3372,34 @@ function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
         })}
       </div>
     </div>
+  );
+}
+
+function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  return (
+    <LabeledLinksPanel
+      site={site}
+      onRefresh={onRefresh}
+      fieldKey="narrationUrls"
+      heading="🎙 콘텐츠별 나레이션(TTS)"
+      linkPlaceholder="음성 링크 붙여넣기 (ElevenLabs/AI Studio 공유 링크 등)"
+      fileAccept="audio/*"
+      uploadLabel="+ 음성 파일 업로드"
+    />
+  );
+}
+
+function SubtitlePanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  return (
+    <LabeledLinksPanel
+      site={site}
+      onRefresh={onRefresh}
+      fieldKey="subtitleUrls"
+      heading="💬 콘텐츠별 자막"
+      linkPlaceholder="자막 링크 붙여넣기"
+      fileAccept=".srt,.vtt,.ass,.ssa,.txt"
+      uploadLabel="+ 자막 파일 업로드"
+    />
   );
 }
 
@@ -3433,6 +3485,7 @@ function FlowChart({
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
+          {isSubtitleStep(active) && <SubtitlePanel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
