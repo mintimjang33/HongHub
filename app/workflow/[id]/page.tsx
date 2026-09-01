@@ -44,6 +44,10 @@ type ContentUnit = {
   // 전체가 공유하는 workflow_content가 아니라 이 유닛(에피소드) 하나에 귀속시켜서, 소재가 바뀌어도
   // "이게 어느 콘텐츠 프롬프트인지" 헷갈리지 않게 한다.
   scenePrompts?: string;
+  // 2026-09-01 추가 — 8번(나레이션 TTS) 단계의 음성 파일/링크. 씬별(scenePrompts)과 달리 나레이션은
+  // 콘텐츠 대본 전체에 대해 하나(또는 후보 여러 개) 나오는 거라 유닛에 바로 붙인다. 링크를 직접
+  // 붙여넣거나, 파일을 업로드하면(uploadSceneMedia 재사용) 그 URL이 여기 같이 쌓인다.
+  narrationUrls?: string[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -1483,6 +1487,10 @@ function isScriptStep(step: Step): boolean {
 
 function isImageVideoStep(step: Step): boolean {
   return /이미지/.test(step.name) && /영상/.test(step.name);
+}
+
+function isNarrationStep(step: Step): boolean {
+  return /나레이션|TTS/i.test(step.name);
 }
 
 const ANALYSIS_TABS = [
@@ -3162,6 +3170,155 @@ function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   );
 }
 
+// 8번(나레이션 TTS) 단계 — 6번(Step6Panel)과 같은 콘텐츠별 리스트 구조를 쓰되, 씬 단위가 아니라
+// 유닛 하나에 음성 링크/파일을 통째로 붙인다. 링크 붙여넣기와 파일 업로드(uploadSceneMedia 재사용)
+// 둘 다 지원 — 어느 쪽이든 결과는 같은 narrationUrls 배열에 쌓인다.
+function NarrationPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const units = site.script_draft?.units || [];
+  const [openUnitId, setOpenUnitId] = useState<string | null>(null);
+  const [linkDraft, setLinkDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  async function saveUrls(id: string, urls: string[]) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, narrationUrls: urls } : u)) }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addLink(unit: ContentUnit) {
+    const value = linkDraft.trim();
+    if (!value) return;
+    setLinkDraft('');
+    await saveUrls(unit.id, [...(unit.narrationUrls || []), value]);
+  }
+
+  async function handleUpload(unit: ContentUnit, files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setUploadError('');
+    try {
+      const urls = await Promise.all(Array.from(files).map(uploadSceneMedia));
+      await saveUrls(unit.id, [...(unit.narrationUrls || []), ...urls]);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removeUrl(unit: ContentUnit, idx: number) {
+    await saveUrls(unit.id, (unit.narrationUrls || []).filter((_, i) => i !== idx));
+  }
+
+  if (units.length === 0) {
+    return (
+      <div className="border-t border-black/5 pt-3">
+        <p className="text-xs text-neutral-300">아직 대본 작성에서 완성된 콘텐츠가 없어요 — 먼저 대본을 완성해주세요.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-black/5 pt-3">
+      <div className="text-xs font-black text-neutral-500 mb-2">🎙 콘텐츠별 나레이션(TTS)</div>
+      <div className="space-y-1.5">
+        {units.map((u) => {
+          const urls = u.narrationUrls || [];
+          const isOpen = openUnitId === u.id;
+          return (
+            <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+              <button
+                onClick={() => {
+                  setOpenUnitId((cur) => (cur === u.id ? null : u.id));
+                  setLinkDraft('');
+                  setUploadError('');
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left cursor-pointer"
+              >
+                <span className={`shrink-0 transition-transform text-neutral-300 ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+                {u.category === 'disaster' && <span className="shrink-0 text-[10px]">🚨</span>}
+                <span className="flex-1 min-w-0 truncate text-[11px] font-bold">{u.title}</span>
+                {urls.length > 0 ? (
+                  <span className="shrink-0 text-[10px] font-black text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
+                    {urls.length}개
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-[10px] font-black text-neutral-300 bg-neutral-50 rounded-full px-2 py-0.5">없음</span>
+                )}
+              </button>
+              {isOpen && (
+                <div className="px-3 pb-3 pt-1 border-t border-neutral-50 space-y-1.5">
+                  <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+                  {urls.length > 0 && (
+                    <div className="space-y-1">
+                      {urls.map((url, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1">
+                          <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
+                            {url}
+                          </a>
+                          <CopyButton text={url} />
+                          <button
+                            onClick={() => removeUrl(u, idx)}
+                            title="삭제"
+                            className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="flex gap-1.5">
+                    <input
+                      value={linkDraft}
+                      onChange={(e) => setLinkDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addLink(u)}
+                      placeholder="음성 링크 붙여넣기 (ElevenLabs/AI Studio 공유 링크 등)"
+                      className="flex-1 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                    />
+                    <button
+                      onClick={() => addLink(u)}
+                      disabled={saving || !linkDraft.trim()}
+                      className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                    >
+                      + 추가
+                    </button>
+                  </div>
+                  <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
+                    {uploading ? '업로드 중...' : '+ 음성 파일 업로드'}
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      multiple
+                      disabled={uploading}
+                      onChange={(e) => {
+                        handleUpload(u, e.target.files);
+                        e.target.value = '';
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                  {uploadError && <p className="text-[10px] text-red-500 font-bold">{uploadError}</p>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
   const s = status || '';
   if (/⚠️|막힘|막히는/.test(s)) return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-600', label: '막힘' };
@@ -3243,6 +3400,7 @@ function FlowChart({
           {isAnalysisStep(active) && <AnalysisPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
+          {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
