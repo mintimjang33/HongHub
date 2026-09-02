@@ -275,18 +275,36 @@ export default function PipelinesPage() {
                     {expandedChannels[s.id] && (
                       <div className="space-y-1.5">
                         {channelsByPipeline[s.name].map((c) => (
-                          <a
+                          <div
                             key={c.id}
-                            href={c.url || '#'}
-                            target="_blank"
-                            rel="noopener noreferrer"
                             className="flex items-center justify-between gap-2 text-[11px] bg-neutral-50 hover:bg-neutral-100 rounded-lg px-3 py-2"
                           >
-                            <span className="font-bold truncate">{c.name}</span>
-                            {c.subscriber_count && (
-                              <span className="text-neutral-400 flex-shrink-0">{c.subscriber_count}</span>
-                            )}
-                          </a>
+                            <a
+                              href={c.url || '#'}
+                              target={c.url ? '_blank' : undefined}
+                              rel="noopener noreferrer"
+                              onClick={(e) => {
+                                if (!c.url) e.preventDefault();
+                              }}
+                              className="font-bold truncate flex-1 min-w-0"
+                            >
+                              {c.name}
+                            </a>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {!c.url && (
+                                <span className="text-amber-500" title="URL 미등록">
+                                  ⚠️
+                                </span>
+                              )}
+                              {c.subscriber_count && <span className="text-neutral-400">{c.subscriber_count}</span>}
+                              <Link
+                                href={`/sources?tab=channels&edit=${c.id}`}
+                                className="text-blue-500 font-black hover:underline"
+                              >
+                                수정
+                              </Link>
+                            </div>
+                          </div>
                         ))}
                       </div>
                     )}
