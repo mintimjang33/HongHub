@@ -1,7 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '../../../../lib/supabase';
 
-const FIELDS = ['title', 'source_url', 'thumbnail_url', 'transcript', 'views', 'content_type', 'raw_notes', 'status', 'channel_id', 'duration_seconds'];
+const FIELDS = [
+  'title',
+  'source_url',
+  'thumbnail_url',
+  'transcript',
+  'views',
+  'content_type',
+  'raw_notes',
+  'status',
+  'channel_id',
+  'duration_seconds',
+  'comment_count',
+];
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,6 +23,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const f of FIELDS) if (f in body) update[f] = body[f] || null;
   if ('platform_fit' in body) update.platform_fit = Array.isArray(body.platform_fit) ? body.platform_fit : [];
+  if ('top_comments' in body) update.top_comments = Array.isArray(body.top_comments) ? body.top_comments : null;
 
   const supabase = getSupabaseServerClient();
   const { data, error } = await supabase.from('hub_source_items').update(update).eq('id', id).select().single();

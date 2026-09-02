@@ -80,6 +80,7 @@ type Site = {
 };
 type Step = { n: string; name: string; desc: string; status: string };
 type Channel = { id: string; name: string; url: string | null; subscriber_count: string | null; notes: string | null };
+type VideoComment = { author: string; text: string; likeCount: number };
 type SourceItem = {
   id: string;
   channel_id: string | null;
@@ -89,6 +90,8 @@ type SourceItem = {
   transcript: string | null;
   duration_seconds: number | null;
   views: string | null;
+  comment_count: number | null;
+  top_comments: VideoComment[] | null;
 };
 type ChannelVideoResult = {
   videoId: string;
@@ -1244,7 +1247,9 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [thumbFetchingIds, setThumbFetchingIds] = useState<Set<string>>(new Set());
   const [durationFetchingIds, setDurationFetchingIds] = useState<Set<string>>(new Set());
+  const [commentFetchingIds, setCommentFetchingIds] = useState<Set<string>>(new Set());
   const [openThumbId, setOpenThumbId] = useState<string | null>(null);
+  const [openCommentsId, setOpenCommentsId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   function load() {
@@ -1371,6 +1376,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
       fetchTranscript(item),
       item.thumbnail_url ? Promise.resolve() : fetchThumbnail(item),
       item.duration_seconds ? Promise.resolve() : fetchDuration(item),
+      item.comment_count ? Promise.resolve() : fetchComments(item),
     ]);
   }
 
@@ -1445,6 +1451,36 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     }
   }
 
+  async function fetchComments(item: SourceItem) {
+    if (!item.source_url) return;
+    setCommentFetchingIds((prev) => new Set(prev).add(item.id));
+    try {
+      const res = await fetch(`/api/fetch-comments?url=${encodeURIComponent(item.source_url)}`);
+      const data = await res.json();
+      if (res.ok) {
+        await fetch(`/api/source-items/${item.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comment_count: data.commentCount, top_comments: data.topComments }),
+        });
+        setFetchErrors((prev) => {
+          const next = { ...prev };
+          delete next[item.id];
+          return next;
+        });
+        load();
+      } else {
+        setFetchErrors((prev) => ({ ...prev, [item.id]: data.error || '댓글을 못 가져왔어요.' }));
+      }
+    } finally {
+      setCommentFetchingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
+
   async function deleteItem(id: string) {
     await fetch(`/api/source-items/${id}`, { method: 'DELETE' });
     load();
@@ -1462,6 +1498,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
       <p className="text-[10px] text-neutral-400 mb-2">
         2번에서 등록한 소재들이에요. "🎬 자동 가져오기"는 이 PC에 U-Caption 크롬 확장이 켜져 있으면 그걸 먼저 쓰고,
         꺼져있거나 없으면 서버가 직접 자막을 가져오는 방식으로 자동 전환돼요(최대 1분~1분 반 정도 걸림, 자막 자체가 없는 영상은 실패). 그래도 안 되면 직접 붙여넣어도 돼요.
+        댓글 수/상위 댓글도 자동으로 같이 가져와요("💬 댓글" 배지 클릭하면 목록이 펼쳐져요).
       </p>
 
       {expanded && (
@@ -1536,8 +1573,41 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                   >
                     📜 대본 {has ? `있음 (${i.transcript!.length.toLocaleString()}자)` : '없음'}
                   </button>
+                  {i.comment_count ? (
+                    <button
+                      onClick={() => setOpenCommentsId((cur) => (cur === i.id ? null : i.id))}
+                      className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-emerald-50 text-emerald-600 border-emerald-200"
+                    >
+                      💬 댓글 {i.comment_count.toLocaleString()}개
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => fetchComments(i)}
+                      disabled={commentFetchingIds.has(i.id)}
+                      className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
+                    >
+                      {commentFetchingIds.has(i.id) ? '가져오는 중...' : '💬 댓글 가져오기'}
+                    </button>
+                  )}
                 </div>
                 {fetchErrors[i.id] && <p className="text-[10px] text-red-500 font-bold mt-1.5">{fetchErrors[i.id]}</p>}
+                {openCommentsId === i.id && (
+                  <div className="mt-2 pt-2 border-t border-neutral-100 space-y-1.5 max-h-56 overflow-y-auto">
+                    {(i.top_comments || []).length === 0 ? (
+                      <p className="text-[11px] text-neutral-300">댓글 목록을 못 가져왔어요(댓글 사용 중지된 영상일 수 있어요) — 댓글 수만 확인됩니다.</p>
+                    ) : (
+                      i.top_comments!.map((c, idx) => (
+                        <div key={idx} className="text-[11px] bg-neutral-50 rounded-lg px-2.5 py-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-neutral-500 truncate">{c.author}</span>
+                            {c.likeCount > 0 && <span className="shrink-0 text-neutral-300">👍 {c.likeCount.toLocaleString()}</span>}
+                          </div>
+                          <p className="text-neutral-600 whitespace-pre-wrap mt-0.5">{c.text}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
                 {openThumbId === i.id && i.thumbnail_url && (
                   <div className="mt-2 pt-2 border-t border-neutral-100">
                     {/* eslint-disable-next-line @next/next/no-img-element */}

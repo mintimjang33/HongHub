@@ -130,6 +130,42 @@ export async function getVideoDuration(videoId: string): Promise<number> {
   return parseDurationSeconds(data.items?.[0]?.contentDetails?.duration);
 }
 
+export type VideoComment = { author: string; text: string; likeCount: number };
+export type VideoComments = { commentCount: number; topComments: VideoComment[] };
+
+// 이미 등록된 소재의 댓글 수 + 상위 댓글 목록을 가져온다 (3번 패널의 "💬 댓글 가져오기").
+// 댓글이 꺼져있는 영상은 commentThreads 호출이 403으로 실패하므로, 그 경우 댓글 수(0)만
+// 반환하고 목록은 비워둔다 — 전체를 실패로 처리하지 않는다.
+export async function getVideoComments(videoId: string, maxResults = 10): Promise<VideoComments> {
+  const statsData = await apiGet('videos', { part: 'statistics', id: videoId });
+  const commentCount = Number(statsData.items?.[0]?.statistics?.commentCount ?? 0);
+
+  let topComments: VideoComment[] = [];
+  try {
+    const threadsData = await apiGet('commentThreads', {
+      part: 'snippet',
+      videoId,
+      order: 'relevance',
+      maxResults,
+      textFormat: 'plainText',
+    });
+    type CommentThread = {
+      snippet: {
+        topLevelComment: { snippet: { authorDisplayName: string; textDisplay: string; likeCount: number } };
+      };
+    };
+    topComments = (threadsData.items || []).map((it: CommentThread) => ({
+      author: it.snippet.topLevelComment.snippet.authorDisplayName,
+      text: it.snippet.topLevelComment.snippet.textDisplay,
+      likeCount: it.snippet.topLevelComment.snippet.likeCount,
+    }));
+  } catch {
+    // 댓글 사용 중지 등 — 댓글 수는 그대로 두고 목록만 빈 채로 반환.
+  }
+
+  return { commentCount, topComments };
+}
+
 // 키워드로 최근 업로드된 쇼츠를 검색해서 채널당 1개씩만 추린다 (1번 채널 발굴용).
 export async function searchShorts({
   query,
