@@ -1351,7 +1351,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
       }
 
       setOpenItemId(item.id);
-      setDraft(transcript);
+      setDraft(transcript ?? '');
     } catch (err) {
       setFetchErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : String(err) }));
     } finally {
