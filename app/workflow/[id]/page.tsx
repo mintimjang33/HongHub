@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
@@ -9,6 +9,7 @@ type AnalysisResult = {
   title?: string;
   script?: string;
   thumbnail?: string;
+  comment?: string;
   duration?: string;
   pace?: string;
   updated_at?: string;
@@ -1252,6 +1253,16 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
   const [openCommentsId, setOpenCommentsId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
+  // 소재 여러 개의 "자동 가져오기"/개별 버튼을 연달아 클릭하면 요청이 한꺼번에 몰려서
+  // 유튜브 쪽 레이트리밋에 걸려 전부 실패하던 문제가 있었다 — 클릭한 순서대로 한 번에
+  // 하나씩만 실제 요청이 나가도록 전역으로 줄을 세운다(앞 작업이 실패해도 큐는 안 끊긴다).
+  const fetchQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  function runQueued<T>(fn: () => Promise<T>): Promise<T> {
+    const run = fetchQueueRef.current.then(fn, fn);
+    fetchQueueRef.current = run.catch(() => {});
+    return run;
+  }
+
   function load() {
     setLoading(true);
     Promise.all([
@@ -1297,11 +1308,10 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     }
   }
 
-  // 1순위: U-Caption 큐에 작업을 등록하고, 이 PC의 크롬 확장(로컬 워커, 최대 1분 주기)이
-  // 처리할 때까지 몇 초 간격으로 상태를 확인한다.
-  // 크롬 확장이 꺼져있거나 미설치라 응답이 없으면(타임아웃/에러) 자동으로 /api/transcript-fallback
-  // (서버가 직접 유튜브 자막을 긁어오는 방식, 확장 불필요)으로 전환해서 계속 진행한다.
-  // 둘 다 실패했을 때만 사용자에게 에러를 보여주고 직접 붙여넣기를 안내한다.
+  // 서버 직접 수집(/api/transcript-fallback, 보통 몇 초면 끝남)을 먼저 시도하고, 그게 실패했을
+  // 때만 U-Caption 큐(크롬 확장, 실패하면 탭까지 열어서 긁는 느린 경로라 최대 1분 반 걸릴 수
+  // 있음)로 넘어간다 — 둘을 동시에 돌리면 같은 유튜브 엔드포인트에 요청이 겹쳐서 레이트리밋에
+  // 더 쉽게 걸리므로, 항상 한 번에 하나씩만 순서대로 시도한다.
   async function fetchTranscript(item: SourceItem) {
     if (!item.source_url) return;
     setFetchingIds((prev) => new Set(prev).add(item.id));
@@ -1312,53 +1322,30 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     });
     try {
       let transcript: string | null = null;
-
       try {
-        const res = await fetch('/api/transcript-jobs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: item.source_url }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '작업 등록 실패');
-        const jobId = data.jobId;
-
-        for (let attempt = 0; attempt < 18; attempt++) {
-          await new Promise((r) => setTimeout(r, 5000));
-          const jobRes = await fetch(`/api/transcript-jobs/${jobId}`);
-          const job = await jobRes.json();
-          if (!jobRes.ok) throw new Error(job.error || '작업 조회 실패');
-          if (job.status === 'done') {
-            transcript = job.transcript || '';
-            break;
-          }
-          if (job.status === 'error') {
-            throw new Error(job.error || '자막을 가져오지 못했어요.');
-          }
-        }
+        transcript = await fetchViaFallback(item.source_url);
       } catch {
-        // U-Caption 크롬 확장이 없거나(미설치) 꺼져있거나 1분 30초 안에 응답이 없는 경우 —
-        // 에러를 여기서 사용자에게 보여주지 않고 아래 서버 직접 수집으로 조용히 넘어간다.
+        // 서버 직접 수집 실패 — 아래 U-Caption 큐로 넘어간다(동시에 안 돌리고 순서대로).
       }
-
       if (transcript === null) {
-        const fbRes = await fetch('/api/transcript-fallback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: item.source_url }),
-        });
-        const fb = await fbRes.json();
-        if (fbRes.ok && fb.transcript) {
-          transcript = fb.transcript;
-        } else {
-          throw new Error(fb.error || 'U-Caption 크롬 확장도, 서버 자동 수집도 실패했어요 — 직접 붙여넣어주세요.');
-        }
+        transcript = await fetchViaUCaptionQueue(item.source_url);
       }
-
+      // 가져오자마자 바로 저장한다 — 저장을 안 하고 draft 입력칸에만 채워두면(예전 방식),
+      // 여러 소재를 연달아 자동 가져오기 할 때 draft가 패널 전체에서 하나만 있다 보니 다음
+      // 소재를 처리하는 순간 방금 가져온 대본이 저장도 안 된 채 덮어써져 사라지는 문제가 있었다.
+      await fetch(`/api/source-items/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript }),
+      });
       setOpenItemId(item.id);
-      setDraft(transcript ?? '');
-    } catch (err) {
-      setFetchErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : String(err) }));
+      setDraft(transcript);
+      load();
+    } catch {
+      setFetchErrors((prev) => ({
+        ...prev,
+        [item.id]: 'U-Caption 크롬 확장도, 서버 자동 수집도 실패했어요 — 직접 붙여넣어주세요.',
+      }));
     } finally {
       setFetchingIds((prev) => {
         const next = new Set(prev);
@@ -1368,16 +1355,69 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     }
   }
 
-  // "🎬 자동 가져오기" 버튼 하나로 대본·썸네일·길이를 한 번에 시도한다. 대본은 U-Caption 큐라 시간이
-  // 걸리고, 썸네일/길이는 유튜브 API라 빠르다 — 병렬로 돌리고, 이미 있는 값은 다시 안 건드린다.
-  // 어느 하나가 실패해도 나머지는 계속 진행되고, 실패한 항목만 개별 버튼이 그대로 남아서 다시 시도할 수 있다.
+  // 서버가 직접 유튜브 자막을 긁어오는 방식(크롬 확장 불필요, 보통 몇 초 안에 끝남).
+  async function fetchViaFallback(sourceUrl: string): Promise<string> {
+    const fbRes = await fetch('/api/transcript-fallback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: sourceUrl }),
+    });
+    const fb = await fbRes.json();
+    if (fbRes.ok && fb.transcript) return fb.transcript;
+    throw new Error(fb.error || '서버 자동 수집 실패');
+  }
+
+  // U-Caption 큐에 작업을 등록하고, 이 PC의 크롬 확장(로컬 워커, 최대 1분 주기)이 처리할
+  // 때까지 몇 초 간격으로 상태를 확인한다. 확장이 없거나 꺼져있으면 계속 'queued'로 남아있다가
+  // 최대 1분 30초 뒤 타임아웃으로 실패한다.
+  async function fetchViaUCaptionQueue(sourceUrl: string): Promise<string> {
+    const res = await fetch('/api/transcript-jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: sourceUrl }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '작업 등록 실패');
+    const jobId = data.jobId;
+
+    for (let attempt = 0; attempt < 18; attempt++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      const jobRes = await fetch(`/api/transcript-jobs/${jobId}`);
+      const job = await jobRes.json();
+      if (!jobRes.ok) throw new Error(job.error || '작업 조회 실패');
+      if (job.status === 'done') return job.transcript || '';
+      if (job.status === 'error') throw new Error(job.error || '자막을 가져오지 못했어요.');
+    }
+    throw new Error('1분 30초 안에 끝나지 않았어요.');
+  }
+
+  // "🎬 자동 가져오기" 버튼 하나로 대본·썸네일·길이·댓글을 순서대로 하나씩 시도한다(동시에 안
+  // 돌림 — 여러 요청이 겹치면 레이트리밋에 더 쉽게 걸림). 이미 있는 값은 다시 안 건드리고,
+  // 어느 하나가 실패해도 다음 항목으로 계속 진행되며, 실패한 항목만 개별 버튼이 그대로 남아서
+  // 다시 시도할 수 있다.
   async function autoFetch(item: SourceItem) {
-    await Promise.allSettled([
-      fetchTranscript(item),
-      item.thumbnail_url ? Promise.resolve() : fetchThumbnail(item),
-      item.duration_seconds ? Promise.resolve() : fetchDuration(item),
-      item.comment_count ? Promise.resolve() : fetchComments(item),
-    ]);
+    await fetchTranscript(item);
+    if (!item.thumbnail_url) {
+      try {
+        await fetchThumbnail(item);
+      } catch {
+        // 실패해도 다음 항목 계속 진행 — 개별 버튼이 그대로 남음
+      }
+    }
+    if (!item.duration_seconds) {
+      try {
+        await fetchDuration(item);
+      } catch {
+        // 위와 동일
+      }
+    }
+    if (!item.comment_count) {
+      try {
+        await fetchComments(item);
+      } catch {
+        // 위와 동일
+      }
+    }
   }
 
   async function copyLink(item: SourceItem) {
@@ -1493,12 +1533,13 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
         className="flex items-center gap-1.5 text-xs font-black text-neutral-500 hover:text-black mb-2"
       >
         <span className={`transition-transform ${expanded ? 'rotate-90' : ''}`}>▶</span>
-        📜 대본 수집 ({loading ? '...' : `${withTranscript.length}/${mineItems.length}`})
+        📜 대본(자막)·댓글·썸네일·시간 수집 ({loading ? '...' : `${withTranscript.length}/${mineItems.length}`})
       </button>
       <p className="text-[10px] text-neutral-400 mb-2">
-        2번에서 등록한 소재들이에요. "🎬 자동 가져오기"는 이 PC에 U-Caption 크롬 확장이 켜져 있으면 그걸 먼저 쓰고,
-        꺼져있거나 없으면 서버가 직접 자막을 가져오는 방식으로 자동 전환돼요(최대 1분~1분 반 정도 걸림, 자막 자체가 없는 영상은 실패). 그래도 안 되면 직접 붙여넣어도 돼요.
-        댓글 수/상위 댓글도 자동으로 같이 가져와요("💬 댓글" 배지 클릭하면 목록이 펼쳐져요).
+        2번에서 등록한 소재들이에요. "🎬 자동 가져오기"는 서버가 직접 자막을 가져오는 걸 먼저 시도하고,
+        실패하면 이 PC의 U-Caption 크롬 확장으로 자동 전환돼요(확장이 없거나 꺼져있으면 최대 1분 반 정도 걸리다 실패, 자막 자체가 없는 영상도 실패). 그래도 안 되면 직접 붙여넣어도 돼요.
+        댓글 수/상위 댓글도 같이 가져와요("💬 댓글" 배지 클릭하면 목록이 펼쳐져요).
+        레이트리밋을 피하려고 여러 개를 눌러도 한 번에 하나씩, 한 소재 안에서도 대본→썸네일→길이→댓글 순서로 하나씩만 처리해요 — 여러 개를 클릭해두면 순서대로 처리되니 기다려주세요.
       </p>
 
       {expanded && (
@@ -1537,14 +1578,14 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                     {copiedId === i.id ? '복사됨' : '🔗'}
                   </button>
                   <button
-                    onClick={() => autoFetch(i)}
+                    onClick={() => runQueued(() => autoFetch(i))}
                     disabled={fetchingIds.has(i.id)}
                     className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
                   >
                     {fetchingIds.has(i.id) ? '가져오는 중...' : '🎬 자동 가져오기'}
                   </button>
                   <button
-                    onClick={() => (i.thumbnail_url ? setOpenThumbId((cur) => (cur === i.id ? null : i.id)) : fetchThumbnail(i))}
+                    onClick={() => (i.thumbnail_url ? setOpenThumbId((cur) => (cur === i.id ? null : i.id)) : runQueued(() => fetchThumbnail(i)))}
                     disabled={thumbFetchingIds.has(i.id)}
                     className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border disabled:opacity-40 ${
                       i.thumbnail_url ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300'
@@ -1558,7 +1599,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                     </span>
                   ) : (
                     <button
-                      onClick={() => fetchDuration(i)}
+                      onClick={() => runQueued(() => fetchDuration(i))}
                       disabled={durationFetchingIds.has(i.id)}
                       className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
                     >
@@ -1582,7 +1623,7 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
                     </button>
                   ) : (
                     <button
-                      onClick={() => fetchComments(i)}
+                      onClick={() => runQueued(() => fetchComments(i))}
                       disabled={commentFetchingIds.has(i.id)}
                       className="shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300 disabled:opacity-40"
                     >
@@ -1678,6 +1719,7 @@ const ANALYSIS_TABS = [
   { key: 'title', label: '제목' },
   { key: 'thumbnail', label: '썸네일' },
   { key: 'script', label: '대본' },
+  { key: 'comment', label: '댓글' },
   { key: 'duration', label: '시간' },
   { key: 'pace', label: '속도' },
 ] as const;
@@ -1693,6 +1735,7 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
     title: false,
     thumbnail: false,
     script: false,
+    comment: false,
     duration: false,
     pace: false,
   });

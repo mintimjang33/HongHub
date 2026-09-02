@@ -3,7 +3,8 @@ import { getSupabaseServerClient } from '../../../lib/supabase';
 
 const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 const MAX_ITEMS = 15;
-const ALL_CATEGORIES = ['channel', 'title', 'thumbnail', 'script', 'duration', 'pace'] as const;
+const MAX_COMMENTS_PER_ITEM = 10;
+const ALL_CATEGORIES = ['channel', 'title', 'thumbnail', 'script', 'comment', 'duration', 'pace'] as const;
 type Category = (typeof ALL_CATEGORIES)[number];
 
 const CATEGORY_INSTRUCTIONS: Record<Category, string> = {
@@ -11,16 +12,20 @@ const CATEGORY_INSTRUCTIONS: Record<Category, string> = {
   title: '제목 — 공통된 후킹 패턴, 구조, 어투, 길이 경향',
   thumbnail: '썸네일 — (이미지 링크를 열어서 실제로 보고) 공통된 색감, 구도, 텍스트 사용 스타일',
   script: '대본 — 공통된 서사 구조(오프닝 훅→전개→반전→마무리 등), 문장 스타일',
+  comment: '댓글 — 시청자들이 공감/반박/추가정보를 다는 포인트, 자주 나오는 질문·불만, 반복되는 반응 패턴',
   duration: '시간 — 영상 길이 경향',
   pace: '속도 — 나레이션 속도(대본 글자수 ÷ 영상 길이) 경향',
 };
 
+type VideoComment = { author: string; text: string; likeCount: number };
 type Item = {
   title: string;
   thumbnail_url: string | null;
   transcript: string | null;
   duration_seconds: number | null;
   views: string | null;
+  comment_count: number | null;
+  top_comments: VideoComment[] | null;
 };
 type ChannelRow = { name: string; url: string | null; subscriber_count: string | null; notes: string | null };
 
@@ -63,7 +68,7 @@ export async function GET(request: Request) {
   if (needsItems) {
     const { data: itemsData, error } = await supabase
       .from('hub_source_items')
-      .select('title, thumbnail_url, transcript, duration_seconds, views')
+      .select('title, thumbnail_url, transcript, duration_seconds, views, comment_count, top_comments')
       .in('channel_id', mineChannelIds);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -83,6 +88,7 @@ export async function GET(request: Request) {
     const includeThumbnail = categories.includes('thumbnail');
     const includeScriptText = categories.includes('script');
     const includeCharCount = categories.includes('pace');
+    const includeComments = categories.includes('comment');
     const fieldNames = [
       '제목',
       '조회수',
@@ -90,6 +96,7 @@ export async function GET(request: Request) {
       includeThumbnail && '썸네일 이미지 링크',
       includeScriptText && '대본',
       includeCharCount && '대본 글자수',
+      includeComments && '상위 댓글',
     ]
       .filter(Boolean)
       .join('/');
@@ -101,6 +108,17 @@ export async function GET(request: Request) {
       if (includeCharCount) parts.push(`대본 글자수: ${i.transcript!.trim().length}자`);
       let line = parts.join(' | ');
       if (includeScriptText) line += `\n  대본: ${i.transcript!.slice(0, 800)}`;
+      if (includeComments) {
+        if (i.top_comments && i.top_comments.length > 0) {
+          const commentLines = i.top_comments
+            .slice(0, MAX_COMMENTS_PER_ITEM)
+            .map((c) => `    - (👍${c.likeCount}) ${c.text.replace(/\s+/g, ' ').slice(0, 200)}`)
+            .join('\n');
+          line += `\n  댓글(${i.comment_count ?? '?'}개 중 상위):\n${commentLines}`;
+        } else {
+          line += '\n  댓글: 없음';
+        }
+      }
       return line;
     });
 

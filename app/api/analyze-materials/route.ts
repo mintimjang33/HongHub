@@ -9,16 +9,20 @@ export const maxDuration = 60;
 const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 const MAX_ITEMS = 15; // 프롬프트 크기/비용 제어 — 조회수 상위 N개만 분석 대상.
 const MAX_THUMBNAILS = 8; // 비전 호출은 이미지 개수만큼 비싸므로 더 적게 제한.
+const MAX_COMMENTS_PER_ITEM = 10;
 const MODEL = 'gemini-3.1-pro-preview'; // 4번 분석은 항상 pro로 — flash는 이 용도엔 얕음.
-const ALL_CATEGORIES = ['channel', 'title', 'thumbnail', 'script', 'duration', 'pace'] as const;
+const ALL_CATEGORIES = ['channel', 'title', 'thumbnail', 'script', 'comment', 'duration', 'pace'] as const;
 type Category = (typeof ALL_CATEGORIES)[number];
 
+type VideoComment = { author: string; text: string; likeCount: number };
 type Item = {
   title: string;
   thumbnail_url: string | null;
   transcript: string | null;
   duration_seconds: number | null;
   views: string | null;
+  comment_count: number | null;
+  top_comments: VideoComment[] | null;
 };
 type ChannelRow = { name: string; url: string | null; subscriber_count: string | null; notes: string | null };
 
@@ -59,7 +63,7 @@ export async function POST(request: Request) {
 
   const { data: itemsData, error } = await supabase
     .from('hub_source_items')
-    .select('title, thumbnail_url, transcript, duration_seconds, views')
+    .select('title, thumbnail_url, transcript, duration_seconds, views, comment_count, top_comments')
     .in('channel_id', mineChannelIds);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -73,6 +77,7 @@ export async function POST(request: Request) {
   }
   const topItems = [...withTranscript].sort((a, b) => parseViews(b.views) - parseViews(a.views)).slice(0, MAX_ITEMS);
   const thumbItems = topItems.filter((i) => i.thumbnail_url).slice(0, MAX_THUMBNAILS);
+  const commentItems = topItems.filter((i) => i.top_comments && i.top_comments.length > 0);
 
   const jobs: Partial<Record<Category, Promise<string>>> = {};
 
@@ -113,6 +118,25 @@ export async function POST(request: Request) {
             model: MODEL,
           })
         : Promise.resolve('썸네일이 있는 소재가 없어요.');
+  }
+  if (categories.includes('comment')) {
+    jobs.comment =
+      commentItems.length > 0
+        ? callGeminiVision({
+            systemPrompt: '너는 유튜브 쇼츠 시청자 반응 분석가다.',
+            userPrompt: `아래는 벤치마크 영상 ${commentItems.length}개의 실제 상위 댓글이다:\n\n${commentItems
+              .map(
+                (i, idx) =>
+                  `[${idx + 1}] ${i.title} (댓글 수 ${i.comment_count ?? '?'}개)\n` +
+                  i
+                    .top_comments!.slice(0, MAX_COMMENTS_PER_ITEM)
+                    .map((c) => `- (👍${c.likeCount}) ${c.text.replace(/\s+/g, ' ').slice(0, 200)}`)
+                    .join('\n')
+              )
+              .join('\n\n---\n\n')}\n\n시청자들이 어떤 포인트에 공감/반박/추가정보를 다는지, 자주 나오는 질문이나 불만, 반복되는 반응 패턴을 분석해줘. 다음 대본에서 미리 짚어주면 좋을 포인트를 구체적으로 정리해줘.`,
+            model: MODEL,
+          })
+        : Promise.resolve('댓글이 있는 소재가 없어요 — 3번 단계에서 "💬 댓글 가져오기"로 채워주세요.');
   }
 
   const keys = Object.keys(jobs) as Category[];

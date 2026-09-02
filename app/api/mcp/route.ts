@@ -765,9 +765,9 @@ const baseHandler = createMcpHandler(
       'get_pipeline_materials_for_analysis',
       {
         description:
-          '워크플로우 4번(분석) 단계용 — 파이프라인 이름으로 그 파이프라인의 2번(제목/썸네일/조회수)·3번(대본)에서 ' +
+          '워크플로우 4번(분석) 단계용 — 파이프라인 이름으로 그 파이프라인의 2번(제목/썸네일/조회수)·3번(대본/댓글)에서 ' +
           '모은 소재 원본 데이터를 가져온다. 이 웹앱은 유료 API로 직접 분석하지 않으므로, 이 툴로 데이터를 받아서 ' +
-          'Claude(이 대화)가 직접 제목/썸네일(이미지 URL 보고)/대본의 공통 패턴을 분석한 뒤, ' +
+          'Claude(이 대화)가 직접 제목/썸네일(이미지 URL 보고)/대본/댓글(시청자 반응)의 공통 패턴을 분석한 뒤, ' +
           'save_pipeline_analysis 툴로 그 결과를 저장해준다.',
         inputSchema: z.object({
           site_name: z.string().describe('파이프라인 이름 (예: 공학, 경제학)'),
@@ -789,7 +789,7 @@ const baseHandler = createMcpHandler(
 
         const { data: itemsData, error } = await supabase
           .from('hub_source_items')
-          .select('title, thumbnail_url, transcript, duration_seconds, views')
+          .select('title, thumbnail_url, transcript, duration_seconds, views, comment_count, top_comments')
           .in('channel_id', mineChannelIds);
         if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
 
@@ -819,6 +819,14 @@ const baseHandler = createMcpHandler(
           if (i.thumbnail_url) parts.push(`썸네일: ${i.thumbnail_url}`);
           let line = parts.join(' | ');
           if (i.transcript && i.transcript.trim().length > 20) line += `\n  대본: ${i.transcript.slice(0, 800)}`;
+          const topComments = i.top_comments as { author: string; text: string; likeCount: number }[] | null;
+          if (topComments && topComments.length > 0) {
+            const commentLines = topComments
+              .slice(0, 10)
+              .map((c) => `    - (👍${c.likeCount}) ${c.text.replace(/\s+/g, ' ').slice(0, 200)}`)
+              .join('\n');
+            line += `\n  댓글(${i.comment_count ?? '?'}개 중 상위):\n${commentLines}`;
+          }
           return line;
         });
 
@@ -847,18 +855,19 @@ const baseHandler = createMcpHandler(
       {
         description:
           'get_pipeline_materials_for_analysis로 받은 데이터를 Claude(이 대화)가 직접 분석한 결과를 저장한다. ' +
-          '워크플로우 페이지 4번 탭(채널/제목/썸네일/대본/시간/속도)에 그대로 표시된다. 넘긴 필드만 갱신되고 나머지는 유지된다.',
+          '워크플로우 페이지 4번 탭(채널/제목/썸네일/대본/댓글/시간/속도)에 그대로 표시된다. 넘긴 필드만 갱신되고 나머지는 유지된다.',
         inputSchema: z.object({
           site_id: z.string().describe('파이프라인의 hub_sites id (list_sites로 확인)'),
           channel: z.string().optional().describe('채널 패턴 분석 결과 (작명/구독자 규모대/포지셔닝)'),
           title: z.string().optional().describe('제목 패턴 분석 결과'),
           thumbnail: z.string().optional().describe('썸네일 패턴 분석 결과 (이미지 URL을 직접 보고 분석)'),
           script: z.string().optional().describe('대본 패턴 분석 결과'),
+          comment: z.string().optional().describe('댓글(시청자 반응) 패턴 분석 결과 — 공감/반박 포인트, 자주 나오는 질문·불만 등'),
           duration: z.string().optional().describe('영상 길이 분석/통계 정리'),
           pace: z.string().optional().describe('나레이션 속도 분석/통계 정리'),
         }),
       },
-      async ({ site_id, channel, title, thumbnail, script, duration, pace }) => {
+      async ({ site_id, channel, title, thumbnail, script, comment, duration, pace }) => {
         const supabase = getSupabaseServerClient();
         const { data: existing } = await supabase.from('hub_sites').select('analysis_result').eq('id', site_id).maybeSingle();
         const merged = {
@@ -867,6 +876,7 @@ const baseHandler = createMcpHandler(
           ...(title !== undefined && { title }),
           ...(thumbnail !== undefined && { thumbnail }),
           ...(script !== undefined && { script }),
+          ...(comment !== undefined && { comment }),
           ...(duration !== undefined && { duration }),
           ...(pace !== undefined && { pace }),
           updated_at: new Date().toISOString(),
