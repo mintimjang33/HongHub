@@ -52,6 +52,9 @@ export default function PipelinesPage() {
   const [quickName, setQuickName] = useState('');
   const [quickAdding, setQuickAdding] = useState(false);
   const [expandedChannels, setExpandedChannels] = useState<Record<string, boolean>>({});
+  const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
+  const [channelEditForm, setChannelEditForm] = useState({ name: '', url: '', subscriber_count: '' });
+  const [channelEditSaving, setChannelEditSaving] = useState(false);
 
   function load() {
     Promise.all([
@@ -144,6 +147,27 @@ export default function PipelinesPage() {
     if (!confirm('이 파이프라인을 목록에서 삭제할까요?')) return;
     await fetch(`/api/sites/${id}`, { method: 'DELETE' });
     load();
+  }
+
+  function openEditChannel(c: Channel) {
+    setEditingChannelId(c.id);
+    setChannelEditForm({ name: c.name, url: c.url || '', subscriber_count: c.subscriber_count || '' });
+  }
+
+  async function handleChannelEditSave() {
+    if (!editingChannelId || !channelEditForm.name.trim()) return;
+    setChannelEditSaving(true);
+    try {
+      await fetch(`/api/source-channels/${editingChannelId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(channelEditForm),
+      });
+      setEditingChannelId(null);
+      load();
+    } finally {
+      setChannelEditSaving(false);
+    }
   }
 
   async function handleQuickAdd() {
@@ -279,31 +303,69 @@ export default function PipelinesPage() {
                             key={c.id}
                             className="flex items-center justify-between gap-2 text-[11px] bg-neutral-50 hover:bg-neutral-100 rounded-lg px-3 py-2"
                           >
-                            <a
-                              href={c.url || '#'}
-                              target={c.url ? '_blank' : undefined}
-                              rel="noopener noreferrer"
-                              onClick={(e) => {
-                                if (!c.url) e.preventDefault();
-                              }}
-                              className="font-bold truncate flex-1 min-w-0"
-                            >
-                              {c.name}
-                            </a>
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                              {!c.url && (
-                                <span className="text-amber-500" title="URL 미등록">
-                                  ⚠️
-                                </span>
-                              )}
-                              {c.subscriber_count && <span className="text-neutral-400">{c.subscriber_count}</span>}
-                              <Link
-                                href={`/sources?tab=channels&edit=${c.id}`}
-                                className="text-blue-500 font-black hover:underline"
-                              >
-                                수정
-                              </Link>
-                            </div>
+                            {editingChannelId === c.id ? (
+                              <div className="flex-1 flex items-center gap-1.5">
+                                <input
+                                  value={channelEditForm.name}
+                                  onChange={(e) => setChannelEditForm((f) => ({ ...f, name: e.target.value }))}
+                                  placeholder="채널명"
+                                  className="flex-1 min-w-0 border border-neutral-200 rounded px-2 py-1 text-[11px] bg-white"
+                                />
+                                <input
+                                  value={channelEditForm.url}
+                                  onChange={(e) => setChannelEditForm((f) => ({ ...f, url: e.target.value }))}
+                                  placeholder="URL"
+                                  className="flex-1 min-w-0 border border-neutral-200 rounded px-2 py-1 text-[11px] bg-white"
+                                />
+                                <input
+                                  value={channelEditForm.subscriber_count}
+                                  onChange={(e) => setChannelEditForm((f) => ({ ...f, subscriber_count: e.target.value }))}
+                                  placeholder="구독자수"
+                                  className="w-20 shrink-0 border border-neutral-200 rounded px-2 py-1 text-[11px] bg-white"
+                                />
+                                <button
+                                  onClick={handleChannelEditSave}
+                                  disabled={channelEditSaving || !channelEditForm.name.trim()}
+                                  className="shrink-0 text-[11px] font-black px-2.5 py-1 rounded-lg bg-black text-white disabled:opacity-40"
+                                >
+                                  {channelEditSaving ? '저장 중' : '저장'}
+                                </button>
+                                <button
+                                  onClick={() => setEditingChannelId(null)}
+                                  className="shrink-0 text-neutral-400 font-bold hover:text-black px-1"
+                                >
+                                  취소
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <a
+                                  href={c.url || '#'}
+                                  target={c.url ? '_blank' : undefined}
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => {
+                                    if (!c.url) e.preventDefault();
+                                  }}
+                                  className="font-bold truncate flex-1 min-w-0"
+                                >
+                                  {c.name}
+                                </a>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  {!c.url && (
+                                    <span className="text-amber-500" title="URL 미등록">
+                                      ⚠️
+                                    </span>
+                                  )}
+                                  {c.subscriber_count && <span className="text-neutral-400">{c.subscriber_count}</span>}
+                                  <button
+                                    onClick={() => openEditChannel(c)}
+                                    className="text-blue-500 font-black hover:underline"
+                                  >
+                                    수정
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         ))}
                       </div>

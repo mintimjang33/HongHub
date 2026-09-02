@@ -190,10 +190,8 @@ function SourcesPageInner() {
 
 // ============ 탭 1: 채널 ============
 function ChannelsTab({ channels, onChange }: { channels: Channel[]; onChange: () => void }) {
-  const searchParams = useSearchParams();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [autoOpened, setAutoOpened] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filterPlatform, setFilterPlatform] = useState('all');
   const [filterGroup, setFilterGroup] = useState('all');
@@ -228,20 +226,6 @@ function ChannelsTab({ channels, onChange }: { channels: Channel[]; onChange: ()
     });
     setShowForm(true);
   }
-
-  // 다른 페이지(예: /pipelines)에서 "?tab=channels&edit=<채널id>"로 들어오면
-  // 해당 채널의 수정 폼을 자동으로 연다. 채널 목록이 로드된 뒤 한 번만 시도.
-  useEffect(() => {
-    if (autoOpened) return;
-    const editId = searchParams.get('edit');
-    if (!editId || channels.length === 0) return;
-    const target = channels.find((c) => c.id === editId);
-    if (target) {
-      openEdit(target);
-    }
-    setAutoOpened(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, searchParams, autoOpened]);
 
   function toggleTag(list: string[], value: string, setter: (v: string[]) => void) {
     setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
