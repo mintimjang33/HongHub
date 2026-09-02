@@ -29,25 +29,30 @@ function parseTranscriptXml(xml: string): string {
     .join('\n');
 }
 
-export async function fetchYoutubeTranscript(videoId: string): Promise<{ transcript: string; lang: string } | null> {
+export async function fetchYoutubeTranscript(
+  videoId: string
+): Promise<{ ok: true; transcript: string; lang: string } | { ok: false; reason: string }> {
   const res = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${ANDROID_INNERTUBE_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ context: ANDROID_CONTEXT, videoId }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) return { ok: false, reason: `player 요청 실패: HTTP ${res.status}` };
   const data = await res.json();
   const tracks: CaptionTrack[] | undefined = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-  if (!tracks || tracks.length === 0) return null;
+  if (!tracks || tracks.length === 0) {
+    const playability = data?.playabilityStatus?.status;
+    return { ok: false, reason: `자막 트랙 없음 (playabilityStatus=${playability})` };
+  }
 
   const track = tracks.find((t) => t.languageCode === 'ko') || tracks.find((t) => t.languageCode?.startsWith('en')) || tracks[0];
 
   const xmlRes = await fetch(track.baseUrl);
-  if (!xmlRes.ok) return null;
+  if (!xmlRes.ok) return { ok: false, reason: `자막 XML 요청 실패: HTTP ${xmlRes.status}` };
   const xml = await xmlRes.text();
-  if (!xml || xml.trim().length === 0) return null;
+  if (!xml || xml.trim().length === 0) return { ok: false, reason: '자막 XML 응답이 비어있음(빈 200)' };
 
   const transcript = parseTranscriptXml(xml);
-  if (!transcript) return null;
-  return { transcript, lang: track.languageCode };
+  if (!transcript) return { ok: false, reason: '자막 XML 파싱 결과가 비어있음' };
+  return { ok: true, transcript, lang: track.languageCode };
 }

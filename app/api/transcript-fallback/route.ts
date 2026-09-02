@@ -13,9 +13,16 @@ export async function POST(request: Request) {
   const videoId = extractVideoId(url);
   if (!videoId) return NextResponse.json({ error: '유효한 유튜브 링크가 아닙니다.' }, { status: 400 });
 
-  const result = await fetchYoutubeTranscript(videoId).catch(() => null);
-  if (!result) {
-    return NextResponse.json({ error: '이 영상은 자동 자막 수집이 안 돼요 — 직접 붙여넣어주세요.' }, { status: 404 });
+  const result = await fetchYoutubeTranscript(videoId).catch(
+    (e): { ok: false; reason: string } => ({ ok: false, reason: e instanceof Error ? e.message : String(e) })
+  );
+  if (!result.ok) {
+    // reason은 왜 서버 직접 수집이 안 됐는지 진단하기 위한 것 — U-Caption 큐로 넘어가기 전에
+    // 브라우저 콘솔에서 확인할 수 있게 그대로 실어보낸다.
+    return NextResponse.json(
+      { error: '이 영상은 자동 자막 수집이 안 돼요 — 직접 붙여넣어주세요.', reason: result.reason },
+      { status: 404 }
+    );
   }
   return NextResponse.json({ transcript: result.transcript, lang: result.lang });
 }

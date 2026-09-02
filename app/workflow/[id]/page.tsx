@@ -1364,6 +1364,9 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     });
     const fb = await fbRes.json();
     if (fbRes.ok && fb.transcript) return fb.transcript;
+    // 왜 서버 직접 수집이 실패해서 (느린) U-Caption 큐로 넘어가는지 진단하기 위한 로그 —
+    // 사용자에게는 안 보이고(그대로 조용히 다음 방법으로 넘어감) 브라우저 콘솔에만 남는다.
+    console.warn('[transcript-fallback] failed, falling back to U-Caption:', fb.reason || fb.error);
     throw new Error(fb.error || '서버 자동 수집 실패');
   }
 
