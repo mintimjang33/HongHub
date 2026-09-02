@@ -892,13 +892,27 @@ function ChannelPanel({ siteName }: { siteName: string }) {
             >
               <a
                 href={c.url || '#'}
-                target="_blank"
+                target={c.url ? '_blank' : undefined}
                 rel="noopener noreferrer"
+                onClick={(e) => {
+                  if (!c.url) e.preventDefault();
+                }}
                 className="flex-1 min-w-0 flex items-center gap-2 hover:underline"
               >
                 <span className="font-bold truncate">{c.name}</span>
                 {c.subscriber_count && <span className="text-neutral-400 flex-shrink-0">{c.subscriber_count}</span>}
               </a>
+              {!c.url && (
+                <span className="shrink-0 text-amber-500" title="URL 미등록">
+                  ⚠️
+                </span>
+              )}
+              <Link
+                href={`/sources?tab=channels&edit=${c.id}`}
+                className="shrink-0 text-blue-500 font-black hover:underline px-1"
+              >
+                수정
+              </Link>
               <button
                 onClick={() => deleteChannel(c.id)}
                 className="shrink-0 text-red-400 font-bold hover:text-red-600 px-1"
