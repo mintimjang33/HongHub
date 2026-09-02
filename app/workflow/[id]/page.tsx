@@ -1292,8 +1292,11 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
     }
   }
 
-  // U-Caption 큐에 작업을 등록하고, 이 PC의 크롬 확장(로컬 워커, 최대 1분 주기)이 처리할 때까지
-  // 몇 초 간격으로 상태를 확인한다. 성공하면 바로 저장하지 않고 검토할 수 있게 입력칸만 채워둔다.
+  // 1순위: U-Caption 큐에 작업을 등록하고, 이 PC의 크롬 확장(로컬 워커, 최대 1분 주기)이
+  // 처리할 때까지 몇 초 간격으로 상태를 확인한다.
+  // 크롬 확장이 꺼져있거나 미설치라 응답이 없으면(타임아웃/에러) 자동으로 /api/transcript-fallback
+  // (서버가 직접 유튜브 자막을 긁어오는 방식, 확장 불필요)으로 전환해서 계속 진행한다.
+  // 둘 다 실패했을 때만 사용자에게 에러를 보여주고 직접 붙여넣기를 안내한다.
   async function fetchTranscript(item: SourceItem) {
     if (!item.source_url) return;
     setFetchingIds((prev) => new Set(prev).add(item.id));
@@ -1303,30 +1306,52 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
       return next;
     });
     try {
-      const res = await fetch('/api/transcript-jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: item.source_url }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '작업 등록 실패');
-      const jobId = data.jobId;
+      let transcript: string | null = null;
 
-      for (let attempt = 0; attempt < 18; attempt++) {
-        await new Promise((r) => setTimeout(r, 5000));
-        const jobRes = await fetch(`/api/transcript-jobs/${jobId}`);
-        const job = await jobRes.json();
-        if (!jobRes.ok) throw new Error(job.error || '작업 조회 실패');
-        if (job.status === 'done') {
-          setOpenItemId(item.id);
-          setDraft(job.transcript || '');
-          return;
+      try {
+        const res = await fetch('/api/transcript-jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: item.source_url }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '작업 등록 실패');
+        const jobId = data.jobId;
+
+        for (let attempt = 0; attempt < 18; attempt++) {
+          await new Promise((r) => setTimeout(r, 5000));
+          const jobRes = await fetch(`/api/transcript-jobs/${jobId}`);
+          const job = await jobRes.json();
+          if (!jobRes.ok) throw new Error(job.error || '작업 조회 실패');
+          if (job.status === 'done') {
+            transcript = job.transcript || '';
+            break;
+          }
+          if (job.status === 'error') {
+            throw new Error(job.error || '자막을 가져오지 못했어요.');
+          }
         }
-        if (job.status === 'error') {
-          throw new Error(job.error || '자막을 가져오지 못했어요.');
+      } catch {
+        // U-Caption 크롬 확장이 없거나(미설치) 꺼져있거나 1분 30초 안에 응답이 없는 경우 —
+        // 에러를 여기서 사용자에게 보여주지 않고 아래 서버 직접 수집으로 조용히 넘어간다.
+      }
+
+      if (transcript === null) {
+        const fbRes = await fetch('/api/transcript-fallback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: item.source_url }),
+        });
+        const fb = await fbRes.json();
+        if (fbRes.ok && fb.transcript) {
+          transcript = fb.transcript;
+        } else {
+          throw new Error(fb.error || 'U-Caption 크롬 확장도, 서버 자동 수집도 실패했어요 — 직접 붙여넣어주세요.');
         }
       }
-      throw new Error('1분 30초 안에 끝나지 않았어요 — 크롬에 U-Caption 확장이 켜져 있는지 확인해주세요.');
+
+      setOpenItemId(item.id);
+      setDraft(transcript);
     } catch (err) {
       setFetchErrors((prev) => ({ ...prev, [item.id]: err instanceof Error ? err.message : String(err) }));
     } finally {
@@ -1435,8 +1460,8 @@ function TranscriptPanel({ siteName }: { siteName: string }) {
         📜 대본 수집 ({loading ? '...' : `${withTranscript.length}/${mineItems.length}`})
       </button>
       <p className="text-[10px] text-neutral-400 mb-2">
-        2번에서 등록한 소재들이에요. "🎬 자동 가져오기"는 이 PC에 U-Caption 크롬 확장이 켜져 있어야
-        동작해요(최대 1분 정도 걸림, 자막 없는 영상은 실패). 안 되거나 급하면 직접 붙여넣어도 돼요.
+        2번에서 등록한 소재들이에요. "🎬 자동 가져오기"는 이 PC에 U-Caption 크롬 확장이 켜져 있으면 그걸 먼저 쓰고,
+        꺼져있거나 없으면 서버가 직접 자막을 가져오는 방식으로 자동 전환돼요(최대 1분~1분 반 정도 걸림, 자막 자체가 없는 영상은 실패). 그래도 안 되면 직접 붙여넣어도 돼요.
       </p>
 
       {expanded && (
