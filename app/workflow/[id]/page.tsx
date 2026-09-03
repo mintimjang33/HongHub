@@ -2417,6 +2417,9 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
   const [newOptionText, setNewOptionText] = useState<Record<string, string>>({});
   const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
   const [reasonDraft, setReasonDraft] = useState('');
+  // 후보 문구 자체를 고치는 용도 — key는 "unitId:idx" — (지우고 다시 쓰지 않고) 인라인으로 바로 수정할 수 있게.
+  const [editingOptionKey, setEditingOptionKey] = useState<string | null>(null);
+  const [editOptionDraft, setEditOptionDraft] = useState('');
   const [saving, setSaving] = useState(false);
 
   async function saveUnits(next: ContentUnit[]) {
@@ -2446,6 +2449,21 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
       units.map((u) =>
         u.id === id
           ? { ...u, strategyOptions: nextOptions, selectedStrategy: u.selectedStrategy === removed ? undefined : u.selectedStrategy }
+          : u
+      )
+    );
+  }
+
+  // 후보 문구를 고침 — 그 후보가 이미 selectedStrategy로 골라져 있었다면 selectedStrategy도 새 문구로 같이 바꿔서 선택 상태가 안 풀리게 한다.
+  async function editOption(id: string, idx: number, newText: string) {
+    if (!newText.trim()) return;
+    const unit = units.find((u) => u.id === id);
+    const oldText = unit?.strategyOptions?.[idx];
+    const nextOptions = (unit?.strategyOptions || []).map((o, i) => (i === idx ? newText.trim() : o));
+    await saveUnits(
+      units.map((u) =>
+        u.id === id
+          ? { ...u, strategyOptions: nextOptions, selectedStrategy: u.selectedStrategy === oldText ? newText.trim() : u.selectedStrategy }
           : u
       )
     );
@@ -2481,26 +2499,68 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                 {(u.strategyOptions || []).length === 0 && (
                   <p className="text-sm text-neutral-300">아직 후보가 없어요 — 아래에서 후보를 추가하세요.</p>
                 )}
-                {(u.strategyOptions || []).map((opt, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${
-                      u.selectedStrategy === opt ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200'
-                    }`}
-                  >
-                    <p className="flex-1 min-w-0 text-sm whitespace-pre-wrap leading-relaxed">{opt}</p>
-                    <button
-                      onClick={() => selectOption(u.id, opt)}
-                      disabled={saving}
-                      className={`shrink-0 text-xs font-black hover:underline ${u.selectedStrategy === opt ? 'text-emerald-600' : 'text-blue-600'}`}
+                {(u.strategyOptions || []).map((opt, i) => {
+                  const editKey = `${u.id}:${i}`;
+                  const isEditing = editingOptionKey === editKey;
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${
+                        u.selectedStrategy === opt ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200'
+                      }`}
                     >
-                      {u.selectedStrategy === opt ? '✅ 선택됨' : '이 방향 선택'}
-                    </button>
-                    <button onClick={() => deleteOption(u.id, i)} className="shrink-0 font-black text-neutral-300 hover:text-red-500" title="후보 삭제">
-                      ✕
-                    </button>
-                  </div>
-                ))}
+                      {isEditing ? (
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <textarea
+                            value={editOptionDraft}
+                            onChange={(e) => setEditOptionDraft(e.target.value)}
+                            rows={2}
+                            className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-sm leading-relaxed"
+                            autoFocus
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => setEditingOptionKey(null)} className="text-xs font-bold text-neutral-400 hover:text-black">
+                              취소
+                            </button>
+                            <button
+                              onClick={async () => {
+                                await editOption(u.id, i, editOptionDraft);
+                                setEditingOptionKey(null);
+                              }}
+                              disabled={saving || !editOptionDraft.trim()}
+                              className="text-xs font-black text-emerald-600 hover:underline"
+                            >
+                              저장
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="flex-1 min-w-0 text-sm whitespace-pre-wrap leading-relaxed">{opt}</p>
+                          <button
+                            onClick={() => selectOption(u.id, opt)}
+                            disabled={saving}
+                            className={`shrink-0 text-xs font-black hover:underline ${u.selectedStrategy === opt ? 'text-emerald-600' : 'text-blue-600'}`}
+                          >
+                            {u.selectedStrategy === opt ? '✅ 선택됨' : '이 방향 선택'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingOptionKey(editKey);
+                              setEditOptionDraft(opt);
+                            }}
+                            className="shrink-0 text-xs font-bold text-blue-600 hover:underline"
+                          >
+                            수정
+                          </button>
+                          <button onClick={() => deleteOption(u.id, i)} className="shrink-0 font-black text-neutral-300 hover:text-red-500" title="후보 삭제">
+                            ✕
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2.5 space-y-2">
                 <p className="text-xs font-black text-neutral-400">+ 방향 후보 추가 (타겟층/앵글을 구체적으로)</p>
@@ -2587,6 +2647,9 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const units = draft.units || [];
   const [openId, setOpenId] = useState<string | null>(null);
   const [newHookText, setNewHookText] = useState<Record<string, string>>({});
+  // 후보 문구 자체를 고치는 용도 — key는 "unitId:idx" — (지우고 다시 쓰지 않고) 인라인으로 바로 수정할 수 있게.
+  const [editingHookKey, setEditingHookKey] = useState<string | null>(null);
+  const [editHookDraft, setEditHookDraft] = useState('');
   const [saving, setSaving] = useState(false);
 
   async function saveUnits(next: ContentUnit[]) {
@@ -2617,6 +2680,19 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
     );
   }
 
+  // 후보 문구를 고침 — 그 후보가 이미 selectedHook으로 골라져 있었다면 selectedHook도 새 문구로 같이 바꿔서 선택 상태가 안 풀리게 한다.
+  async function editHook(id: string, idx: number, newText: string) {
+    if (!newText.trim()) return;
+    const unit = units.find((u) => u.id === id);
+    const oldText = unit?.hookOptions?.[idx];
+    const nextOptions = (unit?.hookOptions || []).map((o, i) => (i === idx ? newText.trim() : o));
+    await saveUnits(
+      units.map((u) =>
+        u.id === id ? { ...u, hookOptions: nextOptions, selectedHook: u.selectedHook === oldText ? newText.trim() : u.selectedHook } : u
+      )
+    );
+  }
+
   async function selectHook(id: string, text: string) {
     await saveUnits(units.map((u) => (u.id === id ? { ...u, selectedHook: u.selectedHook === text ? undefined : text } : u)));
   }
@@ -2643,26 +2719,68 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
                 {(u.hookOptions || []).length === 0 && (
                   <p className="text-sm text-neutral-300">아직 후보가 없어요 — 아래에서 후보를 추가하세요.</p>
                 )}
-                {(u.hookOptions || []).map((opt, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${
-                      u.selectedHook === opt ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200'
-                    }`}
-                  >
-                    <p className="flex-1 min-w-0 text-sm whitespace-pre-wrap leading-relaxed">{opt}</p>
-                    <button
-                      onClick={() => selectHook(u.id, opt)}
-                      disabled={saving}
-                      className={`shrink-0 text-xs font-black hover:underline ${u.selectedHook === opt ? 'text-emerald-600' : 'text-blue-600'}`}
+                {(u.hookOptions || []).map((opt, i) => {
+                  const editKey = `${u.id}:${i}`;
+                  const isEditing = editingHookKey === editKey;
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${
+                        u.selectedHook === opt ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200'
+                      }`}
                     >
-                      {u.selectedHook === opt ? '✅ 선택됨' : '이 버전 선택'}
-                    </button>
-                    <button onClick={() => deleteHook(u.id, i)} className="shrink-0 font-black text-neutral-300 hover:text-red-500" title="후보 삭제">
-                      ✕
-                    </button>
-                  </div>
-                ))}
+                      {isEditing ? (
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <textarea
+                            value={editHookDraft}
+                            onChange={(e) => setEditHookDraft(e.target.value)}
+                            rows={3}
+                            className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-sm leading-relaxed"
+                            autoFocus
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button onClick={() => setEditingHookKey(null)} className="text-xs font-bold text-neutral-400 hover:text-black">
+                              취소
+                            </button>
+                            <button
+                              onClick={async () => {
+                                await editHook(u.id, i, editHookDraft);
+                                setEditingHookKey(null);
+                              }}
+                              disabled={saving || !editHookDraft.trim()}
+                              className="text-xs font-black text-emerald-600 hover:underline"
+                            >
+                              저장
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="flex-1 min-w-0 text-sm whitespace-pre-wrap leading-relaxed">{opt}</p>
+                          <button
+                            onClick={() => selectHook(u.id, opt)}
+                            disabled={saving}
+                            className={`shrink-0 text-xs font-black hover:underline ${u.selectedHook === opt ? 'text-emerald-600' : 'text-blue-600'}`}
+                          >
+                            {u.selectedHook === opt ? '✅ 선택됨' : '이 버전 선택'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingHookKey(editKey);
+                              setEditHookDraft(opt);
+                            }}
+                            className="shrink-0 text-xs font-bold text-blue-600 hover:underline"
+                          >
+                            수정
+                          </button>
+                          <button onClick={() => deleteHook(u.id, i)} className="shrink-0 font-black text-neutral-300 hover:text-red-500" title="후보 삭제">
+                            ✕
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2.5 space-y-2">
                 <p className="text-xs font-black text-neutral-400">+ 훅/인트로 후보 추가</p>
