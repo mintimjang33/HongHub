@@ -2452,10 +2452,6 @@ function Step5Panel({
   const [newMaterialText, setNewMaterialText] = useState('');
   const [editingMaterialIdx, setEditingMaterialIdx] = useState<number | null>(null);
   const [editingMaterialText, setEditingMaterialText] = useState('');
-  // 완성 콘텐츠 카드의 자료조사(factCheck)/출처(sources)를 AI 비교 없이 수동으로 등록·수정·삭제하는 상태.
-  const [editingFactCheckId, setEditingFactCheckId] = useState<string | null>(null);
-  const [factCheckDraft, setFactCheckDraft] = useState('');
-  const [newSourceText, setNewSourceText] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setScriptDraftText(draft.script || '');
@@ -2662,45 +2658,6 @@ function Step5Panel({
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources } : u)) }),
-    });
-    onRefresh();
-  }
-
-  // 자료조사(factCheck) 메모를 AI 비교(compare) 없이도 직접 쓰고 고칠 수 있게 하는 저장 함수.
-  async function saveUnitFactCheck(id: string, factCheck: string) {
-    setSaving(true);
-    try {
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, factCheck } : u)) }),
-      });
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // 출처 목록에 한 줄(URL 등)을 추가 — 자료조사할 때 "이 사실은 이 출처에서 봤다"를 즉시 기록해두는 용도.
-  async function addUnitSource(id: string, url: string) {
-    if (!url.trim()) return;
-    const unit = units.find((u) => u.id === id);
-    const nextSources = [...(unit?.sources || []), url.trim()];
-    await fetch('/api/script-draft', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources: nextSources } : u)) }),
-    });
-    onRefresh();
-  }
-
-  async function deleteUnitSource(id: string, idx: number) {
-    const unit = units.find((u) => u.id === id);
-    const nextSources = (unit?.sources || []).filter((_, i) => i !== idx);
-    await fetch('/api/script-draft', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources: nextSources } : u)) }),
     });
     onRefresh();
   }
@@ -3472,95 +3429,7 @@ function Step5Panel({
                         <p className="text-[10px] font-black text-neutral-400 mb-0.5">🎬 6번 이미지/영상 프롬프트 (이 콘텐츠 전용) — 장면별로 추가/수정</p>
                         <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => saveUnitScenePrompts(u.id, text)} />
                       </div>
-                      <div className="pt-2 border-t border-neutral-50">
-                        <div className="flex items-center justify-between mb-0.5">
-                          <p className="text-[10px] font-black text-neutral-400">📎 자료조사 (사실확인 메모 + 출처) — 사실은 반드시 출처와 함께 기록</p>
-                          {editingFactCheckId !== u.id && (
-                            <button
-                              onClick={() => {
-                                setEditingFactCheckId(u.id);
-                                setFactCheckDraft(u.factCheck || '');
-                              }}
-                              className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
-                            >
-                              수정
-                            </button>
-                          )}
-                        </div>
-                        {editingFactCheckId === u.id ? (
-                          <div className="space-y-1">
-                            <textarea
-                              value={factCheckDraft}
-                              onChange={(e) => setFactCheckDraft(e.target.value)}
-                              rows={4}
-                              placeholder="자료조사 내용(사실확인 메모) — 아래 출처 목록과 짝을 맞춰서 적어두세요"
-                              className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <button onClick={() => setEditingFactCheckId(null)} className="text-[10px] font-bold text-neutral-400 hover:text-black">
-                                취소
-                              </button>
-                              <button
-                                onClick={async () => {
-                                  await saveUnitFactCheck(u.id, factCheckDraft);
-                                  setEditingFactCheckId(null);
-                                }}
-                                disabled={saving}
-                                className="text-[10px] font-black text-emerald-600 hover:underline"
-                              >
-                                저장
-                              </button>
-                            </div>
-                          </div>
-                        ) : u.factCheck ? (
-                          <p className="text-[11px] text-neutral-500 whitespace-pre-wrap leading-relaxed mb-1">{u.factCheck}</p>
-                        ) : (
-                          <p className="text-[11px] text-neutral-300 mb-1">아직 자료조사 메모가 없어요 — &quot;수정&quot;을 눌러서 추가하세요.</p>
-                        )}
-                        {u.sources && u.sources.length > 0 && (
-                          <div className="space-y-1 mt-1">
-                            {u.sources.map((s, i) => (
-                              <div key={i} className="flex items-center gap-1.5 text-[10px] text-neutral-400">
-                                <a href={s} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate hover:underline hover:text-blue-600">
-                                  {s}
-                                </a>
-                                <button
-                                  onClick={() => deleteUnitSource(u.id, i)}
-                                  className="shrink-0 font-black text-neutral-300 hover:text-red-500"
-                                  title="출처 삭제"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex gap-1.5 mt-1.5">
-                          <input
-                            type="text"
-                            value={newSourceText[u.id] || ''}
-                            onChange={(e) => setNewSourceText((prev) => ({ ...prev, [u.id]: e.target.value }))}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                addUnitSource(u.id, newSourceText[u.id] || '');
-                                setNewSourceText((prev) => ({ ...prev, [u.id]: '' }));
-                              }
-                            }}
-                            placeholder="출처 URL 추가 (예: 뉴스·위키 링크)"
-                            className="flex-1 text-[10px] border border-neutral-200 rounded-lg px-2 py-1"
-                          />
-                          <button
-                            onClick={() => {
-                              addUnitSource(u.id, newSourceText[u.id] || '');
-                              setNewSourceText((prev) => ({ ...prev, [u.id]: '' }));
-                            }}
-                            disabled={!(newSourceText[u.id] || '').trim()}
-                            className="shrink-0 text-[10px] font-black px-2.5 py-1 rounded-lg bg-black text-white disabled:opacity-40"
-                          >
-                            + 출처 추가
-                          </button>
-                        </div>
-                      </div>
+                      {/* 자료조사(factCheck/sources) 편집 UI는 7번 자료조사 전용 ResearchPanel에만 둔다 — 여기 8번(대본작성)에 중복으로 있던 블록을 제거함(2026-09-03). */}
 
                       {/* 제미나이와 비교→업그레이드 — "교체"가 아니라 원본+제미나이 버전을 합쳐서 최종본을 만든다. */}
                       <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
