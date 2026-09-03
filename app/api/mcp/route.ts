@@ -1045,6 +1045,53 @@ ${PLATFORM_GUIDE[target_platform]}
       }
     );
 
+    // ── PD(오케스트레이터) 지침 (신규) ─────────────────────────────
+
+    server.registerTool(
+      'get_system_prompt',
+      {
+        description:
+          'HongHub 유튜브 콘텐츠 파이프라인(공학/경제학/심리학 등) 작업을 시작할 때 가장 먼저 호출한다. ' +
+          'PD(오케스트레이터) 역할을 어떻게 수행하는지가 여기 저장돼 있다 — 이 내용을 읽고 그대로 행동할 것. ' +
+          '어느 PC/기기에서 접속하든 이 도구 하나로 항상 최신 지침을 불러올 수 있다(로컬 스킬 파일에 의존하지 않음). ' +
+          '지침은 update_system_prompt로 갱신할 수 있다.',
+        inputSchema: z.object({}),
+      },
+      async () => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('app_config').select('value').eq('key', 'HONGHUB_PD_SYSTEM_PROMPT').maybeSingle();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return {
+          content: [
+            {
+              type: 'text',
+              text: data?.value || '(아직 PD 지침이 등록되지 않았습니다. update_system_prompt로 등록해주세요.)',
+            },
+          ],
+        };
+      }
+    );
+
+    server.registerTool(
+      'update_system_prompt',
+      {
+        description:
+          'HongHub PD(오케스트레이터) 행동 지침 전체를 교체 저장한다(통째로 교체). ' +
+          'get_system_prompt가 반환하는 내용이 이걸로 갱신된다 — 이어붙이려면 먼저 get_system_prompt로 기존 내용을 읽고 합쳐서 넘길 것.',
+        inputSchema: z.object({
+          value: z.string().describe('저장할 지침 전문(마크다운/텍스트)'),
+        }),
+      },
+      async ({ value }) => {
+        const supabase = getSupabaseServerClient();
+        const { error } = await supabase
+          .from('app_config')
+          .upsert({ key: 'HONGHUB_PD_SYSTEM_PROMPT', value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: 'OK — 저장됨' }] };
+      }
+    );
+
     // ── 범용 유틸 (기존) ─────────────────────────────
 
     server.registerTool(
