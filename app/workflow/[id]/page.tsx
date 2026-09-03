@@ -545,7 +545,7 @@ function SceneEditorList({
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
 function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
-  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step) || isAnalysisStep(step) || isScriptStep(step) || isMaterialSelectionStep(step)) return null;
+  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step) || isAnalysisStep(step) || isScriptStep(step) || isMaterialSelectionStep(step) || isResearchStep(step)) return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
   return null;
 }
@@ -1706,6 +1706,11 @@ function isScriptStep(step: Step): boolean {
   return /대본\s*작성/.test(step.name);
 }
 
+// "7.자료조사" 단계 — exact match로 좁혀서 다른 단계 이름에 실수로 안 걸리게 한다.
+function isResearchStep(step: Step): boolean {
+  return step.name.trim() === '자료조사';
+}
+
 // "5.소재 선정" 단계 — 소재/제목/대본 위저드(Step5Panel)의 1단계(소재 목록)가 여기 속한다.
 // exact match로 좁혀서 "소재 선정" 외의 다른 단계 이름에 실수로 걸리지 않게 한다.
 function isMaterialSelectionStep(step: Step): boolean {
@@ -1895,6 +1900,174 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
           아직 &quot;{ANALYSIS_TABS.find((t) => t.key === tab)?.label}&quot; 분석 결과가 없어요 — 위에서 체크하고 분석을 실행해보세요.
         </p>
       )}
+    </div>
+  );
+}
+
+// 7번(자료조사) 단계 전용 패널 — 8번(대본 작성) 패널(Step5Panel)과는 완전히 별개 컴포넌트다.
+// 소재 추천/제목 추천/대본 작성 위저드는 전혀 안 보여주고, 6번에서 등록된 콘텐츠 목록만 나열해서
+// 콘텐츠별로 자료조사 메모(factCheck)와 출처(sources)만 수동으로 등록·수정·삭제하게 한다.
+function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const draft = site.script_draft || {};
+  const units = draft.units || [];
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [factCheckDraft, setFactCheckDraft] = useState('');
+  const [newSourceText, setNewSourceText] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  async function saveFactCheck(id: string, factCheck: string) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, factCheck } : u)) }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addSource(id: string, url: string) {
+    if (!url.trim()) return;
+    const unit = units.find((u) => u.id === id);
+    const nextSources = [...(unit?.sources || []), url.trim()];
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources: nextSources } : u)) }),
+    });
+    onRefresh();
+  }
+
+  async function deleteSource(id: string, idx: number) {
+    const unit = units.find((u) => u.id === id);
+    const nextSources = (unit?.sources || []).filter((_, i) => i !== idx);
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources: nextSources } : u)) }),
+    });
+    onRefresh();
+  }
+
+  if (units.length === 0) {
+    return <p className="text-xs text-neutral-300">아직 6번에서 등록된 콘텐츠가 없어요 — 먼저 5·6번에서 소재를 확정하고 콘텐츠를 등록하세요.</p>;
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {units.map((u) => (
+        <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+          <button
+            onClick={() => {
+              setOpenId((cur) => (cur === u.id ? null : u.id));
+              setEditingId(null);
+            }}
+            className="w-full text-left px-3 py-2 flex items-center gap-2"
+          >
+            <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
+            <span className="flex-1 min-w-0 text-[11px] font-bold truncate">{u.title}</span>
+            {u.factCheck ? (
+              <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 조사됨</span>
+            ) : (
+              <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">미조사</span>
+            )}
+          </button>
+          {openId === u.id && (
+            <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
+              <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <p className="text-[10px] font-black text-neutral-400">자료조사 메모 — 사실은 반드시 출처와 함께 기록</p>
+                  {editingId !== u.id && (
+                    <button
+                      onClick={() => {
+                        setEditingId(u.id);
+                        setFactCheckDraft(u.factCheck || '');
+                      }}
+                      className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
+                    >
+                      수정
+                    </button>
+                  )}
+                </div>
+                {editingId === u.id ? (
+                  <div className="space-y-1">
+                    <textarea
+                      value={factCheckDraft}
+                      onChange={(e) => setFactCheckDraft(e.target.value)}
+                      rows={5}
+                      placeholder="① 사실 — 출처: URL 형식으로, 사실마다 출처를 짝지어 적으세요"
+                      className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
+                    />
+                    <div className="flex justify-end gap-1.5">
+                      <button onClick={() => setEditingId(null)} className="text-[10px] font-bold text-neutral-400 hover:text-black">
+                        취소
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await saveFactCheck(u.id, factCheckDraft);
+                          setEditingId(null);
+                        }}
+                        disabled={saving}
+                        className="text-[10px] font-black text-emerald-600 hover:underline"
+                      >
+                        저장
+                      </button>
+                    </div>
+                  </div>
+                ) : u.factCheck ? (
+                  <p className="text-[11px] text-neutral-500 whitespace-pre-wrap leading-relaxed">{u.factCheck}</p>
+                ) : (
+                  <p className="text-[11px] text-neutral-300">아직 자료조사 메모가 없어요 — &quot;수정&quot;을 눌러서 추가하세요.</p>
+                )}
+              </div>
+              {u.sources && u.sources.length > 0 && (
+                <div className="space-y-1">
+                  {u.sources.map((s, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-[10px] text-neutral-400">
+                      <a href={s} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate hover:underline hover:text-blue-600">
+                        {s}
+                      </a>
+                      <button onClick={() => deleteSource(u.id, i)} className="shrink-0 font-black text-neutral-300 hover:text-red-500" title="출처 삭제">
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  value={newSourceText[u.id] || ''}
+                  onChange={(e) => setNewSourceText((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      addSource(u.id, newSourceText[u.id] || '');
+                      setNewSourceText((prev) => ({ ...prev, [u.id]: '' }));
+                    }
+                  }}
+                  placeholder="출처 URL 추가"
+                  className="flex-1 text-[10px] border border-neutral-200 rounded-lg px-2 py-1"
+                />
+                <button
+                  onClick={() => {
+                    addSource(u.id, newSourceText[u.id] || '');
+                    setNewSourceText((prev) => ({ ...prev, [u.id]: '' }));
+                  }}
+                  disabled={!(newSourceText[u.id] || '').trim()}
+                  className="shrink-0 text-[10px] font-black px-2.5 py-1 rounded-lg bg-black text-white disabled:opacity-40"
+                >
+                  + 출처 추가
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -3965,6 +4138,7 @@ function FlowChart({
           {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
           {isAnalysisStep(active) && <AnalysisPanel site={site} onRefresh={onRefreshSite} />}
           {isMaterialSelectionStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
+          {isResearchStep(active) && <ResearchPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} hideMaterials />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
