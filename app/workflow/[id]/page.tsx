@@ -1921,7 +1921,16 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
 
 // 6번(콘텐츠 등록) 단계 전용 패널 — 유닛의 제목/소재만 등록·수정·삭제한다.
 // 대본은 8번(Step5Panel), 자료조사는 7번(ResearchPanel)의 몫이라 여기서는 건드리지 않는다.
-function ContentRegisterPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+function ContentRegisterPanel({
+  site,
+  onRefresh,
+  onGoToMaterialSelection,
+}: {
+  site: Site;
+  onRefresh: () => void;
+  // "5번 소재 선정"으로 되돌아가서 소재를 체크하는 흐름으로 콘텐츠를 만들고 싶을 때 쓰는 이동 버튼.
+  onGoToMaterialSelection?: () => void;
+}) {
   const draft = site.script_draft || {};
   const units = draft.units || [];
   const [showNewForm, setShowNewForm] = useState(false);
@@ -2018,12 +2027,22 @@ function ContentRegisterPanel({ site, onRefresh }: { site: Site; onRefresh: () =
           </div>
         </div>
       ) : (
-        <button
-          onClick={() => setShowNewForm(true)}
-          className="w-full text-[11px] font-black px-3 py-2 rounded-lg border border-dashed border-neutral-300 text-neutral-500 hover:border-neutral-400 hover:text-black mb-1"
-        >
-          + 새 콘텐츠 등록
-        </button>
+        <div className="flex gap-1.5 mb-1">
+          <button
+            onClick={() => setShowNewForm(true)}
+            className="flex-1 text-[11px] font-black px-3 py-2 rounded-lg border border-dashed border-neutral-300 text-neutral-500 hover:border-neutral-400 hover:text-black"
+          >
+            + 새 콘텐츠 등록
+          </button>
+          {onGoToMaterialSelection && (
+            <button
+              onClick={onGoToMaterialSelection}
+              className="shrink-0 text-[11px] font-bold px-3 py-2 rounded-lg border border-neutral-200 text-neutral-500 hover:border-neutral-400 hover:text-black bg-white"
+            >
+              🔙 5번에서 소재 고르기
+            </button>
+          )}
+        </div>
       )}
       {units.length === 0 && <p className="text-xs text-neutral-300">아직 등록된 콘텐츠가 없어요 — 5번에서 소재를 체크하면 여기로 자동 이동돼요.</p>}
       {units.map((u) => (
@@ -4452,7 +4471,16 @@ function FlowChart({
               }}
             />
           )}
-          {isContentRegisterStep(active) && <ContentRegisterPanel site={site} onRefresh={onRefreshSite} />}
+          {isContentRegisterStep(active) && (
+            <ContentRegisterPanel
+              site={site}
+              onRefresh={onRefreshSite}
+              onGoToMaterialSelection={() => {
+                const idx = steps.findIndex((s) => isMaterialSelectionStep(s));
+                if (idx >= 0) onSelect(idx);
+              }}
+            />
+          )}
           {isResearchStep(active) && <ResearchPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} hideMaterials />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
