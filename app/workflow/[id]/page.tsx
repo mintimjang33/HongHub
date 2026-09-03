@@ -41,6 +41,16 @@ type ContentUnit = {
   sources?: string[];
   // 제미나이와 비교(action=compare)해서 받은 사실확인 결과 — 업그레이드 이후에도 근거로 남겨둔다.
   factCheck?: string;
+  // 2026-09-03 추가 — 8번(전략/컨셉 확정) 단계. script-writer 스킬 3단계에 해당. 검토한 방향 후보를
+  // 실제로 다 적어두고(하나만 남기지 않고) 그중 뭘 왜 골랐는지까지 남겨야 나중에 "왜 이 앵글이었는지"
+  // 되짚을 수 있다.
+  strategyOptions?: string[];
+  selectedStrategy?: string;
+  strategyReason?: string;
+  // 2026-09-03 추가 — 9번(훅/인트로 설계) 단계. script-writer 스킬 4단계에 해당. 클릭률에 가장 큰
+  // 영향을 주는 단계라 후보 버전을 여러 개 적어보고 제일 강한 걸 고른 기록을 남긴다.
+  hookOptions?: string[];
+  selectedHook?: string;
   // 2026-08-31 추가 — 6번(이미지/영상 생성) 단계의 장면별 CLEAN/INFO/영상 프롬프트 전문. 파이프라인
   // 전체가 공유하는 workflow_content가 아니라 이 유닛(에피소드) 하나에 귀속시켜서, 소재가 바뀌어도
   // "이게 어느 콘텐츠 프롬프트인지" 헷갈리지 않게 한다.
@@ -553,7 +563,9 @@ function stepLink(step: Step): { href: string; label: string } | null {
     isScriptStep(step) ||
     isMaterialSelectionStep(step) ||
     isResearchStep(step) ||
-    isContentRegisterStep(step)
+    isContentRegisterStep(step) ||
+    isStrategyStep(step) ||
+    isHookStep(step)
   )
     return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
@@ -1726,6 +1738,17 @@ function isContentRegisterStep(step: Step): boolean {
   return step.name.trim() === '콘텐츠 등록';
 }
 
+// "8.전략/컨셉 확정" 단계 — 이름 뒤에 "(신규)" 같은 부가 표기가 붙을 수 있어서 exact match 대신
+// "전략"과 "컨셉"이 둘 다 들어있는지로 느슨하게 판별한다.
+function isStrategyStep(step: Step): boolean {
+  return /전략/.test(step.name) && /컨셉/.test(step.name);
+}
+
+// "9.훅/인트로 설계" 단계 — 위와 같은 이유로 "훅"과 "인트로"가 둘 다 들어있는지로 판별한다.
+function isHookStep(step: Step): boolean {
+  return /훅/.test(step.name) && /인트로/.test(step.name);
+}
+
 // "5.소재 선정" 단계 — 소재/제목/대본 위저드(Step5Panel)의 1단계(소재 목록)가 여기 속한다.
 // exact match로 좁혀서 "소재 선정" 외의 다른 단계 이름에 실수로 걸리지 않게 한다.
 function isMaterialSelectionStep(step: Step): boolean {
@@ -2375,6 +2398,293 @@ function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                 >
                   + 출처 추가
                 </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 8번(전략/컨셉 확정) 단계 전용 패널 — 7번(자료조사)에서 확보한 자료를 바탕으로 검토한 방향 후보를
+// 실제로 다 적어두고, 그중 하나를 선택 + 이유를 기록한다(script-writer 스킬 3단계에 해당).
+// ResearchPanel과 완전히 같은 리스트/펼치기 구조를 쓰되, factCheck/sources 대신 strategyOptions/selectedStrategy/strategyReason을 다룬다.
+function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const draft = site.script_draft || {};
+  const units = draft.units || [];
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [newOptionText, setNewOptionText] = useState<Record<string, string>>({});
+  const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
+  const [reasonDraft, setReasonDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function saveUnits(next: ContentUnit[]) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: next }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addOption(id: string, text: string) {
+    if (!text.trim()) return;
+    await saveUnits(units.map((u) => (u.id === id ? { ...u, strategyOptions: [...(u.strategyOptions || []), text.trim()] } : u)));
+  }
+
+  async function deleteOption(id: string, idx: number) {
+    const unit = units.find((u) => u.id === id);
+    const nextOptions = (unit?.strategyOptions || []).filter((_, i) => i !== idx);
+    const removed = unit?.strategyOptions?.[idx];
+    await saveUnits(
+      units.map((u) =>
+        u.id === id
+          ? { ...u, strategyOptions: nextOptions, selectedStrategy: u.selectedStrategy === removed ? undefined : u.selectedStrategy }
+          : u
+      )
+    );
+  }
+
+  async function selectOption(id: string, text: string) {
+    await saveUnits(units.map((u) => (u.id === id ? { ...u, selectedStrategy: u.selectedStrategy === text ? undefined : text } : u)));
+  }
+
+  async function saveReason(id: string, reason: string) {
+    await saveUnits(units.map((u) => (u.id === id ? { ...u, strategyReason: reason } : u)));
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {units.length === 0 && <p className="text-xs text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
+      {units.map((u) => (
+        <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+          <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2 flex items-center gap-2">
+            <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
+            <span className="flex-1 min-w-0 text-[11px] font-bold truncate">{u.title}</span>
+            {u.selectedStrategy ? (
+              <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 확정됨</span>
+            ) : (
+              <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">미착수</span>
+            )}
+          </button>
+          {openId === u.id && (
+            <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
+              <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black text-neutral-400">검토한 방향 후보</p>
+                {(u.strategyOptions || []).length === 0 && (
+                  <p className="text-[11px] text-neutral-300">아직 후보가 없어요 — 아래에서 후보를 추가하세요.</p>
+                )}
+                {(u.strategyOptions || []).map((opt, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-1.5 rounded-lg border px-2 py-1.5 ${
+                      u.selectedStrategy === opt ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200'
+                    }`}
+                  >
+                    <p className="flex-1 min-w-0 text-[11px] whitespace-pre-wrap leading-relaxed">{opt}</p>
+                    <button
+                      onClick={() => selectOption(u.id, opt)}
+                      disabled={saving}
+                      className={`shrink-0 text-[10px] font-black hover:underline ${u.selectedStrategy === opt ? 'text-emerald-600' : 'text-blue-600'}`}
+                    >
+                      {u.selectedStrategy === opt ? '✅ 선택됨' : '이 방향 선택'}
+                    </button>
+                    <button onClick={() => deleteOption(u.id, i)} className="shrink-0 font-black text-neutral-300 hover:text-red-500" title="후보 삭제">
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 space-y-1.5">
+                <p className="text-[10px] font-black text-neutral-400">+ 방향 후보 추가 (타겟층/앵글을 구체적으로)</p>
+                <textarea
+                  value={newOptionText[u.id] || ''}
+                  onChange={(e) => setNewOptionText((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                  rows={2}
+                  placeholder="예: 재테크형 — 투자레슨 프레이밍"
+                  className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
+                />
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => {
+                      addOption(u.id, newOptionText[u.id] || '');
+                      setNewOptionText((prev) => ({ ...prev, [u.id]: '' }));
+                    }}
+                    disabled={!(newOptionText[u.id] || '').trim()}
+                    className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                  >
+                    + 후보 추가
+                  </button>
+                </div>
+              </div>
+              {u.selectedStrategy && (
+                <div>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <p className="text-[10px] font-black text-neutral-400">선택 이유</p>
+                    {editingReasonId !== u.id && (
+                      <button
+                        onClick={() => {
+                          setEditingReasonId(u.id);
+                          setReasonDraft(u.strategyReason || '');
+                        }}
+                        className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
+                      >
+                        수정
+                      </button>
+                    )}
+                  </div>
+                  {editingReasonId === u.id ? (
+                    <div className="space-y-1">
+                      <textarea
+                        value={reasonDraft}
+                        onChange={(e) => setReasonDraft(e.target.value)}
+                        rows={3}
+                        placeholder="왜 이 방향을 골랐는지"
+                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <button onClick={() => setEditingReasonId(null)} className="text-[10px] font-bold text-neutral-400 hover:text-black">
+                          취소
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await saveReason(u.id, reasonDraft);
+                            setEditingReasonId(null);
+                          }}
+                          disabled={saving}
+                          className="text-[10px] font-black text-emerald-600 hover:underline"
+                        >
+                          저장
+                        </button>
+                      </div>
+                    </div>
+                  ) : u.strategyReason ? (
+                    <p className="text-[11px] text-neutral-500 whitespace-pre-wrap leading-relaxed">{u.strategyReason}</p>
+                  ) : (
+                    <p className="text-[11px] text-neutral-300">아직 이유가 없어요 — &quot;수정&quot;을 눌러서 추가하세요.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 9번(훅/인트로 설계) 단계 전용 패널 — 본문 쓰기 전 도입부 후보를 여러 버전 적어보고 제일 강한 걸
+// 선택한다(script-writer 스킬 4단계에 해당). 클릭률에 가장 큰 영향을 주는 단계라 후보를 남겨둔다.
+function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const draft = site.script_draft || {};
+  const units = draft.units || [];
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [newHookText, setNewHookText] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  async function saveUnits(next: ContentUnit[]) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: next }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function addHook(id: string, text: string) {
+    if (!text.trim()) return;
+    await saveUnits(units.map((u) => (u.id === id ? { ...u, hookOptions: [...(u.hookOptions || []), text.trim()] } : u)));
+  }
+
+  async function deleteHook(id: string, idx: number) {
+    const unit = units.find((u) => u.id === id);
+    const nextOptions = (unit?.hookOptions || []).filter((_, i) => i !== idx);
+    const removed = unit?.hookOptions?.[idx];
+    await saveUnits(
+      units.map((u) => (u.id === id ? { ...u, hookOptions: nextOptions, selectedHook: u.selectedHook === removed ? undefined : u.selectedHook } : u))
+    );
+  }
+
+  async function selectHook(id: string, text: string) {
+    await saveUnits(units.map((u) => (u.id === id ? { ...u, selectedHook: u.selectedHook === text ? undefined : text } : u)));
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {units.length === 0 && <p className="text-xs text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
+      {units.map((u) => (
+        <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+          <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2 flex items-center gap-2">
+            <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
+            <span className="flex-1 min-w-0 text-[11px] font-bold truncate">{u.title}</span>
+            {u.selectedHook ? (
+              <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 확정됨</span>
+            ) : (
+              <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">미착수</span>
+            )}
+          </button>
+          {openId === u.id && (
+            <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
+              <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black text-neutral-400">훅/인트로 후보</p>
+                {(u.hookOptions || []).length === 0 && (
+                  <p className="text-[11px] text-neutral-300">아직 후보가 없어요 — 아래에서 후보를 추가하세요.</p>
+                )}
+                {(u.hookOptions || []).map((opt, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-1.5 rounded-lg border px-2 py-1.5 ${
+                      u.selectedHook === opt ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200'
+                    }`}
+                  >
+                    <p className="flex-1 min-w-0 text-[11px] whitespace-pre-wrap leading-relaxed">{opt}</p>
+                    <button
+                      onClick={() => selectHook(u.id, opt)}
+                      disabled={saving}
+                      className={`shrink-0 text-[10px] font-black hover:underline ${u.selectedHook === opt ? 'text-emerald-600' : 'text-blue-600'}`}
+                    >
+                      {u.selectedHook === opt ? '✅ 선택됨' : '이 버전 선택'}
+                    </button>
+                    <button onClick={() => deleteHook(u.id, i)} className="shrink-0 font-black text-neutral-300 hover:text-red-500" title="후보 삭제">
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 space-y-1.5">
+                <p className="text-[10px] font-black text-neutral-400">+ 훅/인트로 후보 추가</p>
+                <textarea
+                  value={newHookText[u.id] || ''}
+                  onChange={(e) => setNewHookText((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                  rows={3}
+                  placeholder="도입부 후보 하나를 실제 문장으로 적어보세요"
+                  className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
+                />
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => {
+                      addHook(u.id, newHookText[u.id] || '');
+                      setNewHookText((prev) => ({ ...prev, [u.id]: '' }));
+                    }}
+                    disabled={!(newHookText[u.id] || '').trim()}
+                    className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                  >
+                    + 후보 추가
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -4351,6 +4661,8 @@ function FlowChart({
             />
           )}
           {isResearchStep(active) && <ResearchPanel site={site} onRefresh={onRefreshSite} />}
+          {isStrategyStep(active) && <StrategyPanel site={site} onRefresh={onRefreshSite} />}
+          {isHookStep(active) && <HookPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} hideMaterials />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
