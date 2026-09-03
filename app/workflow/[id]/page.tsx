@@ -2460,39 +2460,39 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
   }
 
   return (
-    <div className="space-y-1.5">
-      {units.length === 0 && <p className="text-xs text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
+    <div className="space-y-2">
+      {units.length === 0 && <p className="text-sm text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
       {units.map((u) => (
         <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
-          <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2 flex items-center gap-2">
+          <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
             <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
-            <span className="flex-1 min-w-0 text-[11px] font-bold truncate">{u.title}</span>
+            <span className="flex-1 min-w-0 text-sm font-bold truncate">{u.title}</span>
             {u.selectedStrategy ? (
-              <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 확정됨</span>
+              <span className="shrink-0 text-xs font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 확정됨</span>
             ) : (
-              <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">미착수</span>
+              <span className="shrink-0 text-xs font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">미착수</span>
             )}
           </button>
           {openId === u.id && (
-            <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
-              <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
-              <div className="space-y-1">
-                <p className="text-[10px] font-black text-neutral-400">검토한 방향 후보</p>
+            <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-3">
+              <p className="text-xs text-neutral-400">소재: {u.material}</p>
+              <div className="space-y-1.5">
+                <p className="text-xs font-black text-neutral-400">검토한 방향 후보</p>
                 {(u.strategyOptions || []).length === 0 && (
-                  <p className="text-[11px] text-neutral-300">아직 후보가 없어요 — 아래에서 후보를 추가하세요.</p>
+                  <p className="text-sm text-neutral-300">아직 후보가 없어요 — 아래에서 후보를 추가하세요.</p>
                 )}
                 {(u.strategyOptions || []).map((opt, i) => (
                   <div
                     key={i}
-                    className={`flex items-start gap-1.5 rounded-lg border px-2 py-1.5 ${
+                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${
                       u.selectedStrategy === opt ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200'
                     }`}
                   >
-                    <p className="flex-1 min-w-0 text-[11px] whitespace-pre-wrap leading-relaxed">{opt}</p>
+                    <p className="flex-1 min-w-0 text-sm whitespace-pre-wrap leading-relaxed">{opt}</p>
                     <button
                       onClick={() => selectOption(u.id, opt)}
                       disabled={saving}
-                      className={`shrink-0 text-[10px] font-black hover:underline ${u.selectedStrategy === opt ? 'text-emerald-600' : 'text-blue-600'}`}
+                      className={`shrink-0 text-xs font-black hover:underline ${u.selectedStrategy === opt ? 'text-emerald-600' : 'text-blue-600'}`}
                     >
                       {u.selectedStrategy === opt ? '✅ 선택됨' : '이 방향 선택'}
                     </button>
@@ -2502,14 +2502,14 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                   </div>
                 ))}
               </div>
-              <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 space-y-1.5">
-                <p className="text-[10px] font-black text-neutral-400">+ 방향 후보 추가 (타겟층/앵글을 구체적으로)</p>
+              <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2.5 space-y-2">
+                <p className="text-xs font-black text-neutral-400">+ 방향 후보 추가 (타겟층/앵글을 구체적으로)</p>
                 <textarea
                   value={newOptionText[u.id] || ''}
                   onChange={(e) => setNewOptionText((prev) => ({ ...prev, [u.id]: e.target.value }))}
                   rows={2}
                   placeholder="예: 재테크형 — 투자레슨 프레이밍"
-                  className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
+                  className="w-full border border-neutral-200 rounded-lg px-2.5 py-2 text-sm leading-relaxed"
                 />
                 <div className="flex justify-end">
                   <button
@@ -2518,7 +2518,7 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                       setNewOptionText((prev) => ({ ...prev, [u.id]: '' }));
                     }}
                     disabled={!(newOptionText[u.id] || '').trim()}
-                    className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                    className="shrink-0 text-sm font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
                   >
                     + 후보 추가
                   </button>
@@ -2526,31 +2526,31 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
               </div>
               {u.selectedStrategy && (
                 <div>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <p className="text-[10px] font-black text-neutral-400">선택 이유</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-black text-neutral-400">선택 이유</p>
                     {editingReasonId !== u.id && (
                       <button
                         onClick={() => {
                           setEditingReasonId(u.id);
                           setReasonDraft(u.strategyReason || '');
                         }}
-                        className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
+                        className="shrink-0 text-xs font-bold text-blue-600 hover:underline"
                       >
                         수정
                       </button>
                     )}
                   </div>
                   {editingReasonId === u.id ? (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <textarea
                         value={reasonDraft}
                         onChange={(e) => setReasonDraft(e.target.value)}
                         rows={3}
                         placeholder="왜 이 방향을 골랐는지"
-                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
+                        className="w-full border border-neutral-200 rounded-lg px-2.5 py-2 text-sm leading-relaxed"
                       />
-                      <div className="flex justify-end gap-1.5">
-                        <button onClick={() => setEditingReasonId(null)} className="text-[10px] font-bold text-neutral-400 hover:text-black">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => setEditingReasonId(null)} className="text-xs font-bold text-neutral-400 hover:text-black">
                           취소
                         </button>
                         <button
@@ -2559,16 +2559,16 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                             setEditingReasonId(null);
                           }}
                           disabled={saving}
-                          className="text-[10px] font-black text-emerald-600 hover:underline"
+                          className="text-xs font-black text-emerald-600 hover:underline"
                         >
                           저장
                         </button>
                       </div>
                     </div>
                   ) : u.strategyReason ? (
-                    <p className="text-[11px] text-neutral-500 whitespace-pre-wrap leading-relaxed">{u.strategyReason}</p>
+                    <p className="text-[15px] text-neutral-600 whitespace-pre-wrap leading-relaxed">{u.strategyReason}</p>
                   ) : (
-                    <p className="text-[11px] text-neutral-300">아직 이유가 없어요 — &quot;수정&quot;을 눌러서 추가하세요.</p>
+                    <p className="text-sm text-neutral-300">아직 이유가 없어요 — &quot;수정&quot;을 눌러서 추가하세요.</p>
                   )}
                 </div>
               )}
@@ -2622,39 +2622,39 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   }
 
   return (
-    <div className="space-y-1.5">
-      {units.length === 0 && <p className="text-xs text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
+    <div className="space-y-2">
+      {units.length === 0 && <p className="text-sm text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
       {units.map((u) => (
         <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
-          <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2 flex items-center gap-2">
+          <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
             <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
-            <span className="flex-1 min-w-0 text-[11px] font-bold truncate">{u.title}</span>
+            <span className="flex-1 min-w-0 text-sm font-bold truncate">{u.title}</span>
             {u.selectedHook ? (
-              <span className="shrink-0 text-[10px] font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 확정됨</span>
+              <span className="shrink-0 text-xs font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 확정됨</span>
             ) : (
-              <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">미착수</span>
+              <span className="shrink-0 text-xs font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">미착수</span>
             )}
           </button>
           {openId === u.id && (
-            <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
-              <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
-              <div className="space-y-1">
-                <p className="text-[10px] font-black text-neutral-400">훅/인트로 후보</p>
+            <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-3">
+              <p className="text-xs text-neutral-400">소재: {u.material}</p>
+              <div className="space-y-1.5">
+                <p className="text-xs font-black text-neutral-400">훅/인트로 후보</p>
                 {(u.hookOptions || []).length === 0 && (
-                  <p className="text-[11px] text-neutral-300">아직 후보가 없어요 — 아래에서 후보를 추가하세요.</p>
+                  <p className="text-sm text-neutral-300">아직 후보가 없어요 — 아래에서 후보를 추가하세요.</p>
                 )}
                 {(u.hookOptions || []).map((opt, i) => (
                   <div
                     key={i}
-                    className={`flex items-start gap-1.5 rounded-lg border px-2 py-1.5 ${
+                    className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${
                       u.selectedHook === opt ? 'border-emerald-300 bg-emerald-50' : 'border-neutral-200'
                     }`}
                   >
-                    <p className="flex-1 min-w-0 text-[11px] whitespace-pre-wrap leading-relaxed">{opt}</p>
+                    <p className="flex-1 min-w-0 text-sm whitespace-pre-wrap leading-relaxed">{opt}</p>
                     <button
                       onClick={() => selectHook(u.id, opt)}
                       disabled={saving}
-                      className={`shrink-0 text-[10px] font-black hover:underline ${u.selectedHook === opt ? 'text-emerald-600' : 'text-blue-600'}`}
+                      className={`shrink-0 text-xs font-black hover:underline ${u.selectedHook === opt ? 'text-emerald-600' : 'text-blue-600'}`}
                     >
                       {u.selectedHook === opt ? '✅ 선택됨' : '이 버전 선택'}
                     </button>
@@ -2664,14 +2664,14 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
                   </div>
                 ))}
               </div>
-              <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 space-y-1.5">
-                <p className="text-[10px] font-black text-neutral-400">+ 훅/인트로 후보 추가</p>
+              <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2.5 space-y-2">
+                <p className="text-xs font-black text-neutral-400">+ 훅/인트로 후보 추가</p>
                 <textarea
                   value={newHookText[u.id] || ''}
                   onChange={(e) => setNewHookText((prev) => ({ ...prev, [u.id]: e.target.value }))}
                   rows={3}
                   placeholder="도입부 후보 하나를 실제 문장으로 적어보세요"
-                  className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
+                  className="w-full border border-neutral-200 rounded-lg px-2.5 py-2 text-sm leading-relaxed"
                 />
                 <div className="flex justify-end">
                   <button
@@ -2680,7 +2680,7 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
                       setNewHookText((prev) => ({ ...prev, [u.id]: '' }));
                     }}
                     disabled={!(newHookText[u.id] || '').trim()}
-                    className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                    className="shrink-0 text-sm font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
                   >
                     + 후보 추가
                   </button>
