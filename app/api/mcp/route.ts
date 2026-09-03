@@ -126,6 +126,12 @@ const baseHandler = createMcpHandler(
             .describe(
               '워크플로우 본문(마크다운) 통째로 교체 — 계획서(plan_content)와는 별개 섹션. 이어붙이려면 먼저 list_sites로 기존 내용을 읽고 합쳐서 넘길 것. 파이프라인마다 각자 따로 두는 것이지 여러 파이프라인이 공유하는 문서가 아니다.'
             ),
+          progress_log: z
+            .string()
+            .optional()
+            .describe(
+              '진행 로그(실측·시행착오 기반 의사결정 기록) 통째로 교체 — plan_content(사전 기획서)와는 별개 필드. 새 로그는 이어붙이려면 먼저 list_sites로 기존 내용을 읽고 합쳐서 넘길 것.'
+            ),
         }),
       },
       async ({ id, ...fields }) => {
