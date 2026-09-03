@@ -1915,6 +1915,59 @@ function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
   const [factCheckDraft, setFactCheckDraft] = useState('');
   const [newSourceText, setNewSourceText] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  // 7번에서 바로 콘텐츠를 새로 등록(6번을 거치지 않고) — 대본 없이 제목/소재만으로 먼저 등록해두고
+  // 자료조사부터 시작할 수 있게 하는 용도.
+  const [showNewUnitForm, setShowNewUnitForm] = useState(false);
+  const [newUnitTitle, setNewUnitTitle] = useState('');
+  const [newUnitMaterial, setNewUnitMaterial] = useState('');
+  const [addingUnit, setAddingUnit] = useState(false);
+  // "수정"으로 통째로 고치는 것 말고, 사실 하나 + 출처 하나를 바로 추가하는 용도.
+  const [newFindingFact, setNewFindingFact] = useState<Record<string, string>>({});
+  const [newFindingSource, setNewFindingSource] = useState<Record<string, string>>({});
+
+  async function addUnit(title: string, material: string) {
+    if (!title.trim()) return;
+    setAddingUnit(true);
+    try {
+      const unit: ContentUnit = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        material: material.trim() || title.trim(),
+        title: title.trim(),
+        script: '',
+        category: draft.category || 'trivia',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      };
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: [...units, unit] }),
+      });
+      setNewUnitTitle('');
+      setNewUnitMaterial('');
+      setShowNewUnitForm(false);
+      onRefresh();
+    } finally {
+      setAddingUnit(false);
+    }
+  }
+
+  // 사실 하나 + 출처 하나를 한 번에 추가 — factCheck에는 줄 하나로 붙고, sources에도 그 URL이 같이 들어간다.
+  async function addFinding(id: string, fact: string, sourceUrl: string) {
+    if (!fact.trim()) return;
+    const unit = units.find((u) => u.id === id);
+    if (!unit) return;
+    const line = sourceUrl.trim() ? `- ${fact.trim()}\n  출처: ${sourceUrl.trim()}` : `- ${fact.trim()}`;
+    const nextFactCheck = unit.factCheck ? `${unit.factCheck}\n\n${line}` : line;
+    const nextSources =
+      sourceUrl.trim() && !(unit.sources || []).includes(sourceUrl.trim()) ? [...(unit.sources || []), sourceUrl.trim()] : unit.sources || [];
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, factCheck: nextFactCheck, sources: nextSources } : u)) }),
+    });
+    onRefresh();
+  }
 
   async function saveFactCheck(id: string, factCheck: string) {
     setSaving(true);
@@ -1953,12 +2006,44 @@ function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
     onRefresh();
   }
 
-  if (units.length === 0) {
-    return <p className="text-xs text-neutral-300">아직 6번에서 등록된 콘텐츠가 없어요 — 먼저 5·6번에서 소재를 확정하고 콘텐츠를 등록하세요.</p>;
-  }
-
   return (
     <div className="space-y-1.5">
+      {showNewUnitForm ? (
+        <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-1 space-y-2">
+          <input
+            value={newUnitTitle}
+            onChange={(e) => setNewUnitTitle(e.target.value)}
+            placeholder="콘텐츠 제목 *"
+            className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs"
+          />
+          <input
+            value={newUnitMaterial}
+            onChange={(e) => setNewUnitMaterial(e.target.value)}
+            placeholder="소재 설명 (비우면 제목과 동일하게 저장)"
+            className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs"
+          />
+          <div className="flex justify-end gap-1.5">
+            <button onClick={() => setShowNewUnitForm(false)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+              취소
+            </button>
+            <button
+              onClick={() => addUnit(newUnitTitle, newUnitMaterial)}
+              disabled={addingUnit || !newUnitTitle.trim()}
+              className="text-[11px] font-black px-4 py-2 rounded-lg bg-black text-white disabled:opacity-40"
+            >
+              {addingUnit ? '등록 중...' : '등록'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowNewUnitForm(true)}
+          className="w-full text-[11px] font-black px-3 py-2 rounded-lg border border-dashed border-neutral-300 text-neutral-500 hover:border-neutral-400 hover:text-black mb-1"
+        >
+          + 새 콘텐츠 등록 (대본 없이 제목만 먼저 등록하고 자료조사부터 시작)
+        </button>
+      )}
+      {units.length === 0 && <p className="text-xs text-neutral-300">아직 등록된 콘텐츠가 없어요 — 위에서 새로 등록하거나, 5·6번에서 소재를 확정하세요.</p>}
       {units.map((u) => (
         <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
           <button
@@ -2024,6 +2109,36 @@ function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                 ) : (
                   <p className="text-[11px] text-neutral-300">아직 자료조사 메모가 없어요 — &quot;수정&quot;을 눌러서 추가하세요.</p>
                 )}
+              </div>
+              <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 space-y-1.5">
+                <p className="text-[10px] font-black text-neutral-400">+ 자료조사 추가 (사실 하나 + 출처 하나씩)</p>
+                <textarea
+                  value={newFindingFact[u.id] || ''}
+                  onChange={(e) => setNewFindingFact((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                  rows={2}
+                  placeholder="새로 확인한 사실 하나"
+                  className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] leading-relaxed"
+                />
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={newFindingSource[u.id] || ''}
+                    onChange={(e) => setNewFindingSource((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                    placeholder="이 사실의 출처 URL"
+                    className="flex-1 text-[11px] border border-neutral-200 rounded-lg px-2 py-1.5"
+                  />
+                  <button
+                    onClick={() => {
+                      addFinding(u.id, newFindingFact[u.id] || '', newFindingSource[u.id] || '');
+                      setNewFindingFact((prev) => ({ ...prev, [u.id]: '' }));
+                      setNewFindingSource((prev) => ({ ...prev, [u.id]: '' }));
+                    }}
+                    disabled={!(newFindingFact[u.id] || '').trim()}
+                    className="shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                  >
+                    + 추가
+                  </button>
+                </div>
               </div>
               {u.sources && u.sources.length > 0 && (
                 <div className="space-y-1">
