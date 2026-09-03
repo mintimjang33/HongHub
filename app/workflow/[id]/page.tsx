@@ -1901,7 +1901,9 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
 
 // 5번(대본 작성) 단계 패널 — 소재 추천 → 제목 추천 → 대본, 3단계를 순서대로 진행한다.
 // 각 단계는 4번과 동일한 하이브리드 방식(유료 Gemini Pro / 무료 구독-복사)을 쓴다.
-function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+// hideMaterials: "7번 대본 작성" 탭에서 열렸을 때는 true — 소재 선정은 "5번 소재 선정" 탭의 몫이라
+// 1️⃣소재 추천 섹션은 숨기고, 이미 선택된 소재를 이어받아 제목/대본 작업과 완성 콘텐츠 목록만 보여준다.
+function Step5Panel({ site, onRefresh, hideMaterials }: { site: Site; onRefresh: () => void; hideMaterials?: boolean }) {
   const draft = site.script_draft || {};
   const [generating, setGenerating] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
   const [copying, setCopying] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
@@ -3161,7 +3163,8 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         </div>
       )}
 
-      {/* 1단계: 소재 추천 */}
+      {/* 1단계: 소재 추천 — "7번 대본 작성" 탭(hideMaterials)에서는 숨김. 소재 선정은 "5번" 탭의 몫. */}
+      {!hideMaterials && (
       <div className="bg-white border border-neutral-100 rounded-lg p-3 mb-2">
         <div className="text-[11px] font-black text-neutral-500 mb-2">1️⃣ 소재 추천</div>
         <GenerateButtons stage="materials" />
@@ -3239,6 +3242,16 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
           </button>
         </div>
       </div>
+      )}
+      {hideMaterials && draft.selectedMaterial && (
+        <div className="bg-white border border-neutral-100 rounded-lg p-3 mb-2">
+          <p className="text-[10px] font-black text-neutral-400 mb-1">선택된 소재 (5번 탭에서 선정됨)</p>
+          <p className="text-[11px] text-neutral-600 leading-relaxed">{draft.selectedMaterial}</p>
+        </div>
+      )}
+      {hideMaterials && !draft.selectedMaterial && (
+        <p className="text-[11px] text-neutral-400 mb-2">아직 선택된 소재가 없어요 — 먼저 &quot;5번 소재 선정&quot; 탭에서 소재를 고르세요.</p>
+      )}
 
       {/* 2단계: 제목 추천 — 소재를 고른 다음에만 진행 */}
       {draft.selectedMaterial && (
@@ -3832,7 +3845,8 @@ function FlowChart({
           {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
           {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
           {isAnalysisStep(active) && <AnalysisPanel site={site} onRefresh={onRefreshSite} />}
-          {(isMaterialSelectionStep(active) || isScriptStep(active)) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
+          {isMaterialSelectionStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
+          {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} hideMaterials />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
           {isSubtitleStep(active) && <SubtitlePanel site={site} onRefresh={onRefreshSite} />}
