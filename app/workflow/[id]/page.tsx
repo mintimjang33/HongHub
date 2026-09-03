@@ -1728,6 +1728,32 @@ const ANALYSIS_TABS = [
 ] as const;
 type AnalysisTabKey = (typeof ANALYSIS_TABS)[number]['key'];
 
+// 분석 결과(특히 썸네일 탭)에 이미지 URL을 그냥 글자로 적어두면 실제로 어떻게 생겼는지 확인이
+// 안 된다는 피드백 — URL을 텍스트째로 두지 않고 실제 썸네일 이미지로 렌더링해서 보여준다.
+const IMAGE_URL_RE = /https?:\/\/\S+\.(?:jpg|jpeg|png|webp|gif)(?:\?\S*)?/gi;
+function TextWithInlineImages({ text }: { text: string }) {
+  const parts = text.split(IMAGE_URL_RE);
+  const urls = text.match(IMAGE_URL_RE) || [];
+  return (
+    <div className="text-xs text-neutral-600 leading-relaxed">
+      {parts.map((part, i) => (
+        <span key={i}>
+          <span className="whitespace-pre-wrap">{part}</span>
+          {urls[i] && (
+            <a href={urls[i]} target="_blank" rel="noopener noreferrer" className="inline-block align-middle mx-1 my-1">
+              <img
+                src={urls[i]}
+                alt="썸네일 예시"
+                className="inline-block h-24 w-auto rounded-lg border border-neutral-200 align-middle hover:border-blue-400"
+              />
+            </a>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // 2·3번에서 모은 소재를 웹앱이 유료 API로 직접 분석하지 않는다 — Claude(구독)나 Gemini한테
 // 채팅으로 "OO 파이프라인 패턴 분석해줘"라고 요청하면, save_pipeline_analysis MCP 툴로
 // 여기(hub_sites.analysis_result)에 저장되고, 이 패널은 그 저장된 결과를 읽어서 탭으로 보여주기만 한다.
@@ -1855,7 +1881,7 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
       </div>
 
       {result?.[tab] ? (
-        <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{result[tab]}</p>
+        <TextWithInlineImages text={result[tab] as string} />
       ) : (
         <p className="text-xs text-neutral-300">
           아직 &quot;{ANALYSIS_TABS.find((t) => t.key === tab)?.label}&quot; 분석 결과가 없어요 — 위에서 체크하고 분석을 실행해보세요.
