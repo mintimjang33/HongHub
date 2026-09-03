@@ -545,7 +545,7 @@ function SceneEditorList({
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
 function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
-  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step) || isAnalysisStep(step) || isScriptStep(step)) return null;
+  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step) || isAnalysisStep(step) || isScriptStep(step) || isMaterialSelectionStep(step)) return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
   return null;
 }
@@ -1223,7 +1223,9 @@ function MaterialPanel({ siteName }: { siteName: string }) {
 }
 
 function isMaterialStep(step: Step): boolean {
-  return /소재/.test(`${step.name} ${step.desc}`);
+  // "5.소재 선정" 단계에도 "소재"가 들어있어서 bare하게 매칭하면 이 단계에도 잘못 걸린다
+  // — 2번(채널별 소재 수집)만 매칭하도록 "수집"이 같이 나오는 경우로 좁힌다.
+  return /소재.*수집|수집.*소재/.test(`${step.name} ${step.desc}`);
 }
 
 function isTranscriptStep(step: Step): boolean {
@@ -1704,6 +1706,12 @@ function isScriptStep(step: Step): boolean {
   return /대본\s*작성/.test(step.name);
 }
 
+// "5.소재 선정" 단계 — 소재/제목/대본 위저드(Step5Panel)의 1단계(소재 목록)가 여기 속한다.
+// exact match로 좁혀서 "소재 선정" 외의 다른 단계 이름에 실수로 걸리지 않게 한다.
+function isMaterialSelectionStep(step: Step): boolean {
+  return step.name.trim() === '소재 선정';
+}
+
 function isImageVideoStep(step: Step): boolean {
   return /이미지/.test(step.name) && /영상/.test(step.name);
 }
@@ -1942,6 +1950,10 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
   const [unitUpgradePasteOpenId, setUnitUpgradePasteOpenId] = useState<string | null>(null);
   const [unitUpgradePasteText, setUnitUpgradePasteText] = useState('');
   const units = draft.units || [];
+  // 소재(아이디어) 목록을 AI 추천/붙여넣기 말고 직접 추가·수정·삭제도 할 수 있게 하는 상태.
+  const [newMaterialText, setNewMaterialText] = useState('');
+  const [editingMaterialIdx, setEditingMaterialIdx] = useState<number | null>(null);
+  const [editingMaterialText, setEditingMaterialText] = useState('');
 
   useEffect(() => {
     setScriptDraftText(draft.script || '');
@@ -2060,6 +2072,46 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ siteId: site.id, selectedMaterial: m }),
+    });
+    onRefresh();
+  }
+
+  // 소재(아이디어)를 AI 추천/붙여넣기 없이 직접 추가·수정·삭제 — 나중에 적용할 수 있게 미리 등록만 해두는 용도.
+  async function addMaterial() {
+    const text = newMaterialText.trim();
+    if (!text) return;
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, materials: [...(draft.materials || []), text] }),
+    });
+    setNewMaterialText('');
+    onRefresh();
+  }
+
+  async function saveEditedMaterial(idx: number) {
+    const text = editingMaterialText.trim();
+    if (!text) return;
+    const next = [...(draft.materials || [])];
+    const wasSelected = draft.selectedMaterial === next[idx];
+    next[idx] = text;
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, materials: next, ...(wasSelected ? { selectedMaterial: text } : {}) }),
+    });
+    setEditingMaterialIdx(null);
+    onRefresh();
+  }
+
+  async function deleteMaterial(idx: number) {
+    const target = (draft.materials || [])[idx];
+    const next = (draft.materials || []).filter((_, i) => i !== idx);
+    const wasSelected = draft.selectedMaterial === target;
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, materials: next, ...(wasSelected ? { selectedMaterial: null } : {}) }),
     });
     onRefresh();
   }
@@ -3115,22 +3167,77 @@ function Step5Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
         <GenerateButtons stage="materials" />
         <PasteBox stage="materials" />
         {draft.materials && draft.materials.length > 0 ? (
-          <div className="space-y-1">
-            {draft.materials.map((m, idx) => (
-              <label
-                key={idx}
-                className={`flex items-start gap-2 text-[11px] rounded-lg px-2.5 py-2 cursor-pointer border ${
-                  draft.selectedMaterial === m ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-neutral-100 hover:border-neutral-300'
-                }`}
-              >
-                <input type="radio" checked={draft.selectedMaterial === m} onChange={() => selectMaterial(m)} className="mt-0.5" />
-                <span className="leading-relaxed">{m}</span>
-              </label>
-            ))}
+          <div className="space-y-1 mb-2">
+            {draft.materials.map((m, idx) =>
+              editingMaterialIdx === idx ? (
+                <div key={idx} className="flex items-start gap-1.5 bg-white border border-blue-200 rounded-lg px-2.5 py-2">
+                  <textarea
+                    value={editingMaterialText}
+                    onChange={(e) => setEditingMaterialText(e.target.value)}
+                    rows={2}
+                    className="flex-1 text-[11px] leading-relaxed border border-neutral-200 rounded-lg px-2 py-1"
+                    autoFocus
+                  />
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <button onClick={() => saveEditedMaterial(idx)} className="text-[10px] font-black text-emerald-600 hover:underline">
+                      저장
+                    </button>
+                    <button onClick={() => setEditingMaterialIdx(null)} className="text-[10px] font-bold text-neutral-400 hover:text-black">
+                      취소
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  key={idx}
+                  className={`flex items-start gap-2 text-[11px] rounded-lg px-2.5 py-2 border ${
+                    draft.selectedMaterial === m ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-neutral-100 hover:border-neutral-300'
+                  }`}
+                >
+                  <label className="flex items-start gap-2 flex-1 min-w-0 cursor-pointer">
+                    <input type="radio" checked={draft.selectedMaterial === m} onChange={() => selectMaterial(m)} className="mt-0.5 shrink-0" />
+                    <span className="leading-relaxed">{m}</span>
+                  </label>
+                  <div className="flex gap-1.5 shrink-0">
+                    <button
+                      onClick={() => {
+                        setEditingMaterialIdx(idx);
+                        setEditingMaterialText(m);
+                      }}
+                      className="text-[10px] font-bold text-neutral-400 hover:text-black"
+                    >
+                      수정
+                    </button>
+                    <button onClick={() => deleteMaterial(idx)} className="text-[10px] font-black text-neutral-300 hover:text-red-500">
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              )
+            )}
           </div>
         ) : (
-          <p className="text-[11px] text-neutral-300">아직 추천받은 소재가 없어요.</p>
+          <p className="text-[11px] text-neutral-300 mb-2">아직 등록된 소재가 없어요.</p>
         )}
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={newMaterialText}
+            onChange={(e) => setNewMaterialText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') addMaterial();
+            }}
+            placeholder="아이디어 직접 추가 — 나중에 적용할 소재를 미리 등록해두세요"
+            className="flex-1 text-[11px] border border-neutral-200 rounded-lg px-2.5 py-1.5"
+          />
+          <button
+            onClick={addMaterial}
+            disabled={!newMaterialText.trim()}
+            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+          >
+            + 추가
+          </button>
+        </div>
       </div>
 
       {/* 2단계: 제목 추천 — 소재를 고른 다음에만 진행 */}
@@ -3725,7 +3832,7 @@ function FlowChart({
           {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
           {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
           {isAnalysisStep(active) && <AnalysisPanel site={site} onRefresh={onRefreshSite} />}
-          {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
+          {(isMaterialSelectionStep(active) || isScriptStep(active)) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
           {isSubtitleStep(active) && <SubtitlePanel site={site} onRefresh={onRefreshSite} />}
