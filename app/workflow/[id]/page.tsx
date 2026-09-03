@@ -51,6 +51,7 @@ type ContentUnit = {
   // 영향을 주는 단계라 후보 버전을 여러 개 적어보고 제일 강한 걸 고른 기록을 남긴다.
   hookOptions?: string[];
   selectedHook?: string;
+  hookReason?: string;
   // 2026-08-31 추가 — 6번(이미지/영상 생성) 단계의 장면별 CLEAN/INFO/영상 프롬프트 전문. 파이프라인
   // 전체가 공유하는 workflow_content가 아니라 이 유닛(에피소드) 하나에 귀속시켜서, 소재가 바뀌어도
   // "이게 어느 콘텐츠 프롬프트인지" 헷갈리지 않게 한다.
@@ -565,7 +566,8 @@ function stepLink(step: Step): { href: string; label: string } | null {
     isResearchStep(step) ||
     isContentRegisterStep(step) ||
     isStrategyStep(step) ||
-    isHookStep(step)
+    isHookStep(step) ||
+    isPlanningDocStep(step)
   )
     return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
@@ -1749,6 +1751,12 @@ function isHookStep(step: Step): boolean {
   return /훅/.test(step.name) && /인트로/.test(step.name);
 }
 
+// "10.기획서 작성" 단계 — 2026-09-03 신설. 8·9번(전략/훅)이 확정된 뒤, 5·7·8·9번을 종합해 이
+// 콘텐츠의 방향을 한 문서로 정리하는 단계. "기획서"라는 단어가 들어있으면 매칭한다.
+function isPlanningDocStep(step: Step): boolean {
+  return /기획서/.test(step.name);
+}
+
 // "5.소재 선정" 단계 — 소재/제목/대본 위저드(Step5Panel)의 1단계(소재 목록)가 여기 속한다.
 // exact match로 좁혀서 "소재 선정" 외의 다른 단계 이름에 실수로 걸리지 않게 한다.
 function isMaterialSelectionStep(step: Step): boolean {
@@ -2650,6 +2658,10 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   // 후보 문구 자체를 고치는 용도 — key는 "unitId:idx" — (지우고 다시 쓰지 않고) 인라인으로 바로 수정할 수 있게.
   const [editingHookKey, setEditingHookKey] = useState<string | null>(null);
   const [editHookDraft, setEditHookDraft] = useState('');
+  // 2026-09-03 추가 — 왜 이 훅을 골랐는지(StrategyPanel의 "선택 이유"와 동일한 목적). 이전엔 이
+  // 필드를 저장할 UI가 없어서 DB에 직접 써넣은 값이 있어도 화면에서 보거나 고칠 수 없었다.
+  const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
+  const [reasonDraft, setReasonDraft] = useState('');
   const [saving, setSaving] = useState(false);
 
   async function saveUnits(next: ContentUnit[]) {
@@ -2695,6 +2707,10 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
 
   async function selectHook(id: string, text: string) {
     await saveUnits(units.map((u) => (u.id === id ? { ...u, selectedHook: u.selectedHook === text ? undefined : text } : u)));
+  }
+
+  async function saveReason(id: string, reason: string) {
+    await saveUnits(units.map((u) => (u.id === id ? { ...u, hookReason: reason } : u)));
   }
 
   return (
@@ -2804,10 +2820,136 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
                   </button>
                 </div>
               </div>
+              {u.selectedHook && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-black text-neutral-400">선택 이유</p>
+                    {editingReasonId !== u.id && (
+                      <button
+                        onClick={() => {
+                          setEditingReasonId(u.id);
+                          setReasonDraft(u.hookReason || '');
+                        }}
+                        className="shrink-0 text-xs font-bold text-blue-600 hover:underline"
+                      >
+                        수정
+                      </button>
+                    )}
+                  </div>
+                  {editingReasonId === u.id ? (
+                    <div className="space-y-1.5">
+                      <textarea
+                        value={reasonDraft}
+                        onChange={(e) => setReasonDraft(e.target.value)}
+                        rows={4}
+                        placeholder="왜 이 훅을 골랐는지 — 대본을 근거로 쓰지 말고 7번(사실)·4번(오프닝공식)·이 콘텐츠의 반전 약속만으로"
+                        className="w-full border border-neutral-200 rounded-lg px-2.5 py-2 text-sm leading-relaxed"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => setEditingReasonId(null)} className="text-xs font-bold text-neutral-400 hover:text-black">
+                          취소
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await saveReason(u.id, reasonDraft);
+                            setEditingReasonId(null);
+                          }}
+                          disabled={saving}
+                          className="text-xs font-black text-emerald-600 hover:underline"
+                        >
+                          저장
+                        </button>
+                      </div>
+                    </div>
+                  ) : u.hookReason ? (
+                    <p className="text-[15px] text-neutral-600 whitespace-pre-wrap leading-relaxed">{u.hookReason}</p>
+                  ) : (
+                    <p className="text-sm text-neutral-300">아직 이유가 없어요 — &quot;수정&quot;을 눌러서 추가하세요.</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+// 10번(기획서 작성) 단계 전용 패널 — 2026-09-03 신설. 8·9번(전략/훅)이 확정된 뒤, 5(소재)+7(자료조사)
+// +8(전략)+9(훅)을 한 화면에 모아 보여주는 순수 종합 뷰. 별도 필드에 저장하지 않고 항상 그 순간의
+// 8·9번 값을 그대로 읽어서 보여준다 — 복사본을 따로 저장하면 8·9번이 나중에 바뀌었을 때 기획서만
+// 낡은 채로 남는 문제가 생기기 때문(plan_content 문서 작성 규칙과 같은 이유). 이 단계 자체는 "새 판단을
+// 하지 않는다" 규칙이라 여기서 뭔가를 고치는 대신, 비어있는 항목이 있으면 어느 단계로 가서 채워야
+// 하는지만 안내한다.
+function PlanningDocPanel({ site }: { site: Site; onRefresh: () => void }) {
+  const draft = site.script_draft || {};
+  const units = draft.units || [];
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  return (
+    <div className="space-y-2">
+      {units.length === 0 && <p className="text-sm text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
+      {units.map((u) => {
+        const factCount = (u.factCheck || '').split(/\n(?=①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|■)/).filter((s) => s.trim()).length;
+        const ready = Boolean(u.selectedStrategy && u.selectedHook);
+        return (
+          <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+            <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
+              <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
+              <span className="flex-1 min-w-0 text-sm font-bold truncate">{u.title}</span>
+              {ready ? (
+                <span className="shrink-0 text-xs font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 기획서 완성</span>
+              ) : (
+                <span className="shrink-0 text-xs font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">8·9번 대기</span>
+              )}
+            </button>
+            {openId === u.id && (
+              <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-3">
+                <div>
+                  <p className="text-xs font-black text-neutral-400 mb-1">5. 소재</p>
+                  <p className="text-sm text-neutral-700 whitespace-pre-wrap leading-relaxed">{u.material || '(없음)'}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-black text-neutral-400 mb-1">7. 자료조사</p>
+                  <p className="text-sm text-neutral-700">
+                    {u.factCheck ? `사실 약 ${factCount}개 확보됨` : '아직 없음 — 7번(자료조사)에서 먼저 채우세요.'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-black text-neutral-400 mb-1">8. 전략/컨셉</p>
+                  {u.selectedStrategy ? (
+                    <>
+                      <p className="text-sm font-bold text-neutral-800 whitespace-pre-wrap leading-relaxed">{u.selectedStrategy}</p>
+                      {u.strategyReason && (
+                        <p className="text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed mt-1">{u.strategyReason}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-neutral-300">아직 확정 안 됨 — 8번(전략/컨셉 확정)에서 먼저 고르세요.</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs font-black text-neutral-400 mb-1">9. 훅/인트로</p>
+                  {u.selectedHook ? (
+                    <>
+                      <p className="text-sm font-bold text-neutral-800 whitespace-pre-wrap leading-relaxed">{u.selectedHook}</p>
+                      {u.hookReason && <p className="text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed mt-1">{u.hookReason}</p>}
+                    </>
+                  ) : (
+                    <p className="text-sm text-neutral-300">아직 확정 안 됨 — 9번(훅/인트로 설계)에서 먼저 고르세요.</p>
+                  )}
+                </div>
+                {ready && (
+                  <p className="text-xs text-emerald-600 font-bold border-t border-black/5 pt-2">
+                    ✅ 8·9번이 모두 확정됐어요 — 이 내용을 근거로 11번(대본 작성)의 초안을 쓰면 됩니다.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -4781,6 +4923,7 @@ function FlowChart({
           {isResearchStep(active) && <ResearchPanel site={site} onRefresh={onRefreshSite} />}
           {isStrategyStep(active) && <StrategyPanel site={site} onRefresh={onRefreshSite} />}
           {isHookStep(active) && <HookPanel site={site} onRefresh={onRefreshSite} />}
+          {isPlanningDocStep(active) && <PlanningDocPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} hideMaterials />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
