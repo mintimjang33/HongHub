@@ -545,7 +545,17 @@ function SceneEditorList({
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
 function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
-  if (isChannelStep(step) || isMaterialStep(step) || isTranscriptStep(step) || isAnalysisStep(step) || isScriptStep(step) || isMaterialSelectionStep(step) || isResearchStep(step)) return null;
+  if (
+    isChannelStep(step) ||
+    isMaterialStep(step) ||
+    isTranscriptStep(step) ||
+    isAnalysisStep(step) ||
+    isScriptStep(step) ||
+    isMaterialSelectionStep(step) ||
+    isResearchStep(step) ||
+    isContentRegisterStep(step)
+  )
+    return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
   return null;
 }
@@ -1711,6 +1721,11 @@ function isResearchStep(step: Step): boolean {
   return step.name.trim() === '자료조사';
 }
 
+// "6.콘텐츠 등록" 단계 — exact match.
+function isContentRegisterStep(step: Step): boolean {
+  return step.name.trim() === '콘텐츠 등록';
+}
+
 // "5.소재 선정" 단계 — 소재/제목/대본 위저드(Step5Panel)의 1단계(소재 목록)가 여기 속한다.
 // exact match로 좁혀서 "소재 선정" 외의 다른 단계 이름에 실수로 걸리지 않게 한다.
 function isMaterialSelectionStep(step: Step): boolean {
@@ -1900,6 +1915,169 @@ function AnalysisPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
           아직 &quot;{ANALYSIS_TABS.find((t) => t.key === tab)?.label}&quot; 분석 결과가 없어요 — 위에서 체크하고 분석을 실행해보세요.
         </p>
       )}
+    </div>
+  );
+}
+
+// 6번(콘텐츠 등록) 단계 전용 패널 — 유닛의 제목/소재만 등록·수정·삭제한다.
+// 대본은 8번(Step5Panel), 자료조사는 7번(ResearchPanel)의 몫이라 여기서는 건드리지 않는다.
+function ContentRegisterPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const draft = site.script_draft || {};
+  const units = draft.units || [];
+  const [showNewForm, setShowNewForm] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newMaterial, setNewMaterial] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editMaterial, setEditMaterial] = useState('');
+  const [savingEditId, setSavingEditId] = useState<string | null>(null);
+
+  async function addUnit(title: string, material: string) {
+    if (!title.trim()) return;
+    setAdding(true);
+    try {
+      const unit: ContentUnit = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        material: material.trim() || title.trim(),
+        title: title.trim(),
+        script: '',
+        category: draft.category || 'trivia',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      };
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: [...units, unit] }),
+      });
+      setNewTitle('');
+      setNewMaterial('');
+      setShowNewForm(false);
+      onRefresh();
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function saveEdit(id: string) {
+    setSavingEditId(id);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId: site.id,
+          units: units.map((u) => (u.id === id ? { ...u, title: editTitle.trim() || u.title, material: editMaterial.trim() || u.material } : u)),
+        }),
+      });
+      setEditingId(null);
+      onRefresh();
+    } finally {
+      setSavingEditId(null);
+    }
+  }
+
+  async function deleteUnit(id: string) {
+    if (!confirm('이 콘텐츠를 삭제할까요? (대본·자료조사 내용도 같이 지워져요)')) return;
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, units: units.filter((u) => u.id !== id) }),
+    });
+    onRefresh();
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {showNewForm ? (
+        <div className="bg-white border border-neutral-200 rounded-lg p-3 mb-1 space-y-2">
+          <input
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="콘텐츠 제목 *"
+            className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs"
+          />
+          <input
+            value={newMaterial}
+            onChange={(e) => setNewMaterial(e.target.value)}
+            placeholder="소재 설명 (비우면 제목과 동일하게 저장)"
+            className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs"
+          />
+          <div className="flex justify-end gap-1.5">
+            <button onClick={() => setShowNewForm(false)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+              취소
+            </button>
+            <button
+              onClick={() => addUnit(newTitle, newMaterial)}
+              disabled={adding || !newTitle.trim()}
+              className="text-[11px] font-black px-4 py-2 rounded-lg bg-black text-white disabled:opacity-40"
+            >
+              {adding ? '등록 중...' : '등록'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setShowNewForm(true)}
+          className="w-full text-[11px] font-black px-3 py-2 rounded-lg border border-dashed border-neutral-300 text-neutral-500 hover:border-neutral-400 hover:text-black mb-1"
+        >
+          + 새 콘텐츠 등록
+        </button>
+      )}
+      {units.length === 0 && <p className="text-xs text-neutral-300">아직 등록된 콘텐츠가 없어요 — 5번에서 소재를 체크하면 여기로 자동 이동돼요.</p>}
+      {units.map((u) => (
+        <div key={u.id} className="bg-white border border-neutral-100 rounded-lg px-3 py-2">
+          {editingId === u.id ? (
+            <div className="space-y-1.5">
+              <input
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                placeholder="제목"
+              />
+              <input
+                value={editMaterial}
+                onChange={(e) => setEditMaterial(e.target.value)}
+                className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                placeholder="소재"
+              />
+              <div className="flex justify-end gap-1.5">
+                <button onClick={() => setEditingId(null)} className="text-[10px] font-bold text-neutral-400 hover:text-black">
+                  취소
+                </button>
+                <button
+                  onClick={() => saveEdit(u.id)}
+                  disabled={savingEditId === u.id}
+                  className="text-[10px] font-black text-emerald-600 hover:underline"
+                >
+                  저장
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-bold truncate">{u.title}</p>
+                <p className="text-[10px] text-neutral-400 truncate">{u.material}</p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingId(u.id);
+                  setEditTitle(u.title);
+                  setEditMaterial(u.material);
+                }}
+                className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
+              >
+                수정
+              </button>
+              <button onClick={() => deleteUnit(u.id)} className="shrink-0 text-[10px] font-black text-neutral-300 hover:text-red-500" title="삭제">
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -2191,7 +2369,18 @@ function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
 // 각 단계는 4번과 동일한 하이브리드 방식(유료 Gemini Pro / 무료 구독-복사)을 쓴다.
 // hideMaterials: "7번 대본 작성" 탭에서 열렸을 때는 true — 소재 선정은 "5번 소재 선정" 탭의 몫이라
 // 1️⃣소재 추천 섹션은 숨기고, 이미 선택된 소재를 이어받아 제목/대본 작업과 완성 콘텐츠 목록만 보여준다.
-function Step5Panel({ site, onRefresh, hideMaterials }: { site: Site; onRefresh: () => void; hideMaterials?: boolean }) {
+function Step5Panel({
+  site,
+  onRefresh,
+  hideMaterials,
+  onMaterialSelected,
+}: {
+  site: Site;
+  onRefresh: () => void;
+  hideMaterials?: boolean;
+  // 소재를 체크하는 순간 "6번 콘텐츠 등록" 탭으로 자동 이동시키는 콜백(5번 탭에서만 넘겨줌).
+  onMaterialSelected?: () => void;
+}) {
   const draft = site.script_draft || {};
   const [generating, setGenerating] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
   const [copying, setCopying] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
@@ -2368,6 +2557,7 @@ function Step5Panel({ site, onRefresh, hideMaterials }: { site: Site; onRefresh:
       body: JSON.stringify({ siteId: site.id, selectedMaterial: m }),
     });
     onRefresh();
+    onMaterialSelected?.();
   }
 
   // 소재(아이디어)를 AI 추천/붙여넣기 없이 직접 추가·수정·삭제 — 나중에 적용할 수 있게 미리 등록만 해두는 용도.
@@ -4252,7 +4442,17 @@ function FlowChart({
           {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
           {isTranscriptStep(active) && <TranscriptPanel siteName={siteName} />}
           {isAnalysisStep(active) && <AnalysisPanel site={site} onRefresh={onRefreshSite} />}
-          {isMaterialSelectionStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} />}
+          {isMaterialSelectionStep(active) && (
+            <Step5Panel
+              site={site}
+              onRefresh={onRefreshSite}
+              onMaterialSelected={() => {
+                const idx = steps.findIndex((s) => isContentRegisterStep(s));
+                if (idx >= 0) onSelect(idx);
+              }}
+            />
+          )}
+          {isContentRegisterStep(active) && <ContentRegisterPanel site={site} onRefresh={onRefreshSite} />}
           {isResearchStep(active) && <ResearchPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} hideMaterials />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
