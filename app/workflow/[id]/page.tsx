@@ -3362,7 +3362,7 @@ function Step5Panel({
                           className="shrink-0 text-[10px] font-bold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5"
                           title={u.factCheck}
                         >
-                          ✅ 제미나이 크로스체크 완료
+                          📎 자료조사 메모 있음
                         </span>
                       )}
                       {u.review?.score !== undefined && (
