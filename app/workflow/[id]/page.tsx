@@ -3572,12 +3572,19 @@ function Step5Panel({
     }
   }
 
-  async function deleteUnit(id: string) {
-    if (!confirm('이 완성 콘텐츠를 삭제할까요?')) return;
+  // 2026-09-04 신규 — 이전엔 이 패널(11번 대본)의 삭제 버튼이 유닛 전체를 지우는 deleteUnit()을 그대로 써서,
+  // "대본만 지우려던" 클릭이 유닛 전체(소재·자료조사·전략·훅·기획서까지)를 날려버리는 버그가 있었음(사용자 실사고로 발견).
+  // 유닛 전체 삭제는 6번(콘텐츠 등록) 패널에서만 하도록 하고, 이 패널에선 대본(script)·검토결과(review)·
+  // 승인상태(status)만 초기화하고 나머지 필드는 그대로 둔다.
+  async function clearScript(id: string) {
+    if (!confirm('이 콘텐츠의 대본만 지울까요? (소재·자료조사·전략·훅·기획서는 그대로 남아요)')) return;
     await fetch('/api/script-draft', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.filter((u) => u.id !== id) }),
+      body: JSON.stringify({
+        siteId: site.id,
+        units: units.map((u) => (u.id === id ? { ...u, script: '', status: 'pending' as const, review: undefined } : u)),
+      }),
     });
     onRefresh();
   }
@@ -4024,7 +4031,7 @@ function Step5Panel({
                       )}
                     </button>
                     <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full ${statusTag.cls}`}>{statusTag.label}</span>
-                    <button onClick={() => deleteUnit(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="삭제">
+                    <button onClick={() => clearScript(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="대본만 삭제 (소재·자료조사·전략·훅·기획서는 유지)">
                       ✕
                     </button>
                   </div>
