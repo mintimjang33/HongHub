@@ -2304,15 +2304,18 @@ function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                 <div className="flex items-center justify-between mb-0.5">
                   <p className="text-[10px] font-black text-neutral-400">자료조사 메모 — 사실은 반드시 출처와 함께 기록</p>
                   {editingId !== u.id && (
-                    <button
-                      onClick={() => {
-                        setEditingId(u.id);
-                        setFactCheckDraft(u.factCheck || '');
-                      }}
-                      className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
-                    >
-                      수정
-                    </button>
+                    <div className="shrink-0 flex items-center gap-1.5">
+                      {u.factCheck && <CopyButton text={u.factCheck} />}
+                      <button
+                        onClick={() => {
+                          setEditingId(u.id);
+                          setFactCheckDraft(u.factCheck || '');
+                        }}
+                        className="text-[10px] font-bold text-blue-600 hover:underline"
+                      >
+                        수정
+                      </button>
+                    </div>
                   )}
                 </div>
                 {editingId === u.id ? (
@@ -2553,6 +2556,7 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                       ) : (
                         <>
                           <p className="flex-1 min-w-0 text-sm whitespace-pre-wrap leading-relaxed">{opt}</p>
+                          <CopyButton text={opt} />
                           <button
                             onClick={() => selectOption(u.id, opt)}
                             disabled={saving}
@@ -2605,15 +2609,18 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-xs font-black text-neutral-400">선택 이유</p>
                     {editingReasonId !== u.id && (
-                      <button
-                        onClick={() => {
-                          setEditingReasonId(u.id);
-                          setReasonDraft(u.strategyReason || '');
-                        }}
-                        className="shrink-0 text-xs font-bold text-blue-600 hover:underline"
-                      >
-                        수정
-                      </button>
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        {u.strategyReason && <CopyButton text={u.strategyReason} />}
+                        <button
+                          onClick={() => {
+                            setEditingReasonId(u.id);
+                            setReasonDraft(u.strategyReason || '');
+                          }}
+                          className="text-xs font-bold text-blue-600 hover:underline"
+                        >
+                          수정
+                        </button>
+                      </div>
                     )}
                   </div>
                   {editingReasonId === u.id ? (
@@ -2781,6 +2788,7 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
                       ) : (
                         <>
                           <p className="flex-1 min-w-0 text-sm whitespace-pre-wrap leading-relaxed">{opt}</p>
+                          <CopyButton text={opt} />
                           <button
                             onClick={() => selectHook(u.id, opt)}
                             disabled={saving}
@@ -2833,15 +2841,18 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-xs font-black text-neutral-400">선택 이유</p>
                     {editingReasonId !== u.id && (
-                      <button
-                        onClick={() => {
-                          setEditingReasonId(u.id);
-                          setReasonDraft(u.hookReason || '');
-                        }}
-                        className="shrink-0 text-xs font-bold text-blue-600 hover:underline"
-                      >
-                        수정
-                      </button>
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        {u.hookReason && <CopyButton text={u.hookReason} />}
+                        <button
+                          onClick={() => {
+                            setEditingReasonId(u.id);
+                            setReasonDraft(u.hookReason || '');
+                          }}
+                          className="text-xs font-bold text-blue-600 hover:underline"
+                        >
+                          수정
+                        </button>
+                      </div>
                     )}
                   </div>
                   {editingReasonId === u.id ? (
@@ -2941,29 +2952,32 @@ function PlanningDocPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
               <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <p className="text-xs font-black text-neutral-400">📄 기획서 — 이 콘텐츠가 조회수 잘 나오게 하는 전략</p>
+                    <p className="text-xs font-black text-neutral-400">📄 기획서 — 이 콘텐츠 조회수 잘 나오게 만드는 실행 지침서</p>
                     {editingDocId !== u.id && (
-                      <button
-                        onClick={() => {
-                          setEditingDocId(u.id);
-                          setDocDraft(u.planningDoc || '');
-                        }}
-                        className="shrink-0 text-xs font-bold text-blue-600 hover:underline"
-                      >
-                        {docWritten ? '수정' : '작성'}
-                      </button>
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        {docWritten && <CopyButton text={u.planningDoc || ''} />}
+                        <button
+                          onClick={() => {
+                            setEditingDocId(u.id);
+                            setDocDraft(u.planningDoc || '');
+                          }}
+                          className="text-xs font-bold text-blue-600 hover:underline"
+                        >
+                          {docWritten ? '수정' : '작성'}
+                        </button>
+                      </div>
                     )}
                   </div>
                   {editingDocId === u.id ? (
                     <div className="space-y-1.5">
                       <p className="text-[11px] text-amber-600 bg-amber-50 rounded-lg px-2 py-1.5 leading-relaxed">
-                        ⚠️ 이건 결정 사항 요약이 아니라 <b>조회수 전략</b>입니다 — "왜 이렇게 하면 더 잘 터질지"를 쓰세요. 아래 참고자료(5·7·8·9번)만 근거로 새로 쓰고, 11번에 이미 대본이 있어도 그걸 보고 짜맞추면 안 됩니다.
+                        ⚠️ 이건 "왜 잘 나오는가" 논증문이 아니라 <b>실행 지침서</b>입니다 — 제목 후보·오프닝 초 단위 구성·본문 리듬·댓글유도 위치·길이를 구체적으로 지시하고, <b>위험요소·보완점도 최소 2개 이상</b> 반드시 쓰세요(자기 칭찬 금지). 아래 참고자료(5·7·8·9번)만 근거로 새로 쓰고, 11번에 이미 대본이 있어도 그걸 보고 짜맞추면 안 됩니다.
                       </p>
                       <textarea
                         value={docDraft}
                         onChange={(e) => setDocDraft(e.target.value)}
                         rows={10}
-                        placeholder="왜 이 조합(타겟·반전·훅·구조)이면 조회수가 잘 나올지를 전략적으로 쓰세요 — 예: 이 타겟층은 ~을 원한다 / 4번 분석의 OO 패턴과 이렇게 맞아떨어져서 끌린다 / 이 훅이 이탈을 막고 끝까지 보게 만드는 이유는 ~다"
+                        placeholder="제목 후보(실제 문장 2~3개) / 오프닝 초 단위 구성 / 본문 리듬(자료 인과관계로 새로 설계) / 댓글 유도 위치 / 길이 판단 / ⚠️위험요소·보완점 최소 2개"
                         className="w-full border border-neutral-200 rounded-lg px-2.5 py-2 text-sm leading-relaxed"
                       />
                       <div className="flex justify-end gap-2">
@@ -2986,7 +3000,7 @@ function PlanningDocPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
                     <p className="text-sm text-neutral-800 whitespace-pre-wrap leading-relaxed bg-neutral-50 rounded-lg p-3">{u.planningDoc}</p>
                   ) : (
                     <p className="text-sm text-neutral-300">
-                      아직 조회수 전략이 없어요 — {inputsReady ? '위 "작성" 버튼을 눌러 직접 쓰거나, 별도 에이전트로 작성하세요.' : '먼저 8·9번을 확정하세요.'}
+                      아직 실행 지침서가 없어요 — {inputsReady ? '위 "작성" 버튼을 눌러 직접 쓰거나, 대본을 안 보는 별도 에이전트로 작성하세요.' : '먼저 8·9번을 확정하세요.'}
                     </p>
                   )}
                 </div>
@@ -3289,20 +3303,7 @@ function Step5Panel({
     onRefresh();
   }
 
-  // 6번 장면 프롬프트를 이 콘텐츠 유닛에 저장 — Claude가 채팅으로 만들어준 프롬프트 전문을 그대로 붙여넣는 용도.
-  async function saveUnitScenePrompts(id: string, scenePrompts: string) {
-    setSaving(true);
-    try {
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, scenePrompts } : u)) }),
-      });
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
-  }
+  // 씬 프롬프트 저장은 12번 전용 Step6Panel에서 처리한다(2026-09-04, 여기 있던 중복 함수 제거).
 
   // Gemini/Claude가 사실확인하면서 출처를 붙여주면(신문사명, 링크 등) 여기 한 줄씩 저장해서
   // 나중에 "그거 어디서 봤냐"는 지적에 근거로 내밀 수 있게 한다.
@@ -4071,7 +4072,10 @@ function Step5Panel({
                         </div>
                       )}
                       <div>
-                        <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇰🇷 한국어 ({u.script.length}자)</p>
+                        <div className="flex items-center justify-between mb-0.5">
+                          <p className="text-[10px] font-black text-neutral-400">🇰🇷 한국어 ({u.script.length}자)</p>
+                          {u.script && <CopyButton text={u.script} />}
+                        </div>
                         <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
                       </div>
                       {u.scriptEn && (
@@ -4086,10 +4090,7 @@ function Step5Panel({
                           <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptJa}</p>
                         </div>
                       )}
-                      <div className="pt-2 border-t border-neutral-50">
-                        <p className="text-[10px] font-black text-neutral-400 mb-0.5">🎬 6번 이미지/영상 프롬프트 (이 콘텐츠 전용) — 장면별로 추가/수정</p>
-                        <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => saveUnitScenePrompts(u.id, text)} />
-                      </div>
+                      {/* 씬/이미지·영상 프롬프트 편집 UI는 12번 전용 Step6Panel에만 둔다 — 11번(대본)에 중복으로 있던 블록을 제거함(2026-09-04, 사용자 지적). */}
                       {/* 자료조사(factCheck/sources) 편집 UI는 7번 자료조사 전용 ResearchPanel에만 둔다 — 여기 8번(대본작성)에 중복으로 있던 블록을 제거함(2026-09-03). */}
 
                       {/* 제미나이와 비교→업그레이드 — "교체"가 아니라 원본+제미나이 버전을 합쳐서 최종본을 만든다. */}
