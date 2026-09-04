@@ -52,6 +52,14 @@ type ContentUnit = {
   hookOptions?: string[];
   selectedHook?: string;
   hookReason?: string;
+  // 2026-09-04 추가 — 10번(기획서 작성) 단계. "기획"은 "계획"(일정/절차 문서)과 다르다 — 5(소재)+
+  // 7(자료조사)+8(전략)+9(훅)을 근거로 "이 콘텐츠가 왜/어떻게 조회수가 더 잘 나올지"를 논증하는
+  // 조회수 전략 문서다. 처음엔 5·7·8·9 필드를 화면에 그대로 나열하는 대시보드로 잘못 구현했다가
+  // ("저게 기획서야? 그냥 필드 나열 아니야?" 지적), "10번의 핵심은 독립적으로 기획서(=조회수
+  // 전략)를 새로 쓰는 것"이라는 지적을 받고 이 필드를 추가함(2026-09-04). 11번(대본)이 이미
+  // 쓰여 있어도 그걸 보고 기획서를 짜맞추면 안 됨 — 9번과 같은 이유로, 오직 5·7·8·9만 근거로
+  // 독립적으로 작성해야 한다.
+  planningDoc?: string;
   // 2026-08-31 추가 — 6번(이미지/영상 생성) 단계의 장면별 CLEAN/INFO/영상 프롬프트 전문. 파이프라인
   // 전체가 공유하는 workflow_content가 아니라 이 유닛(에피소드) 하나에 귀속시켜서, 소재가 바뀌어도
   // "이게 어느 콘텐츠 프롬프트인지" 헷갈리지 않게 한다.
@@ -2876,75 +2884,151 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   );
 }
 
-// 10번(기획서 작성) 단계 전용 패널 — 2026-09-03 신설. 8·9번(전략/훅)이 확정된 뒤, 5(소재)+7(자료조사)
-// +8(전략)+9(훅)을 한 화면에 모아 보여주는 순수 종합 뷰. 별도 필드에 저장하지 않고 항상 그 순간의
-// 8·9번 값을 그대로 읽어서 보여준다 — 복사본을 따로 저장하면 8·9번이 나중에 바뀌었을 때 기획서만
-// 낡은 채로 남는 문제가 생기기 때문(plan_content 문서 작성 규칙과 같은 이유). 이 단계 자체는 "새 판단을
-// 하지 않는다" 규칙이라 여기서 뭔가를 고치는 대신, 비어있는 항목이 있으면 어느 단계로 가서 채워야
-// 하는지만 안내한다.
-function PlanningDocPanel({ site }: { site: Site; onRefresh: () => void }) {
+// 10번(기획서 작성) 단계 전용 패널. **"기획"은 "계획"과 다르다** — 계획(plan_content)은 파이프라인
+// 전체의 일정/절차 문서고, 기획(planningDoc)은 이 콘텐츠 하나가 조회수가 더 잘 나오도록 전략을
+// 짜는 것이다(2026-09-04, 사용자 지적). 처음엔 5·7·8·9번 값을 화면에 그대로 다시 보여주기만
+// 하는 대시보드로 잘못 만들었다가("저게 기획서야? 그냥 필드 나열 아니야?" 지적), 그 다음엔
+// "10단계의 핵심은 독립적으로 기획서를 새로 쓰는 것"이라는 지적으로 에디터를 추가했지만, 그
+// 에디터 문구도 여전히 "결정 사항을 종합해서 쓰라"는 요약 톤이었다 — "전략짜는 거라고" 지적을
+// 받고서야 placeholder/안내문을 "왜 이 조합이면 조회수가 잘 나올지"를 논증하게 바꿨다. 5·7·8·9번
+// 원본값은 "참고 자료"로만 접어두고, 진짜 기획서(planningDoc)는 그걸 근거로 사람이나 별도
+// 에이전트가 직접 조회수 전략을 한 편의 글로 써서 저장한다. **⚠️ 9번과 같은 이유의 독립성 규칙**:
+// 11번(대본)이 이미 쓰여 있는 콘텐츠라도, 그 대본을 훑어보고 기획서를 짜맞추면 안 된다 — 오직
+// 5(소재)·7(자료조사)·8(전략)·9(훅)만 근거로 새로 써야 한다.
+function PlanningDocPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const draft = site.script_draft || {};
   const units = draft.units || [];
   const [openId, setOpenId] = useState<string | null>(null);
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [docDraft, setDocDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function saveDoc(id: string, planningDoc: string) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, planningDoc } : u)) }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-2">
       {units.length === 0 && <p className="text-sm text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
       {units.map((u) => {
         const factCount = (u.factCheck || '').split(/\n(?=①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|■)/).filter((s) => s.trim()).length;
-        const ready = Boolean(u.selectedStrategy && u.selectedHook);
+        const inputsReady = Boolean(u.selectedStrategy && u.selectedHook);
+        const docWritten = Boolean(u.planningDoc && u.planningDoc.trim());
         return (
           <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
             <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
               <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
               <span className="flex-1 min-w-0 text-sm font-bold truncate">{u.title}</span>
-              {ready ? (
-                <span className="shrink-0 text-xs font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 기획서 완성</span>
+              {docWritten ? (
+                <span className="shrink-0 text-xs font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 기획서 작성됨</span>
+              ) : inputsReady ? (
+                <span className="shrink-0 text-xs font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">기획서 미작성</span>
               ) : (
-                <span className="shrink-0 text-xs font-bold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5">8·9번 대기</span>
+                <span className="shrink-0 text-xs font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">8·9번 대기</span>
               )}
             </button>
             {openId === u.id && (
               <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-3">
                 <div>
-                  <p className="text-xs font-black text-neutral-400 mb-1">5. 소재</p>
-                  <p className="text-sm text-neutral-700 whitespace-pre-wrap leading-relaxed">{u.material || '(없음)'}</p>
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-black text-neutral-400">📄 기획서 — 이 콘텐츠가 조회수 잘 나오게 하는 전략</p>
+                    {editingDocId !== u.id && (
+                      <button
+                        onClick={() => {
+                          setEditingDocId(u.id);
+                          setDocDraft(u.planningDoc || '');
+                        }}
+                        className="shrink-0 text-xs font-bold text-blue-600 hover:underline"
+                      >
+                        {docWritten ? '수정' : '작성'}
+                      </button>
+                    )}
+                  </div>
+                  {editingDocId === u.id ? (
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] text-amber-600 bg-amber-50 rounded-lg px-2 py-1.5 leading-relaxed">
+                        ⚠️ 이건 결정 사항 요약이 아니라 <b>조회수 전략</b>입니다 — "왜 이렇게 하면 더 잘 터질지"를 쓰세요. 아래 참고자료(5·7·8·9번)만 근거로 새로 쓰고, 11번에 이미 대본이 있어도 그걸 보고 짜맞추면 안 됩니다.
+                      </p>
+                      <textarea
+                        value={docDraft}
+                        onChange={(e) => setDocDraft(e.target.value)}
+                        rows={10}
+                        placeholder="왜 이 조합(타겟·반전·훅·구조)이면 조회수가 잘 나올지를 전략적으로 쓰세요 — 예: 이 타겟층은 ~을 원한다 / 4번 분석의 OO 패턴과 이렇게 맞아떨어져서 끌린다 / 이 훅이 이탈을 막고 끝까지 보게 만드는 이유는 ~다"
+                        className="w-full border border-neutral-200 rounded-lg px-2.5 py-2 text-sm leading-relaxed"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => setEditingDocId(null)} className="text-xs font-bold text-neutral-400 hover:text-black">
+                          취소
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await saveDoc(u.id, docDraft);
+                            setEditingDocId(null);
+                          }}
+                          disabled={saving}
+                          className="text-xs font-black text-emerald-600 hover:underline"
+                        >
+                          저장
+                        </button>
+                      </div>
+                    </div>
+                  ) : docWritten ? (
+                    <p className="text-sm text-neutral-800 whitespace-pre-wrap leading-relaxed bg-neutral-50 rounded-lg p-3">{u.planningDoc}</p>
+                  ) : (
+                    <p className="text-sm text-neutral-300">
+                      아직 조회수 전략이 없어요 — {inputsReady ? '위 "작성" 버튼을 눌러 직접 쓰거나, 별도 에이전트로 작성하세요.' : '먼저 8·9번을 확정하세요.'}
+                    </p>
+                  )}
                 </div>
-                <div>
-                  <p className="text-xs font-black text-neutral-400 mb-1">7. 자료조사</p>
-                  <p className="text-sm text-neutral-700">
-                    {u.factCheck ? `사실 약 ${factCount}개 확보됨` : '아직 없음 — 7번(자료조사)에서 먼저 채우세요.'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-black text-neutral-400 mb-1">8. 전략/컨셉</p>
-                  {u.selectedStrategy ? (
-                    <>
-                      <p className="text-sm font-bold text-neutral-800 whitespace-pre-wrap leading-relaxed">{u.selectedStrategy}</p>
-                      {u.strategyReason && (
-                        <p className="text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed mt-1">{u.strategyReason}</p>
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-neutral-400 font-bold">참고자료 (5·7·8·9번 원본값 — 기획서 쓸 때만 참고, 그대로 베끼지 말 것)</summary>
+                  <div className="space-y-2 mt-2">
+                    <div>
+                      <p className="text-xs font-black text-neutral-400 mb-1">5. 소재</p>
+                      <p className="text-sm text-neutral-700 whitespace-pre-wrap leading-relaxed">{u.material || '(없음)'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-neutral-400 mb-1">7. 자료조사</p>
+                      <p className="text-sm text-neutral-700">
+                        {u.factCheck ? `사실 약 ${factCount}개 확보됨` : '아직 없음 — 7번(자료조사)에서 먼저 채우세요.'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-neutral-400 mb-1">8. 전략/컨셉</p>
+                      {u.selectedStrategy ? (
+                        <>
+                          <p className="text-sm font-bold text-neutral-800 whitespace-pre-wrap leading-relaxed">{u.selectedStrategy}</p>
+                          {u.strategyReason && (
+                            <p className="text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed mt-1">{u.strategyReason}</p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-sm text-neutral-300">아직 확정 안 됨 — 8번(전략/컨셉 확정)에서 먼저 고르세요.</p>
                       )}
-                    </>
-                  ) : (
-                    <p className="text-sm text-neutral-300">아직 확정 안 됨 — 8번(전략/컨셉 확정)에서 먼저 고르세요.</p>
-                  )}
-                </div>
-                <div>
-                  <p className="text-xs font-black text-neutral-400 mb-1">9. 훅/인트로</p>
-                  {u.selectedHook ? (
-                    <>
-                      <p className="text-sm font-bold text-neutral-800 whitespace-pre-wrap leading-relaxed">{u.selectedHook}</p>
-                      {u.hookReason && <p className="text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed mt-1">{u.hookReason}</p>}
-                    </>
-                  ) : (
-                    <p className="text-sm text-neutral-300">아직 확정 안 됨 — 9번(훅/인트로 설계)에서 먼저 고르세요.</p>
-                  )}
-                </div>
-                {ready && (
-                  <p className="text-xs text-emerald-600 font-bold border-t border-black/5 pt-2">
-                    ✅ 8·9번이 모두 확정됐어요 — 이 내용을 근거로 11번(대본 작성)의 초안을 쓰면 됩니다.
-                  </p>
-                )}
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-neutral-400 mb-1">9. 훅/인트로</p>
+                      {u.selectedHook ? (
+                        <>
+                          <p className="text-sm font-bold text-neutral-800 whitespace-pre-wrap leading-relaxed">{u.selectedHook}</p>
+                          {u.hookReason && <p className="text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed mt-1">{u.hookReason}</p>}
+                        </>
+                      ) : (
+                        <p className="text-sm text-neutral-300">아직 확정 안 됨 — 9번(훅/인트로 설계)에서 먼저 고르세요.</p>
+                      )}
+                    </div>
+                  </div>
+                </details>
               </div>
             )}
           </div>
