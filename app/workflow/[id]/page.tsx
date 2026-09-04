@@ -4000,7 +4000,7 @@ function Step5Panel({
       )}
       {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
 
-      {units.length > 0 && (
+      {hideMaterials && units.length > 0 && (
         <div className="bg-emerald-50/40 border border-emerald-100 rounded-lg p-3 mb-2">
           <div className="text-[11px] font-black text-emerald-700 mb-2">✅ 완성된 콘텐츠 ({units.length}개)</div>
           <div className="space-y-1.5">
@@ -4966,6 +4966,12 @@ function FlowChart({
 
   return (
     <div className="mb-6 bg-white border border-neutral-200 rounded-xl p-5">
+      <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+        <p className="text-[11px] font-black text-amber-700 mb-1">🎬 PD(오케스트레이터)의 역할</p>
+        <p className="text-[11px] text-amber-700 leading-relaxed">
+          세부 작업을 직접 하지 않고 각 단계를 전문 스킬/도구에 위임한다. 산출물이 나왔다고 바로 &quot;완료&quot;로 표시하지 않는다 — 반드시 별도 에이전트(이 세션과 맥락을 공유하지 않는)를 spawn해서 그 산출물이 단계 목적을 실제로 달성했는지 판단시키고, PASS가 나올 때까지 반복해야 완료로 표시할 수 있다. 스스로 판단하고 완료 처리하는 건 원칙 위반.
+        </p>
+      </div>
       <div className="text-[11px] font-black text-neutral-400 mb-4">🔀 플로우차트 미리보기 — 단계를 클릭하면 오른쪽에 상세가 떠요</div>
       <div className="flex flex-col gap-5">
         <div className="w-full flex items-center overflow-x-auto pb-1">
