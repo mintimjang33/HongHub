@@ -75,6 +75,16 @@ type ContentUnit = {
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
+// 12번(채널 캐릭터 시스템 설계) 단계 전용 — 채널 전체에서 반복해서 쓰는 캐릭터를 등록해두는
+// 등장인물 소개(만화책 캐릭터 시트 개념) 목록. 특정 콘텐츠(unit)가 아니라 채널 전체에서 공유되는
+// 자산이라 ContentUnit이 아니라 ScriptDraft 최상위에 둔다.
+type Character = {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  imageUrl?: string;
+};
 type ScriptDraft = {
   category?: UnitCategory;
   materials?: string[];
@@ -89,6 +99,7 @@ type ScriptDraft = {
   sources?: string[];
   factCheck?: string;
   units?: ContentUnit[];
+  characters?: Character[];
   updated_at?: string;
 };
 type Site = {
@@ -575,7 +586,8 @@ function stepLink(step: Step): { href: string; label: string } | null {
     isContentRegisterStep(step) ||
     isStrategyStep(step) ||
     isHookStep(step) ||
-    isPlanningDocStep(step)
+    isPlanningDocStep(step) ||
+    isCharacterStep(step)
   )
     return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
@@ -1763,6 +1775,11 @@ function isHookStep(step: Step): boolean {
 // 콘텐츠의 방향을 한 문서로 정리하는 단계. "기획서"라는 단어가 들어있으면 매칭한다.
 function isPlanningDocStep(step: Step): boolean {
   return /기획서/.test(step.name);
+}
+
+// "12.채널 캐릭터 시스템 설계" 단계 — 2026-09-06 신설. "캐릭터"라는 단어가 들어있으면 매칭한다.
+function isCharacterStep(step: Step): boolean {
+  return /캐릭터/.test(step.name);
 }
 
 // "5.소재 선정" 단계 — 소재/제목/대본 위저드(Step5Panel)의 1단계(소재 목록)가 여기 속한다.
@@ -3052,6 +3069,208 @@ function PlanningDocPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
   );
 }
 
+type CharacterDraft = { id: string; name: string; role: string; description: string; imageUrl: string };
+const EMPTY_CHARACTER_DRAFT: CharacterDraft = { id: '', name: '', role: '', description: '', imageUrl: '' };
+
+function nextCharacterId(chars: CharacterDraft[]): string {
+  let max = 0;
+  for (const c of chars) {
+    const m = c.id.match(/(\d+)/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `C${String(max + 1).padStart(2, '0')}`;
+}
+
+// 캐릭터 하나를 추가/수정하는 폼 — SceneDraftForm과 같은 패턴(이미지는 uploadSceneMedia로 영구 저장).
+function CharacterDraftForm({
+  draft,
+  setDraft,
+  onCancel,
+  onSave,
+  saving,
+}: {
+  draft: CharacterDraft;
+  setDraft: (d: CharacterDraft) => void;
+  onCancel: () => void;
+  onSave: () => void | Promise<void>;
+  saving: boolean;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  async function handleFile(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setUploadError('');
+    try {
+      const url = await uploadSceneMedia(files[0]);
+      setDraft({ ...draft, imageUrl: url });
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 space-y-1.5">
+      <div className="flex gap-1.5">
+        <input
+          value={draft.name}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+          placeholder="이름 (예: 젠틀맨 루즈)"
+          className="flex-1 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+        />
+        <input
+          value={draft.role}
+          onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+          placeholder="역할 (예: 메인 화자 / 출연 캐릭터 / 실존 인물)"
+          className="flex-1 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+        />
+      </div>
+      <textarea
+        value={draft.description}
+        onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+        rows={4}
+        placeholder="외형/특징 설명 — Flow 프롬프트에 그대로 옮겨 쓸 수 있게 구체적으로"
+        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed"
+      />
+      <div className="border-t border-neutral-200 pt-1.5">
+        {draft.imageUrl && (
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <img src={draft.imageUrl} alt={draft.name} className="w-16 h-16 object-cover rounded-lg border border-neutral-200" />
+            <button onClick={() => setDraft({ ...draft, imageUrl: '' })} className="text-[10px] font-black text-neutral-400 hover:text-red-500">
+              ✕ 이미지 제거
+            </button>
+          </div>
+        )}
+        <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
+          {uploading ? '업로드 중...' : draft.imageUrl ? '이미지 교체' : '+ 캐릭터 시트 이미지 업로드'}
+          <input
+            type="file"
+            accept="image/*"
+            disabled={uploading}
+            onChange={(e) => {
+              handleFile(e.target.files);
+              e.target.value = '';
+            }}
+            className="hidden"
+          />
+        </label>
+        {uploadError && <p className="text-[10px] text-red-500 font-bold mt-1">{uploadError}</p>}
+      </div>
+      <div className="flex justify-end gap-1.5">
+        <button onClick={onCancel} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+          취소
+        </button>
+        <button
+          onClick={onSave}
+          disabled={saving || !draft.name.trim()}
+          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+        >
+          {saving ? '저장 중...' : '저장'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 12번(채널 캐릭터 시스템 설계) 단계 패널 — 만화책의 "등장인물 소개" 페이지처럼, 이 채널에서
+// 반복해서 쓰는 캐릭터(호스트 젠틀맨 루즈, 출연 캐릭터 등)를 등록/수정/삭제한다. 특정 콘텐츠가
+// 아니라 채널 전체 자산이라 site.script_draft.characters(최상위)에 저장하고, 13번(이미지/영상
+// 생성)에서 프롬프트를 짤 때 여기 설명을 그대로 참고한다.
+function CharacterPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const characters = site.script_draft?.characters || [];
+  const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 캐릭터 추가 중
+  const [draft, setDraft] = useState<CharacterDraft>(EMPTY_CHARACTER_DRAFT);
+  const [saving, setSaving] = useState(false);
+
+  function startEdit(idx: number) {
+    setEditingIndex(idx);
+    setDraft(characters[idx]);
+  }
+  function startAdd() {
+    setEditingIndex(-1);
+    setDraft({ ...EMPTY_CHARACTER_DRAFT, id: nextCharacterId(characters) });
+  }
+  function cancel() {
+    setEditingIndex(null);
+    setDraft(EMPTY_CHARACTER_DRAFT);
+  }
+  async function save(next: Character[]) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, characters: next }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function saveDraft() {
+    const next = editingIndex === -1 ? [...characters, draft] : characters.map((c, i) => (i === editingIndex ? draft : c));
+    await save(next);
+    setEditingIndex(null);
+    setDraft(EMPTY_CHARACTER_DRAFT);
+  }
+  async function removeCharacter(idx: number) {
+    if (!confirm(`"${characters[idx].name}" 캐릭터를 삭제할까요?`)) return;
+    await save(characters.filter((_, i) => i !== idx));
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-neutral-400 leading-relaxed">
+        만화책의 등장인물 소개 페이지처럼, 이 채널에 반복해서 나올 캐릭터를 여기 등록해두세요. 13번(이미지/영상 생성)에서
+        프롬프트를 짤 때 여기 설명을 그대로 참고합니다.
+      </p>
+      {characters.length === 0 && editingIndex === null && <p className="text-[11px] text-neutral-300">아직 등록된 캐릭터가 없어요.</p>}
+      {characters.map((c, idx) =>
+        editingIndex === idx ? (
+          <CharacterDraftForm key={c.id || idx} draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
+        ) : (
+          <div key={c.id || idx} className="flex items-start gap-2 bg-white border border-neutral-100 rounded-lg p-2">
+            {c.imageUrl ? (
+              <img src={c.imageUrl} alt={c.name} className="w-14 h-14 object-cover rounded-lg border border-neutral-200 shrink-0" />
+            ) : (
+              <div className="w-14 h-14 rounded-lg bg-neutral-50 border border-neutral-200 shrink-0 flex items-center justify-center text-neutral-300 text-[10px] text-center leading-tight">
+                이미지
+                <br />
+                없음
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-bold truncate">{c.name}</span>
+                {c.role && <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">{c.role}</span>}
+              </div>
+              {c.description && <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{c.description}</p>}
+            </div>
+            <div className="shrink-0 flex items-center gap-1.5">
+              <button onClick={() => startEdit(idx)} className="text-[11px] font-bold text-blue-600 hover:underline">
+                수정
+              </button>
+              <button onClick={() => removeCharacter(idx)} className="text-[11px] font-bold text-neutral-400 hover:text-red-500">
+                삭제
+              </button>
+            </div>
+          </div>
+        )
+      )}
+      {editingIndex === -1 ? (
+        <CharacterDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
+      ) : (
+        <button onClick={startAdd} className="text-[11px] font-bold text-blue-600 hover:underline">
+          + 캐릭터 추가
+        </button>
+      )}
+    </div>
+  );
+}
+
 // 5번(대본 작성) 단계 패널 — 소재 추천 → 제목 추천 → 대본, 3단계를 순서대로 진행한다.
 // 각 단계는 4번과 동일한 하이브리드 방식(유료 Gemini Pro / 무료 구독-복사)을 쓴다.
 // hideMaterials: "7번 대본 작성" 탭에서 열렸을 때는 true — 소재 선정은 "5번 소재 선정" 탭의 몫이라
@@ -4000,17 +4219,24 @@ function Step5Panel({
       )}
       {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
 
-      {units.length > 0 && (
+      {hideMaterials && units.length > 0 && (
         <div className="bg-emerald-50/40 border border-emerald-100 rounded-lg p-3 mb-2">
           <div className="text-[11px] font-black text-emerald-700 mb-2">✅ 완성된 콘텐츠 ({units.length}개)</div>
           <div className="space-y-1.5">
             {units.map((u) => {
-              const statusTag =
+              const pdTag =
                 u.status === 'approved'
-                  ? { label: '승인됨', cls: 'bg-emerald-100 text-emerald-700' }
+                  ? { label: 'PD 승인', cls: 'bg-emerald-100 text-emerald-700' }
                   : u.status === 'rejected'
-                    ? { label: '반려됨', cls: 'bg-red-100 text-red-600' }
-                    : { label: '검토대기', cls: 'bg-neutral-100 text-neutral-500' };
+                    ? { label: 'PD 반려', cls: 'bg-red-100 text-red-600' }
+                    : { label: 'PD 확인 대기', cls: 'bg-neutral-100 text-neutral-500' };
+              // 2026-09-04 추가 — "검토대기" 배지 하나로는 대본/사실확인/검수/PD확인 중 어디서
+              // 막혀있는지 알 수 없다는 지적을 받고, 단계별로 끝났는지를 각각 보여주게 분리함.
+              const stages = [
+                { label: '대본', done: !!u.script },
+                { label: '사실확인', done: !!u.factCheck },
+                { label: '검수', done: u.review?.score !== undefined },
+              ];
               return (
                 <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
                   <div className="flex items-center gap-2 px-3 py-2">
@@ -4031,7 +4257,20 @@ function Step5Panel({
                         <span className="shrink-0 text-[10px] font-black text-neutral-400">({u.review.score}/10)</span>
                       )}
                     </button>
-                    <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full ${statusTag.cls}`}>{statusTag.label}</span>
+                    <div className="shrink-0 flex items-center gap-1">
+                      {stages.map((s) => (
+                        <span
+                          key={s.label}
+                          title={s.done ? `${s.label} 완료` : `${s.label} 대기`}
+                          className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
+                            s.done ? 'bg-blue-50 text-blue-600' : 'bg-neutral-100 text-neutral-300'
+                          }`}
+                        >
+                          {s.done ? '✓' : '○'} {s.label}
+                        </span>
+                      ))}
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${pdTag.cls}`}>{pdTag.label}</span>
+                    </div>
                     <button onClick={() => clearScript(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="대본만 삭제 (소재·자료조사·전략·훅·기획서는 유지)">
                       ✕
                     </button>
@@ -4039,20 +4278,22 @@ function Step5Panel({
                   {openUnitId === u.id && (
                     <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
                       <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] font-black text-neutral-400">분야:</span>
-                        {['건축', '토목', '무기', '항공', '자연재해', '기타'].map((t) => (
-                          <button
-                            key={t}
-                            onClick={() => setUnitTopic(u.id, u.topic === t ? '' : t)}
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                              u.topic === t ? 'bg-black text-white border-black' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400'
-                            }`}
-                          >
-                            {t}
-                          </button>
-                        ))}
-                      </div>
+                      {u.category === 'disaster' && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-black text-neutral-400">분야:</span>
+                          {['건축', '토목', '무기', '항공', '자연재해', '기타'].map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setUnitTopic(u.id, u.topic === t ? '' : t)}
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                u.topic === t ? 'bg-black text-white border-black' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400'
+                              }`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {u.titleCandidates && u.titleCandidates.filter((t) => t !== u.title).length > 0 && (
                         <div>
                           <p className="text-[10px] font-black text-neutral-400 mb-1">그때 같이 나온 다른 제목 후보 (클릭하면 교체)</p>
@@ -4944,6 +5185,12 @@ function FlowChart({
 
   return (
     <div className="mb-6 bg-white border border-neutral-200 rounded-xl p-5">
+      <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+        <p className="text-[11px] font-black text-amber-700 mb-1">🎬 PD(오케스트레이터)의 역할</p>
+        <p className="text-[11px] text-amber-700 leading-relaxed">
+          세부 작업을 직접 하지 않고 각 단계를 전문 스킬/도구에 위임한다. 산출물이 나왔다고 바로 &quot;완료&quot;로 표시하지 않는다 — 반드시 별도 에이전트(이 세션과 맥락을 공유하지 않는)를 spawn해서 그 산출물이 단계 목적을 실제로 달성했는지 판단시키고, PASS가 나올 때까지 반복해야 완료로 표시할 수 있다. 스스로 판단하고 완료 처리하는 건 원칙 위반.
+        </p>
+      </div>
       <div className="text-[11px] font-black text-neutral-400 mb-4">🔀 플로우차트 미리보기 — 단계를 클릭하면 오른쪽에 상세가 떠요</div>
       <div className="flex flex-col gap-5">
         <div className="w-full flex items-center overflow-x-auto pb-1">
@@ -5016,6 +5263,7 @@ function FlowChart({
           {isStrategyStep(active) && <StrategyPanel site={site} onRefresh={onRefreshSite} />}
           {isHookStep(active) && <HookPanel site={site} onRefresh={onRefreshSite} />}
           {isPlanningDocStep(active) && <PlanningDocPanel site={site} onRefresh={onRefreshSite} />}
+          {isCharacterStep(active) && <CharacterPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <Step5Panel site={site} onRefresh={onRefreshSite} hideMaterials />}
           {isImageVideoStep(active) && <Step6Panel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
