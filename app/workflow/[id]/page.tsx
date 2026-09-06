@@ -3072,7 +3072,7 @@ function PlanningDocPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
 type CharacterDraft = { id: string; name: string; role: string; description: string; imageUrl: string };
 const EMPTY_CHARACTER_DRAFT: CharacterDraft = { id: '', name: '', role: '', description: '', imageUrl: '' };
 
-function nextCharacterId(chars: CharacterDraft[]): string {
+function nextCharacterId(chars: { id: string }[]): string {
   let max = 0;
   for (const c of chars) {
     const m = c.id.match(/(\d+)/);
@@ -3187,7 +3187,7 @@ function CharacterPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
 
   function startEdit(idx: number) {
     setEditingIndex(idx);
-    setDraft(characters[idx]);
+    setDraft({ ...characters[idx], imageUrl: characters[idx].imageUrl || '' });
   }
   function startAdd() {
     setEditingIndex(-1);
