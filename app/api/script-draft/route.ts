@@ -45,6 +45,16 @@ type ContentUnit = {
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
+// 12번(채널 캐릭터 시스템 설계) 단계 전용 — 채널 전체에서 반복해서 쓰는 캐릭터를 등록해두는
+// 등장인물 소개(만화책 캐릭터 시트 개념) 목록. 특정 콘텐츠(unit)에 속한 게 아니라 채널 전체에서
+// 공유되는 자산이라 ContentUnit이 아니라 ScriptDraft 최상위에 둔다.
+type Character = {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  imageUrl?: string;
+};
 type ScriptDraft = {
   category?: Category;
   materials?: string[];
@@ -62,6 +72,7 @@ type ScriptDraft = {
   // action=compare(제미나이 사실확인) 결과 — action=upgrade로 합친 다음에도 근거 기록으로 남겨둔다.
   factCheck?: string;
   units?: ContentUnit[];
+  characters?: Character[];
   updated_at?: string;
 };
 
@@ -910,6 +921,7 @@ export async function PATCH(request: Request) {
   if ('sources' in body) patch.sources = body.sources;
   if ('factCheck' in body) patch.factCheck = body.factCheck;
   if ('units' in body) patch.units = body.units;
+  if ('characters' in body) patch.characters = body.characters;
 
   const nextDraft: ScriptDraft = { ...prevDraft, ...patch, updated_at: new Date().toISOString() };
   const { error } = await supabase
