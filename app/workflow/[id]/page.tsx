@@ -4000,24 +4000,17 @@ function Step5Panel({
       )}
       {error && <p className="text-[11px] text-red-500 font-bold mb-2">{error}</p>}
 
-      {hideMaterials && units.length > 0 && (
+      {units.length > 0 && (
         <div className="bg-emerald-50/40 border border-emerald-100 rounded-lg p-3 mb-2">
           <div className="text-[11px] font-black text-emerald-700 mb-2">✅ 완성된 콘텐츠 ({units.length}개)</div>
           <div className="space-y-1.5">
             {units.map((u) => {
-              const pdTag =
+              const statusTag =
                 u.status === 'approved'
-                  ? { label: 'PD 승인', cls: 'bg-emerald-100 text-emerald-700' }
+                  ? { label: '승인됨', cls: 'bg-emerald-100 text-emerald-700' }
                   : u.status === 'rejected'
-                    ? { label: 'PD 반려', cls: 'bg-red-100 text-red-600' }
-                    : { label: 'PD 확인 대기', cls: 'bg-neutral-100 text-neutral-500' };
-              // 2026-09-04 추가 — "검토대기" 배지 하나로는 대본/사실확인/검수/PD확인 중 어디서
-              // 막혀있는지 알 수 없다는 지적을 받고, 단계별로 끝났는지를 각각 보여주게 분리함.
-              const stages = [
-                { label: '대본', done: !!u.script },
-                { label: '사실확인', done: !!u.factCheck },
-                { label: '검수', done: u.review?.score !== undefined },
-              ];
+                    ? { label: '반려됨', cls: 'bg-red-100 text-red-600' }
+                    : { label: '검토대기', cls: 'bg-neutral-100 text-neutral-500' };
               return (
                 <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
                   <div className="flex items-center gap-2 px-3 py-2">
@@ -4038,20 +4031,7 @@ function Step5Panel({
                         <span className="shrink-0 text-[10px] font-black text-neutral-400">({u.review.score}/10)</span>
                       )}
                     </button>
-                    <div className="shrink-0 flex items-center gap-1">
-                      {stages.map((s) => (
-                        <span
-                          key={s.label}
-                          title={s.done ? `${s.label} 완료` : `${s.label} 대기`}
-                          className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
-                            s.done ? 'bg-blue-50 text-blue-600' : 'bg-neutral-100 text-neutral-300'
-                          }`}
-                        >
-                          {s.done ? '✓' : '○'} {s.label}
-                        </span>
-                      ))}
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${pdTag.cls}`}>{pdTag.label}</span>
-                    </div>
+                    <span className={`shrink-0 text-[10px] font-black px-2 py-0.5 rounded-full ${statusTag.cls}`}>{statusTag.label}</span>
                     <button onClick={() => clearScript(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="대본만 삭제 (소재·자료조사·전략·훅·기획서는 유지)">
                       ✕
                     </button>
@@ -4059,22 +4039,20 @@ function Step5Panel({
                   {openUnitId === u.id && (
                     <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
                       <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
-                      {u.category === 'disaster' && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-black text-neutral-400">분야:</span>
-                          {['건축', '토목', '무기', '항공', '자연재해', '기타'].map((t) => (
-                            <button
-                              key={t}
-                              onClick={() => setUnitTopic(u.id, u.topic === t ? '' : t)}
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                                u.topic === t ? 'bg-black text-white border-black' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400'
-                              }`}
-                            >
-                              {t}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-black text-neutral-400">분야:</span>
+                        {['건축', '토목', '무기', '항공', '자연재해', '기타'].map((t) => (
+                          <button
+                            key={t}
+                            onClick={() => setUnitTopic(u.id, u.topic === t ? '' : t)}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              u.topic === t ? 'bg-black text-white border-black' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400'
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
                       {u.titleCandidates && u.titleCandidates.filter((t) => t !== u.title).length > 0 && (
                         <div>
                           <p className="text-[10px] font-black text-neutral-400 mb-1">그때 같이 나온 다른 제목 후보 (클릭하면 교체)</p>
@@ -4966,12 +4944,6 @@ function FlowChart({
 
   return (
     <div className="mb-6 bg-white border border-neutral-200 rounded-xl p-5">
-      <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
-        <p className="text-[11px] font-black text-amber-700 mb-1">🎬 PD(오케스트레이터)의 역할</p>
-        <p className="text-[11px] text-amber-700 leading-relaxed">
-          세부 작업을 직접 하지 않고 각 단계를 전문 스킬/도구에 위임한다. 산출물이 나왔다고 바로 &quot;완료&quot;로 표시하지 않는다 — 반드시 별도 에이전트(이 세션과 맥락을 공유하지 않는)를 spawn해서 그 산출물이 단계 목적을 실제로 달성했는지 판단시키고, PASS가 나올 때까지 반복해야 완료로 표시할 수 있다. 스스로 판단하고 완료 처리하는 건 원칙 위반.
-        </p>
-      </div>
       <div className="text-[11px] font-black text-neutral-400 mb-4">🔀 플로우차트 미리보기 — 단계를 클릭하면 오른쪽에 상세가 떠요</div>
       <div className="flex flex-col gap-5">
         <div className="w-full flex items-center overflow-x-auto pb-1">
