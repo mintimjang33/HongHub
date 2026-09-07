@@ -3753,6 +3753,21 @@ function Step5Panel({
     onMaterialSelected?.();
   }
 
+  // 2026-09-07 추가(3차) — 라디오 체크는 미리보기/변경만 하고, 확정 버튼을 눌러야 진짜로
+  // "이 소재는 다 썼다"는 뜻이라 목록에서 지운다(사용자 지적: 6번으로 넘긴 소재가 5번 목록에
+  // 계속 남아있으면 나중에 또 고를 수 있어서 헷갈림). selectedMaterial 자체는 7번(자료조사)·
+  // 11번(대본) 프롬프트가 계속 참조하므로 그대로 유지하고, materials 후보 목록에서만 뺀다.
+  async function confirmMaterial(m: string) {
+    const nextMaterials = (draft.materials || []).filter((x) => x !== m);
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ siteId: site.id, materials: nextMaterials, selectedMaterial: m }),
+    });
+    onRefresh();
+    onMaterialSelected?.();
+  }
+
   // 소재(아이디어)를 AI 추천/붙여넣기 없이 직접 추가·수정·삭제 — 나중에 적용할 수 있게 미리 등록만 해두는 용도.
   async function addMaterial() {
     const text = newMaterialText.trim();
@@ -5004,10 +5019,10 @@ ${u.material}`}
                       항목과 멀어져 안 보인다는 지적. 체크한 바로 그 항목 밑에 바로 붙여서 보여준다. */}
                   {draft.selectedMaterial === m && (
                     <button
-                      onClick={() => selectMaterial(m)}
+                      onClick={() => confirmMaterial(m)}
                       className="w-full text-[11px] font-black px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 mt-1 mb-1"
                     >
-                      ✅ 이 소재로 확정하고 6번(콘텐츠 등록)으로 이동
+                      ✅ 이 소재로 확정하고 6번(콘텐츠 등록)으로 이동 (목록에서 제거됨)
                     </button>
                   )}
                 </div>
