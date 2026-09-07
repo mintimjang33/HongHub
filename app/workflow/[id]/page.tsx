@@ -2434,17 +2434,19 @@ function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                       <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50">
                         <span className="text-amber-700">🔍 제미나이 프롬프트</span>
                         <CopyButton
-                          text={`[역할] 너는 우리 유튜브 채널의 리서처다. 아래 소재에 대해 실제로 검증 가능한 사실들을 조사해서, 각 사실마다 신뢰할 수 있는 출처(기사·공식 페이지·위키피디아 등) URL을 짝지어 정리해라. 추측이나 미확인 정보는 넣지 말고, 확인이 안 되면 그 사실은 빼라.
+                          text={`[맥락] 우리는 유튜브 미스터리·경제사 채널을 운영한다. 진행자는 "젠틀맨 루즈"라는 냉소적이고 연극적인 캐릭터이고, 매 영상은 "누구나 아는 사실 이면의 결정적 반전"을 찾아내 15분 분량의 드라마틱한 나레이션 대본으로 만든다. 지금 이 조사는 그 대본을 쓰기 위한 사전 자료조사다.
 
-[출력 형식] 아래처럼 번호 매긴 목록으로만 출력해라. 부연설명 붙이지 마라.
-① 사실 하나 — 출처: URL
-② 사실 하나 — 출처: URL
-(반전이 될 만한 놀라운 사실 위주로 최소 10개 이상)
-
-[참고 자료] 우리 채널 정보: https://honghub.vercel.app/share/${site.id}
+[역할] 너는 이 채널의 리서처다. 지금 이 자리에서 구글 검색으로 아래 [소재]에 대한 실제 사실을 직접 조사해라. 위 맥락을 이해했다면 어떤 사실이 영상에 쓸모 있을지는 스스로 판단해라 — 단순 정보 나열이 아니라 반전·아이러니가 될 만한 사실 위주로 찾아라.
 
 [소재]
-${u.material}`}
+${u.material}
+
+[출력 형식] 번호 매긴 목록으로 사실+출처만 출력해라. 서론·조사팁·질문 붙이지 마라.
+① 사실 — 출처: URL
+② 사실 — 출처: URL
+(최소 15개 이상)
+
+[참고 자료] 우리 채널 정보: https://honghub.vercel.app/share/${site.id}`}
                         />
                       </div>
                       {u.factCheck && <CopyButton text={u.factCheck} />}
@@ -5003,6 +5005,18 @@ ${u.material}`}
           </div>
         ) : (
           <p className="text-[11px] text-neutral-300 mb-2">아직 등록된 소재가 없어요.</p>
+        )}
+        {/* 2026-09-07 추가 — 라디오 체크(selectMaterial)의 onMaterialSelected 콜백만으로는 6번 자동이동이
+            눈에 안 띄거나 실패하는 것처럼 느껴진다는 지적(사용자: "체크하고 6단계로 넘기기가 있어야겠다").
+            라디오 클릭에 암묵적으로 얹혀가는 대신, 소재를 고른 뒤 사람이 직접 누르는 명시적 버튼으로
+            "선택 저장 + 6번 이동"을 다시 한번 확실하게 트리거한다. */}
+        {draft.selectedMaterial && (
+          <button
+            onClick={() => selectMaterial(draft.selectedMaterial as string)}
+            className="w-full text-[11px] font-black px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 mb-2"
+          >
+            ✅ &quot;{draft.selectedMaterial}&quot;로 확정하고 6번(콘텐츠 등록)으로 이동
+          </button>
         )}
         <div className="flex gap-1.5">
           <input
