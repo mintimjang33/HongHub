@@ -2162,6 +2162,27 @@ function ContentRegisterPanel({
     onRefresh();
   }
 
+  // 등록을 완전히 지우지 않고 5번(소재 선정) 목록으로 되돌린다(2026-09-08 추가) — deleteUnit과 달리 소재 문구를 materials에
+  // 다시 넣어서 5번에서 다시 고를 수 있게 한다. selectedMaterial이 이 유니트의 material과 같으면(보통 그렇다 —
+  // confirmMaterial이 그것을 selectedMaterial로 설정해놓고 6번으로 넘겼기 때문) 함께 비운다 — 안 그러면 5번 위저드가
+  // 이 소재가 이미 확정된 것처럼 보여준다.
+  async function undoUnit(u: ContentUnit) {
+    if (!confirm(`"${u.title}" 등록을 취소하고 5번 소재 목록으로 되돌릴까요?`)) return;
+    const nextMaterials = (draft.materials || []).includes(u.material) ? draft.materials || [] : [...(draft.materials || []), u.material];
+    await fetch('/api/script-draft', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        siteId: site.id,
+        materials: nextMaterials,
+        selectedMaterial: draft.selectedMaterial === u.material ? null : draft.selectedMaterial,
+        units: units.filter((x) => x.id !== u.id),
+      }),
+    });
+    onRefresh();
+    onGoToMaterialSelection?.();
+  }
+
   return (
     <div className="space-y-1.5">
       {showNewForm ? (
@@ -2254,6 +2275,13 @@ function ContentRegisterPanel({
                 className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
               >
                 수정
+              </button>
+              <button
+                onClick={() => undoUnit(u)}
+                className="shrink-0 text-[10px] font-bold text-amber-600 hover:underline"
+                title="등록을 취소하고 5번 소재 목록으로 되돌립니다"
+              >
+                ↩️ 5번으로
               </button>
               <button onClick={() => deleteUnit(u.id)} className="shrink-0 text-[10px] font-black text-neutral-300 hover:text-red-500" title="삭제">
                 ✕
