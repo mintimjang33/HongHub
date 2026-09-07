@@ -19,6 +19,9 @@ type ScriptDraft = {
   units?: ContentUnit[];
 };
 
+// hub_source_channels.notes에 붙는 "[파이프라인:{사이트명}]" 태그 — page.tsx의 CHANNEL_TAG_RE와 동일한 패턴.
+const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
+
 export default async function SharePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = getSupabaseServerClient();
@@ -38,12 +41,53 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
 
   const units: ContentUnit[] = (site.script_draft as ScriptDraft)?.units || [];
 
+  // 2026-09-07 추가 — 이 채널이 벤치마킹하는 채널들(1번 단계 등록분)의 실제 고조회수 대본(3번 단계 수집분)도
+  // 같이 보여준다. 대본 작성용 제미나이 프롬프트가 이 링크를 참고 자료로 걸기 때문에, 여기 없으면
+  // "100만 대본 참고해서 써줘"라는 지시가 있어도 제미나이가 실제로 읽을 게 없다(사용자 지시로 신설).
+  const { data: allChannels } = await supabase.from('hub_source_channels').select('id, name, notes, url');
+  const myChannelIds = (allChannels || [])
+    .filter((c) => c.notes?.match(CHANNEL_TAG_RE)?.[1] === site.name)
+    .map((c) => c.id);
+  const channelNameById = new Map((allChannels || []).map((c) => [c.id, c.name]));
+
+  let benchmarkItems: { id: string; title: string; views: string | null; transcript: string | null; channel_id: string | null }[] = [];
+  if (myChannelIds.length > 0) {
+    const { data: items } = await supabase
+      .from('hub_source_items')
+      .select('id, title, views, transcript, channel_id')
+      .in('channel_id', myChannelIds)
+      .not('transcript', 'is', null);
+    benchmarkItems = items || [];
+  }
+
   return (
     <div className="max-w-3xl mx-auto p-6 sm:p-10 space-y-8">
       <header className="border-b border-neutral-200 pb-4">
         <p className="text-[11px] font-black text-neutral-400 uppercase tracking-wide">HongHub · 읽기 전용 공유</p>
         <h1 className="text-2xl font-black text-neutral-900 mt-1">{site.name}</h1>
       </header>
+
+      {benchmarkItems.length > 0 && (
+        <section>
+          <h2 className="text-lg font-black text-neutral-800 mb-3">벤치마크 대본 (실제 고조회수 영상 {benchmarkItems.length}개)</h2>
+          <p className="text-xs text-neutral-500 mb-3">
+            이 채널이 참고하는 채널들의 실제 대본입니다. 대본 작성 시 이 리듬·구조·훅 패턴을 참고하되, 문장을 그대로 베끼지 말고 완전히 새로 쓸 것.
+          </p>
+          <div className="space-y-4">
+            {benchmarkItems.map((it) => (
+              <details key={it.id} className="border border-neutral-200 rounded-xl p-4">
+                <summary className="cursor-pointer text-sm font-black text-neutral-900">
+                  {it.title || '(제목 없음)'} {it.views ? `· 조회수 ${it.views}` : ''}
+                  {it.channel_id && channelNameById.get(it.channel_id) ? ` · ${channelNameById.get(it.channel_id)}` : ''}
+                </summary>
+                <pre className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-neutral-700 font-sans mt-3">
+                  {it.transcript}
+                </pre>
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
 
       {units.length > 0 && (
         <section>
