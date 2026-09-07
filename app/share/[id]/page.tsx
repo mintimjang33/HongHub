@@ -15,8 +15,17 @@ type ContentUnit = {
   topic?: string;
 };
 
+type ChannelCharacter = {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  imageUrl?: string;
+};
+
 type ScriptDraft = {
   units?: ContentUnit[];
+  characters?: ChannelCharacter[];
 };
 
 // hub_source_channels.notes에 붙는 "[파이프라인:{사이트명}]" 태그 — page.tsx의 CHANNEL_TAG_RE와 동일한 패턴.
@@ -40,6 +49,10 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
   }
 
   const units: ContentUnit[] = (site.script_draft as ScriptDraft)?.units || [];
+  // 폐기된 대안 캐릭터 후보(role이 "Alternate..."로 시작)는 혼동을 막기 위해 제외 — 확정된 진행자만 보여준다.
+  const characters: ChannelCharacter[] = ((site.script_draft as ScriptDraft)?.characters || []).filter(
+    (c) => !c.role?.startsWith('Alternate')
+  );
 
   // 2026-09-07 추가 — 이 채널이 벤치마킹하는 채널들(1번 단계 등록분)의 실제 고조회수 대본(3번 단계 수집분)도
   // 같이 보여준다. 대본 작성용 제미나이 프롬프트가 이 링크를 참고 자료로 걸기 때문에, 여기 없으면
@@ -66,6 +79,30 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
         <p className="text-[11px] font-black text-neutral-400 uppercase tracking-wide">HongHub · 읽기 전용 공유</p>
         <h1 className="text-2xl font-black text-neutral-900 mt-1">{site.name}</h1>
       </header>
+
+      {characters.length > 0 && (
+        <section>
+          <h2 className="text-lg font-black text-neutral-800 mb-3">채널 캐릭터</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {characters.map((c) => (
+              <div key={c.id} className="border border-neutral-200 rounded-xl p-4">
+                {c.imageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={c.imageUrl} alt={c.name} className="w-full rounded-lg border border-neutral-100 mb-3" />
+                )}
+                <h3 className="text-sm font-black text-neutral-900">{c.name}</h3>
+                <p className="text-[11px] text-neutral-400 mb-1.5">{c.role}</p>
+                {c.imageUrl && (
+                  <a href={c.imageUrl} target="_blank" rel="noopener noreferrer" className="block text-[11px] text-blue-600 hover:underline break-all mb-1.5">
+                    {c.imageUrl}
+                  </a>
+                )}
+                <p className="text-[12px] text-neutral-600 leading-relaxed whitespace-pre-wrap">{c.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {benchmarkItems.length > 0 && (
         <section>
