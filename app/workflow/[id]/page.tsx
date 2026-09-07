@@ -3750,7 +3750,7 @@ function Step5Panel({
       body: JSON.stringify({ siteId: site.id, selectedMaterial: m }),
     });
     onRefresh();
-    onMaterialSelected?.();
+    // 2026-09-08 수정 — 라디오 체크는 미리보기일 뿐이라 6번으로 자동이동하면 안 됨(확정 버튼 confirmMaterial에서만 이동).
   }
 
   // 2026-09-07 추가(3차) — 라디오 체크는 미리보기/변경만 하고, 확정 버튼을 눌러야 진짜로
