@@ -5435,7 +5435,12 @@ function FlowChart({
               {activeTone.label}
             </span>
           </div>
-          {active.desc && <p className="text-sm text-neutral-600 leading-relaxed mb-3">{active.desc}</p>}
+          {active.desc && (
+            <details className="mb-3">
+              <summary className="cursor-pointer text-xs text-neutral-400 font-bold">단계 설명 보기</summary>
+              <p className="text-sm text-neutral-600 leading-relaxed mt-2">{active.desc}</p>
+            </details>
+          )}
           {active.status && <p className="text-xs text-neutral-500 leading-relaxed border-t border-black/5 pt-3 mb-3">{active.status}</p>}
           {isChannelStep(active) && <ChannelPanel siteName={siteName} />}
           {isMaterialStep(active) && <MaterialPanel siteName={siteName} />}
