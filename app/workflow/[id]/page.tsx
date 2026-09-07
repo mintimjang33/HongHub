@@ -2431,6 +2431,22 @@ function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                   <p className="text-[10px] font-black text-neutral-400">자료조사 메모 — 사실은 반드시 출처와 함께 기록</p>
                   {editingId !== u.id && (
                     <div className="shrink-0 flex items-center gap-1.5">
+                      <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50">
+                        <span className="text-amber-700">🔍 제미나이 프롬프트</span>
+                        <CopyButton
+                          text={`[역할] 너는 우리 유튜브 채널의 리서처다. 아래 소재에 대해 실제로 검증 가능한 사실들을 조사해서, 각 사실마다 신뢰할 수 있는 출처(기사·공식 페이지·위키피디아 등) URL을 짝지어 정리해라. 추측이나 미확인 정보는 넣지 말고, 확인이 안 되면 그 사실은 빼라.
+
+[출력 형식] 아래처럼 번호 매긴 목록으로만 출력해라. 부연설명 붙이지 마라.
+① 사실 하나 — 출처: URL
+② 사실 하나 — 출처: URL
+(반전이 될 만한 놀라운 사실 위주로 최소 10개 이상)
+
+[참고 자료] 우리 채널 정보: https://honghub.vercel.app/share/${site.id}
+
+[소재]
+${u.material}`}
+                        />
+                      </div>
                       {u.factCheck && <CopyButton text={u.factCheck} />}
                       <button
                         onClick={() => {
@@ -2708,6 +2724,25 @@ function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () => void 
                   );
                 })}
               </div>
+              <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50">
+                <span className="text-amber-700">🔍 제미나이 프롬프트</span>
+                <CopyButton
+                  text={`[역할] 너는 우리 채널의 전략 기획자다. 아래 소재와 자료조사 내용을 바탕으로, 이 콘텐츠를 어떤 앵글로 풀어낼지 방향 후보를 2개 이상 제안해라. 각 후보는 타겟층과 핵심 앵글을 구체적으로 밝혀라.
+
+[출력 형식]
+A) [앵글 이름] — [1~2문장 설명, 왜 이 앵글이 먹히는지]
+B) [앵글 이름] — [1~2문장 설명]
+(필요하면 C, D도 추가)
+
+[참고 자료] 우리 채널 정보(벤치마크 대본·캐릭터·이전 대본): https://honghub.vercel.app/share/${site.id}
+
+[소재]
+${u.material}
+
+[자료조사]
+${u.factCheck || '(아직 없음 — 소재 설명만으로 판단)'}`}
+                />
+              </div>
               <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2.5 space-y-2">
                 <p className="text-xs font-black text-neutral-400">+ 방향 후보 추가 (타겟층/앵글을 구체적으로)</p>
                 <textarea
@@ -2940,6 +2975,24 @@ function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
                   );
                 })}
               </div>
+              <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50">
+                <span className="text-amber-700">🔍 제미나이 프롬프트</span>
+                <CopyButton
+                  text={`[역할] 너는 우리 채널의 훅/인트로 작가다. 아래 소재·전략을 바탕으로, 시청자가 3초 안에 스크롤을 멈추게 만들 도입부 문장 후보를 2개 이상 실제 문장으로 써라. 구조 설명이 아니라 그대로 나레이션에 쓸 수 있는 완성된 문장으로 써라.
+
+[출력 형식]
+후보1: "[실제 도입부 문장, 2~4문장]"
+후보2: "[실제 도입부 문장, 2~4문장]"
+
+[참고 자료] 우리 채널 정보(벤치마크 대본·캐릭터·이전 대본): https://honghub.vercel.app/share/${site.id}
+
+[소재]
+${u.material}
+
+[선택된 전략]
+${u.selectedStrategy || '(아직 미확정 — 소재만으로 판단)'}`}
+                />
+              </div>
               <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2.5 space-y-2">
                 <p className="text-xs font-black text-neutral-400">+ 훅/인트로 후보 추가</p>
                 <textarea
@@ -3081,6 +3134,34 @@ function PlanningDocPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
                     <p className="text-xs font-black text-neutral-400">📄 기획서 — 이 콘텐츠 조회수 잘 나오게 만드는 실행 지침서</p>
                     {editingDocId !== u.id && (
                       <div className="shrink-0 flex items-center gap-1.5">
+                        <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50">
+                          <span className="text-amber-700">🔍 제미나이 프롬프트</span>
+                          <CopyButton
+                            text={`[역할] 너는 우리 채널의 조회수 전략 기획자다. 아래 소재·자료조사·전략·훅을 근거로, 이 콘텐츠가 왜/어떻게 조회수가 잘 나올지 논증하는 게 아니라, 실제로 만들 때 지킬 실행 지침서를 써라.
+
+[출력 형식]
+1. 제목 후보(실제 문장 2~3개)
+2. 오프닝 초 단위 구성(0:00부터 몇 초까지 뭘 하는지)
+3. 본문 리듬(자료들을 어떤 인과관계 순서로 배치할지)
+4. 댓글 유도 위치(어느 챕터 끝에 어떤 질문을)
+5. 길이 판단(권장 분량과 근거)
+6. ⚠️ 위험요소·보완점 최소 2개(자기 칭찬 금지, 진짜 리스크만)
+
+[참고 자료] 우리 채널 정보(벤치마크 대본·캐릭터·이전 대본): https://honghub.vercel.app/share/${site.id}
+
+[소재]
+${u.material}
+
+[자료조사]
+${u.factCheck || '(없음)'}
+
+[선택된 전략]
+${u.selectedStrategy || '(미확정)'}
+
+[선택된 훅]
+${u.selectedHook || '(미확정)'}`}
+                          />
+                        </div>
                         {docWritten && <CopyButton text={u.planningDoc || ''} />}
                         <button
                           onClick={() => {
@@ -5232,6 +5313,30 @@ function Step6Panel({ site, onRefresh }: { site: Site; onRefresh: () => void }) 
               {openUnitId === u.id && (
                 <div className="px-3 pb-3 pt-1 border-t border-neutral-50">
                   <p className="text-[10px] text-neutral-400 mb-1">소재: {u.material}</p>
+                  <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 mb-2">
+                    <span className="text-amber-700">🔍 제미나이 프롬프트 (13번 TTS 타임코드 채운 뒤 사용)</span>
+                    <CopyButton
+                      text={`[역할] 너는 우리 채널 영상의 편집 감독(edit director)이다. 완성된 대본과 실제 TTS 나레이션의 타임코드를 기반으로, 정확한 초 단위 스토리보드와 각 장면의 이미지 생성 프롬프트를 설계한다.
+
+[입력]
+- 최종 확정 대본:
+${u.script || '(아직 11번에서 대본이 완성되지 않았습니다)'}
+- 실제 TTS 낭독 타임코드: [13번에서 뽑은 나레이션을 들으며 챕터별/문단별 시작~끝 초를 직접 채워 넣으세요]
+
+[작업 지시]
+1. 6~7초 단위로 장면을 나눈다. 장면 경계는 반드시 위 타임코드에 맞춰, 문장이 끊기는 자연스러운 호흡 지점에서 나눈다 — 임의로 초를 배분하지 않는다.
+2. 장면마다 다음 4개 열로 구성된 표를 만든다: (1) 타임(시작~끝, 초 단위) (2) 화면 설명(한국어) (3) 이미지 프롬프트(영어, Flow AI 이미지 생성용) (4) 영상/전환 프롬프트(영어)
+
+[이미지 프롬프트 작성 규칙 — 반드시 지킬 것]
+- 진행자가 등장하는 장면은 항상 "젠틀맨 루즈"(검은 톱햇, 금테 외알렌즈, 검은 연미복+금색 안감 망토, 능글맞고 자신감 있는 쇼맨, 반전 순간 망토를 젖히는 제스처)로 묘사한다. 레퍼런스 이미지: https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/character-refs/economics-gentleman-rouge.jpg
+- 실존 인물의 동작이 필요한 장면은 얼굴을 그리지 않고 손 클로즈업으로만 표현한다.
+- 이 소재의 상징 사물을 의인화한 배역이 등장할 수 있다 — 팔다리·눈·표정을 붙이되 사람 얼굴 캐릭터로 그리지 않는다.
+- 이미지 안에 텍스트·캡션·라벨·제목을 절대 넣지 않는다 — 프롬프트 끝에 "IMPORTANT: absolutely NO text, no captions, no title, no labels anywhere in the image"를 반드시 포함한다.
+- 재질/질감 지시는 반드시 "캐릭터 표면 자체의 재질"이라고 명시한다 — 배경은 별도로 "plain solid grey background" 등으로 명확히 지정한다.
+
+[출력 형식] 위 표만 챕터 순서대로 전체 대본 분량만큼 빠짐없이 작성해줘. 표 앞뒤에 부연설명 붙이지 마.`}
+                    />
+                  </div>
                   <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => save(u.id, text)} />
                 </div>
               )}
