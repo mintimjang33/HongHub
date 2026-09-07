@@ -31,6 +31,19 @@ type ScriptDraft = {
 // hub_source_channels.notes에 붙는 "[파이프라인:{사이트명}]" 태그 — page.tsx의 CHANNEL_TAG_RE와 동일한 패턴.
 const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 
+// "109.5만" / "1.2억" 같은 한글 조회수 표기를 실제 숫자로 변환 — 100만 이상만 벤치마크로 걸러내기 위함
+// (사용자 지시: "100만 이상 터진것만 전달해" — 40~90만대까지 다 보여주면 진짜 히트작 신호가 희석된다).
+function parseViews(views: string | null): number {
+  if (!views) return 0;
+  const m = views.match(/^([\d.]+)\s*(억|만)?/);
+  if (!m) return 0;
+  const num = parseFloat(m[1]);
+  if (isNaN(num)) return 0;
+  if (m[2] === '억') return num * 100000000;
+  if (m[2] === '만') return num * 10000;
+  return num;
+}
+
 export default async function SharePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = getSupabaseServerClient();
@@ -70,7 +83,8 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
       .select('id, title, views, transcript, channel_id')
       .in('channel_id', myChannelIds)
       .not('transcript', 'is', null);
-    benchmarkItems = items || [];
+    // 100만 조회수 미만은 제외 — "100만 이상 터진 것만" 벤치마크로 전달한다(사용자 지시).
+    benchmarkItems = (items || []).filter((it) => parseViews(it.views) >= 1000000).sort((a, b) => parseViews(b.views) - parseViews(a.views));
   }
 
   return (
@@ -106,7 +120,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
 
       {benchmarkItems.length > 0 && (
         <section>
-          <h2 className="text-lg font-black text-neutral-800 mb-3">벤치마크 대본 (실제 고조회수 영상 {benchmarkItems.length}개)</h2>
+          <h2 className="text-lg font-black text-neutral-800 mb-3">벤치마크 대본 (조회수 100만 이상 영상 {benchmarkItems.length}개)</h2>
           <p className="text-xs text-neutral-500 mb-3">
             이 채널이 참고하는 채널들의 실제 대본입니다. 대본 작성 시 이 리듬·구조·훅 패턴을 참고하되, 문장을 그대로 베끼지 말고 완전히 새로 쓸 것.
           </p>
