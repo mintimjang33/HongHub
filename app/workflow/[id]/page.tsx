@@ -1891,8 +1891,14 @@ function isMaterialSelectionStep(step: Step): boolean {
   return step.name.trim() === '소재 선정';
 }
 
+// 2026-09-07 수정 — 나레이션을 이미지/영상보다 앞으로 옮기면서 "이미지/영상 생성" 한 단계가
+// "씬별 이미지 프롬프트 작성·생성"과 "영상 생성" 두 단계로 쪼개졌다(경제학 등 파이프라인 재편).
+// 원래는 이름에 "이미지"와 "영상"이 "둘 다" 있어야 매칭했는데, 쪼개진 두 이름은 각각 하나씩만
+// 가지고 있어 이 스토리보드 패널(Step6Panel)이 안 열리는 버그가 생겼다 — "둘 중 하나"로 완화.
+// scenePrompts 하나에 이미지 프롬프트와 영상/전환 프롬프트가 같이 들어있으니 두 단계 다 같은
+// 스토리보드 표를 열어도 자연스럽다.
 function isImageVideoStep(step: Step): boolean {
-  return /이미지/.test(step.name) && /영상/.test(step.name);
+  return /이미지/.test(step.name) || /영상/.test(step.name);
 }
 
 function isNarrationStep(step: Step): boolean {
