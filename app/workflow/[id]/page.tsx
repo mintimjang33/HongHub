@@ -3505,6 +3505,12 @@ function Step5Panel({
   const [reviewCopiedId, setReviewCopiedId] = useState<string | null>(null);
   const [reviewPasteOpenId, setReviewPasteOpenId] = useState<string | null>(null);
   const [reviewPasteText, setReviewPasteText] = useState('');
+  // 2026-09-07 추가 — AI 검토(review)가 없어도 대본을 바로 수동으로 고칠 수 있는 직접수정 상태.
+  // "피드백 반영해서 수정" 버튼은 u.review가 있어야만 뜨는데(4645번 줄 부근), 그게 없는 완성 콘텐츠는
+  // 수정 수단이 복사/삭제뿐이라 사용자가 직접 텍스트를 고칠 방법이 없었다.
+  const [editScriptId, setEditScriptId] = useState<string | null>(null);
+  const [editScriptText, setEditScriptText] = useState('');
+  const [savingScriptEdit, setSavingScriptEdit] = useState(false);
   const [revisingId, setRevisingId] = useState<string | null>(null);
   const [reviseCopyingId, setReviseCopyingId] = useState<string | null>(null);
   const [reviseCopiedId, setReviseCopiedId] = useState<string | null>(null);
@@ -4194,6 +4200,26 @@ function Step5Panel({
     }
   }
 
+  async function saveScriptEdit(unitId: string) {
+    setSavingScriptEdit(true);
+    setError('');
+    try {
+      const res = await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unitId ? { ...u, script: editScriptText } : u)) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '저장 실패');
+      setEditScriptId(null);
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingScriptEdit(false);
+    }
+  }
+
   async function keepOriginalAfterUnitCompare(unitId: string) {
     if (!unitCompareResult) return;
     setSaving(true);
@@ -4517,9 +4543,45 @@ function Step5Panel({
                       <div>
                         <div className="flex items-center justify-between mb-0.5">
                           <p className="text-[10px] font-black text-neutral-400">🇰🇷 한국어 ({u.script.length}자)</p>
-                          {u.script && <CopyButton text={u.script} />}
+                          <div className="flex items-center gap-2">
+                            {u.script && <CopyButton text={u.script} />}
+                            {editScriptId !== u.id && (
+                              <button
+                                onClick={() => {
+                                  setEditScriptId(u.id);
+                                  setEditScriptText(u.script);
+                                }}
+                                className="text-[10px] font-black text-neutral-400 hover:text-black"
+                              >
+                                ✏️ 직접 수정
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
+                        {editScriptId === u.id ? (
+                          <div>
+                            <textarea
+                              value={editScriptText}
+                              onChange={(e) => setEditScriptText(e.target.value)}
+                              rows={16}
+                              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs leading-relaxed font-mono mb-1.5"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button onClick={() => setEditScriptId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                                취소
+                              </button>
+                              <button
+                                onClick={() => saveScriptEdit(u.id)}
+                                disabled={savingScriptEdit || !editScriptText.trim()}
+                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                              >
+                                {savingScriptEdit ? '저장 중...' : '저장'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
+                        )}
                       </div>
                       {u.scriptEn && (
                         <div className="pt-2 border-t border-neutral-50">
