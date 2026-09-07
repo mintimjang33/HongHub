@@ -4975,48 +4975,47 @@ ${u.material}`}
                   </div>
                 </div>
               ) : (
-                <div
-                  key={idx}
-                  className={`flex items-start gap-2 text-[11px] rounded-lg px-2.5 py-2 border ${
-                    draft.selectedMaterial === m ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-neutral-100 hover:border-neutral-300'
-                  }`}
-                >
-                  <label className="flex items-start gap-2 flex-1 min-w-0 cursor-pointer">
-                    <input type="radio" checked={draft.selectedMaterial === m} onChange={() => selectMaterial(m)} className="mt-0.5 shrink-0" />
-                    <span className="leading-relaxed">{m}</span>
-                  </label>
-                  <div className="flex gap-1.5 shrink-0">
-                    <button
-                      onClick={() => {
-                        setEditingMaterialIdx(idx);
-                        setEditingMaterialText(m);
-                      }}
-                      className="text-[10px] font-bold text-neutral-400 hover:text-black"
-                    >
-                      수정
-                    </button>
-                    <button onClick={() => deleteMaterial(idx)} className="text-[10px] font-black text-neutral-300 hover:text-red-500">
-                      ✕
-                    </button>
+                <div key={idx}>
+                  <div
+                    className={`flex items-start gap-2 text-[11px] rounded-lg px-2.5 py-2 border ${
+                      draft.selectedMaterial === m ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-neutral-100 hover:border-neutral-300'
+                    }`}
+                  >
+                    <label className="flex items-start gap-2 flex-1 min-w-0 cursor-pointer">
+                      <input type="radio" checked={draft.selectedMaterial === m} onChange={() => selectMaterial(m)} className="mt-0.5 shrink-0" />
+                      <span className="leading-relaxed">{m}</span>
+                    </label>
+                    <div className="flex gap-1.5 shrink-0">
+                      <button
+                        onClick={() => {
+                          setEditingMaterialIdx(idx);
+                          setEditingMaterialText(m);
+                        }}
+                        className="text-[10px] font-bold text-neutral-400 hover:text-black"
+                      >
+                        수정
+                      </button>
+                      <button onClick={() => deleteMaterial(idx)} className="text-[10px] font-black text-neutral-300 hover:text-red-500">
+                        ✕
+                      </button>
+                    </div>
                   </div>
+                  {/* 2026-09-07 추가(2차) — 확정 버튼이 목록 맨 아래에 따로 있어서 목록이 길면 체크한
+                      항목과 멀어져 안 보인다는 지적. 체크한 바로 그 항목 밑에 바로 붙여서 보여준다. */}
+                  {draft.selectedMaterial === m && (
+                    <button
+                      onClick={() => selectMaterial(m)}
+                      className="w-full text-[11px] font-black px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 mt-1 mb-1"
+                    >
+                      ✅ 이 소재로 확정하고 6번(콘텐츠 등록)으로 이동
+                    </button>
+                  )}
                 </div>
               )
             )}
           </div>
         ) : (
           <p className="text-[11px] text-neutral-300 mb-2">아직 등록된 소재가 없어요.</p>
-        )}
-        {/* 2026-09-07 추가 — 라디오 체크(selectMaterial)의 onMaterialSelected 콜백만으로는 6번 자동이동이
-            눈에 안 띄거나 실패하는 것처럼 느껴진다는 지적(사용자: "체크하고 6단계로 넘기기가 있어야겠다").
-            라디오 클릭에 암묵적으로 얹혀가는 대신, 소재를 고른 뒤 사람이 직접 누르는 명시적 버튼으로
-            "선택 저장 + 6번 이동"을 다시 한번 확실하게 트리거한다. */}
-        {draft.selectedMaterial && (
-          <button
-            onClick={() => selectMaterial(draft.selectedMaterial as string)}
-            className="w-full text-[11px] font-black px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 mb-2"
-          >
-            ✅ &quot;{draft.selectedMaterial}&quot;로 확정하고 6번(콘텐츠 등록)으로 이동
-          </button>
         )}
         <div className="flex gap-1.5">
           <input
