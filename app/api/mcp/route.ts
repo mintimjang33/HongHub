@@ -152,7 +152,8 @@ const baseHandler = createMcpHandler(
       'update_script_draft',
       {
         description:
-          '사이트의 script_draft(대본+씬별 CLEAN/INFO/영상 프롬프트가 담긴 JSON, units 배열 구조)를 통째로 교체한다. update_site로는 이 필드를 못 건드려서 별도로 만든 도구.',
+          '사이트의 script_draft(대본+씬별 스토리보드 프롬프트가 담긴 JSON, units 배열 구조)를 통째로 교체한다. update_site로는 이 필드를 못 건드려서 별도로 만든 도구. ' +
+          '⚠️ 대본은 units[].script, 씬별 프롬프트(시간/장면이미지/이미지프롬프트/영상·전환프롬프트)는 units[].scenePrompts에 저장한다(2026-09-07, 여러 파이프라인이 5~20번 구조로 통일된 이후 명칭) — 정확한 단계 번호는 파이프라인마다 다를 수 있으니 항상 그 파이프라인의 workflow_content를 먼저 확인할 것.',
         inputSchema: z.object({
           id: z.string().describe('사이트 id (list_sites로 확인)'),
           script_draft: z
@@ -1023,13 +1024,21 @@ ${PLATFORM_GUIDE[target_platform]}
       'save_unit_scene_prompts',
       {
         description:
-          '5번(대본 작성) 완성 콘텐츠 목록(script_draft.units)의 특정 유닛 하나에 6번(이미지/영상 생성) 장면별 프롬프트 전문을 저장한다. ' +
+          '대본 작성 완성 콘텐츠 목록(script_draft.units)의 특정 유닛 하나에 씬별(스토리보드) 프롬프트 전문을 저장한다. ' +
           '워크플로우 문서(workflow_content)는 파이프라인 전체가 공유하는 문서라 특정 에피소드 전용 프롬프트를 적을 곳이 아니다 — ' +
-          '반드시 이 툴로 해당 유닛에 붙여야 5번 탭에서 그 콘텐츠와 함께 보인다.',
+          '반드시 이 툴로 해당 유닛에 붙여야 앱의 스토리보드 탭(타임/장면이미지/이미지프롬프트/영상·전환프롬프트 표)에서 그 콘텐츠와 함께 보인다. ' +
+          '⚠️ "대본 작성"과 "씬별 이미지·영상 생성"의 정확한 단계 번호는 파이프라인마다 다를 수 있으니(2026-09-07 여러 파이프라인이 5~20번 구조로 통일됐지만 진행 상태·예외가 파이프라인마다 있음) 항상 그 파이프라인의 workflow_content를 먼저 확인할 것 — 번호를 가정하지 말 것.',
         inputSchema: z.object({
           site_id: z.string().describe('파이프라인의 hub_sites id (list_sites로 확인)'),
           unit_id: z.string().describe('script_draft.units 안의 유닛 id (list_sites 결과의 script_draft.units 참고)'),
-          scenePrompts: z.string().describe('장면별 CLEAN/INFO/영상 프롬프트 전문(마크다운/텍스트, 통째로 교체됨)'),
+          scenePrompts: z
+            .string()
+            .describe(
+              '장면별 스토리보드 프롬프트 전문(마크다운/텍스트, 통째로 교체됨). 각 장면은 "### 장면ID 제목" 헤더로 시작하고, 그 아래 다음 줄들을 필요한 것만 선택적으로 붙인다: ' +
+                '"대본: ..."(그 장면의 대본 문장), "- 시간: 0:00-0:07"(타임코드), "- 장면이미지: https://..."(생성된 이미지 URL), ' +
+                '"- 이미지프롬프트: ..."(현재 표준 — 이 장면 이미지를 생성할 때 쓴/쓸 프롬프트), "- 영상: ..."(영상프롬프트 or 전환프롬프트 — 이 장면을 영상 클립으로 만들거나 다음 장면으로 넘어가는 연출), ' +
+                '"- 자료: https://..."(첨부 URL, 여러 줄 가능). "- CLEAN: ..."/"- INFO: ..."는 구버전(이미지 2장 방식) 필드로 지금은 "이미지프롬프트" 하나만 쓰면 된다.'
+            ),
         }),
       },
       async ({ site_id, unit_id, scenePrompts }) => {
