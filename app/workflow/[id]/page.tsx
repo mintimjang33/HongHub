@@ -74,10 +74,17 @@ type ContentUnit = {
   subtitleUrls?: { label: string; url: string }[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
+  // 2026-09-07 추가 — 12번(채널 캐릭터 시스템) 단계 중 "이 콘텐츠 하나에서만 쓰는" 캐릭터(소재를
+  // 의인화한 배역, 그 배역의 의상 변형 등). 채널 전체를 관통하는 진행자만 ScriptDraft 최상위
+  // characters에 남기고, 나머지(예: 코카콜라 병 캐릭터)는 사용자 지적으로 여기로 옮김 — "1번
+  // 콘텐츠 아래에 등록돼야 한다"는 게 원칙(다른 유닛에 재사용하려면 그 유닛에 따로 등록할 것).
+  characters?: Character[];
 };
-// 12번(채널 캐릭터 시스템 설계) 단계 전용 — 채널 전체에서 반복해서 쓰는 캐릭터를 등록해두는
-// 등장인물 소개(만화책 캐릭터 시트 개념) 목록. 특정 콘텐츠(unit)가 아니라 채널 전체에서 공유되는
-// 자산이라 ContentUnit이 아니라 ScriptDraft 최상위에 둔다.
+// 12번(채널 캐릭터 시스템 설계) 단계 전용 — 등장인물 소개(만화책 캐릭터 시트 개념) 목록.
+// 채널 전체를 관통하는 진행자 등은 ContentUnit이 아니라 ScriptDraft 최상위(channel-wide)에 두고,
+// 특정 콘텐츠 하나에서만 쓰는 배역(소재 의인화 등)은 그 ContentUnit.characters(unit-scoped)에 둔다
+// (2026-09-07, 사용자 지적으로 분리 — 처음엔 전부 최상위에 뒀다가 "1번 콘텐츠 아래에 있어야 한다"는
+// 지적을 받고 채널 공용/유닛 전용으로 나눔).
 type Character = {
   id: string;
   name: string;
@@ -195,9 +202,7 @@ function parseSteps(markdown: string): Step[] {
 // scenePrompts 텍스트("### S01A 제목 (4초)\n대본: ...\n- CLEAN: ...\n- INFO: ...\n- 영상: ..." 형식,
 // 6번 워크시트/워크플로우 문서에서 쓰는 것과 동일한 포맷)를 장면 카드 배열로 파싱한다.
 // 형식이 안 맞으면(자유 텍스트로 붙여넣은 경우 등) 빈 배열을 반환하고, 그때는 원문 그대로 보여준다.
-function parseSceneBlocks(
-  text: string
-): { id: string; title: string; script: string; note: string; clean: string; info: string; video: string; media: string[] }[] {
+function parseSceneBlocks(text: string): SceneBlock[] {
   if (!text) return [];
   const blocks = text
     .split(/\n(?=###\s)/)
@@ -211,6 +216,9 @@ function parseSceneBlocks(
     const title = headerMatch ? headerMatch[2] : header;
     let script = '';
     let note = '';
+    let time = '';
+    let sceneImage = '';
+    let imagePrompt = '';
     let clean = '';
     let info = '';
     let video = '';
@@ -218,17 +226,50 @@ function parseSceneBlocks(
     for (const line of lines.slice(1)) {
       if (line.startsWith('대본:')) script = line.replace(/^대본:\s*/, '');
       else if (line.startsWith('- 해석:')) note = line.replace(/^- 해석:\s*/, '');
+      // 2026-09-07 추가 — 13번을 스토리보드(타임/장면이미지/이미지프롬프트/영상·전환프롬프트) 형태로
+      // 재구성(사용자 지시). 기존 CLEAN/INFO/영상 라인은 구버전(A안 2장/D안 텍스트→영상) 데이터가
+      // 깨지지 않도록 그대로 계속 읽는다 — 새 필드만 추가.
+      else if (line.startsWith('- 시간:')) time = line.replace(/^- 시간:\s*/, '');
+      else if (line.startsWith('- 장면이미지:')) sceneImage = line.replace(/^- 장면이미지:\s*/, '').trim();
+      else if (line.startsWith('- 이미지프롬프트:')) imagePrompt = line.replace(/^- 이미지프롬프트:\s*/, '');
       else if (line.startsWith('- CLEAN:')) clean = line.replace(/^- CLEAN:\s*/, '');
       else if (line.startsWith('- INFO:')) info = line.replace(/^- INFO:\s*/, '');
       else if (line.startsWith('- 영상:')) video = line.replace(/^- 영상:\s*/, '');
       else if (line.startsWith('- 자료:')) media.push(line.replace(/^- 자료:\s*/, '').trim());
     }
-    return { id, title, script, note, clean, info, video, media };
+    return { id, title, script, note, time, sceneImage, imagePrompt, clean, info, video, media };
   });
 }
 
-type SceneBlock = { id: string; title: string; script: string; note: string; clean: string; info: string; video: string; media: string[] };
-const EMPTY_SCENE_DRAFT: SceneBlock = { id: '', title: '', script: '', note: '', clean: '', info: '', video: '', media: [] };
+// 13번(이미지/영상 생성) 스토리보드 한 행 — 열 구성은 사용자 지시(2026-09-07): 타임/장면이미지/
+// 이미지 프롬프트/영상프롬프트 or 전환프롬프트. clean/info(구 A안 2장 방식)는 하위호환용으로 남기고
+// 화면에선 "고급 옵션"처럼 접어둔다.
+type SceneBlock = {
+  id: string;
+  title: string;
+  script: string;
+  note: string;
+  time: string;
+  sceneImage: string;
+  imagePrompt: string;
+  clean: string;
+  info: string;
+  video: string; // = 영상프롬프트 or 전환프롬프트
+  media: string[];
+};
+const EMPTY_SCENE_DRAFT: SceneBlock = {
+  id: '',
+  title: '',
+  script: '',
+  note: '',
+  time: '',
+  sceneImage: '',
+  imagePrompt: '',
+  clean: '',
+  info: '',
+  video: '',
+  media: [],
+};
 
 // Flow 등에서 만든 이미지/영상을 다운로드해서 여기로 업로드하면 /api/upload가 honghub-files
 // Storage에 영구 저장하고 공개 URL을 돌려준다(Flow 자체 링크는 구글 로그인 세션에 묶이거나
@@ -250,6 +291,9 @@ function serializeSceneBlocks(scenes: SceneBlock[]): string {
       const lines = [`### ${s.id}${s.title ? ` ${s.title}` : ''}`];
       if (s.script) lines.push(`대본: ${s.script}`);
       if (s.note) lines.push(`- 해석: ${s.note}`);
+      if (s.time) lines.push(`- 시간: ${s.time}`);
+      if (s.sceneImage) lines.push(`- 장면이미지: ${s.sceneImage}`);
+      if (s.imagePrompt) lines.push(`- 이미지프롬프트: ${s.imagePrompt}`);
       if (s.clean) lines.push(`- CLEAN: ${s.clean}`);
       if (s.info) lines.push(`- INFO: ${s.info}`);
       if (s.video) lines.push(`- 영상: ${s.video}`);
@@ -310,6 +354,20 @@ function SceneDraftForm({
     }
   }
 
+  async function handleSceneImage(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setUploadError('');
+    try {
+      const url = await uploadSceneMedia(files[0]);
+      setDraft({ ...draft, sceneImage: url });
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 space-y-1.5">
       <div className="flex gap-1.5">
@@ -320,9 +378,15 @@ function SceneDraftForm({
           className="w-24 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
         />
         <input
+          value={draft.time}
+          onChange={(e) => setDraft({ ...draft, time: e.target.value })}
+          placeholder="타임 (예: 0:00-0:07)"
+          className="w-32 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
+        />
+        <input
           value={draft.title}
           onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-          placeholder="장면 제목 (예: 오프닝훅·4초)"
+          placeholder="장면 제목 (예: 오프닝훅)"
           className="flex-1 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
         />
       </div>
@@ -333,15 +397,47 @@ function SceneDraftForm({
         placeholder="대본 문장 (선택)"
         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
       />
+      <div>
+        <p className="text-[10px] font-black text-neutral-400 mb-1">장면이미지 — Flow 등에서 생성한 결과물을 여기 올려두면 스토리보드 썸네일로 보입니다</p>
+        {draft.sceneImage ? (
+          <div className="flex items-center gap-1.5 mb-1">
+            <img src={draft.sceneImage} alt={draft.title} className="w-16 h-16 object-cover rounded-lg border border-neutral-200" />
+            <button onClick={() => setDraft({ ...draft, sceneImage: '' })} className="text-[10px] font-black text-neutral-400 hover:text-red-500">
+              ✕ 제거
+            </button>
+          </div>
+        ) : (
+          <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
+            {uploading ? '업로드 중...' : '+ 장면이미지 업로드'}
+            <input
+              type="file"
+              accept="image/*"
+              disabled={uploading}
+              onChange={(e) => {
+                handleSceneImage(e.target.files);
+                e.target.value = '';
+              }}
+              className="hidden"
+            />
+          </label>
+        )}
+      </div>
+      <textarea
+        value={draft.imagePrompt}
+        onChange={(e) => setDraft({ ...draft, imagePrompt: e.target.value })}
+        rows={3}
+        placeholder="이미지 프롬프트 — 위 장면이미지를 생성할 때 쓴(또는 쓸) 프롬프트"
+        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed"
+      />
       <textarea
         value={draft.video}
         onChange={(e) => setDraft({ ...draft, video: e.target.value })}
-        rows={4}
-        placeholder="영상 생성 프롬프트 — 텍스트→영상 직접 생성 방식이면 이 칸 하나만 채우면 됨"
+        rows={3}
+        placeholder="영상프롬프트 or 전환프롬프트 — 장면이미지를 영상 클립으로 만들 때 쓰는 프롬프트, 또는 다음 장면으로 넘어가는 전환 연출 지시"
         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed"
       />
       <details className="text-[10px]">
-        <summary className="cursor-pointer text-neutral-400 font-bold">CLEAN/INFO 이미지 프롬프트 (이미지 2장 방식 쓸 때만)</summary>
+        <summary className="cursor-pointer text-neutral-400 font-bold">CLEAN/INFO 이미지 프롬프트 (구버전 이미지 2장 방식 — 지금은 위 "이미지 프롬프트" 하나만 쓰면 됨)</summary>
         <div className="space-y-1.5 mt-1.5">
           <textarea
             value={draft.clean}
@@ -449,12 +545,6 @@ function SceneEditorList({
     if (!confirm(`${scenes[idx].id} 장면을 삭제할까요?`)) return;
     await onSave(serializeSceneBlocks(scenes.filter((_, i) => i !== idx)));
   }
-  // 장면 편집 폼에 안 들어가고, 보기 화면에서 첨부 하나만 바로 뗄 수 있게(수정 모드까지 안 열어도 되게).
-  async function removeSceneMedia(sceneIdx: number, mediaIdx: number) {
-    const next = scenes.map((s, i) => (i === sceneIdx ? { ...s, media: s.media.filter((_, j) => j !== mediaIdx) } : s));
-    await onSave(serializeSceneBlocks(next));
-  }
-
   // 형식이 안 맞는 예전 자유 텍스트 — 그대로 보여주되 장면 추가는 여전히 가능하게 둔다.
   if (scenes.length === 0 && scenePrompts.trim()) {
     return (
@@ -471,89 +561,102 @@ function SceneEditorList({
     );
   }
 
+  // 2026-09-07, 사용자 지시로 13번을 스토리보드 표 형태로 재구성: 타임 / 장면이미지 / 이미지
+  // 프롬프트 / 영상프롬프트 or 전환프롬프트 4개 열. 수정 중인 행만 SceneDraftForm으로 펼치고,
+  // 나머지는 표 한 줄로 스캔하기 쉽게 보여준다. 좁은 패널이라 가로 스크롤로 감싼다.
   return (
     <div className="space-y-1.5 mt-1">
       {scenes.length === 0 && editingIndex === null && <p className="text-[11px] text-neutral-300">아직 없음</p>}
-      {scenes.map((s, idx) =>
-        editingIndex === idx ? (
-          <SceneDraftForm key={s.id || idx} draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
-        ) : (
-          <details key={s.id || idx} className="bg-white border border-neutral-100 rounded-lg">
-            <summary className="cursor-pointer px-2.5 py-2 text-[11px] font-bold flex items-center gap-2 select-none">
-              <span className="text-neutral-400 shrink-0">{s.id}</span>
-              <span className="flex-1 min-w-0 truncate">{s.title}</span>
-              <span
-                role="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  startEdit(idx);
-                }}
-                className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
-              >
-                ✏️
-              </span>
-              <span
-                role="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  removeScene(idx);
-                }}
-                className="shrink-0 text-[10px] font-bold text-red-500 hover:underline"
-              >
-                🗑
-              </span>
-            </summary>
-            <div className="px-2.5 pb-2.5 pt-1 border-t border-neutral-50 space-y-1.5">
-              {s.script && <p className="text-[11px] text-neutral-500 italic">&quot;{s.script}&quot;</p>}
-              {s.note && (
-                <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-md px-2 py-1 leading-relaxed">🇰🇷 {s.note}</p>
-              )}
-              {s.clean && (
-                <div className="flex items-start gap-1.5">
-                  <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">CLEAN</span>
-                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.clean}</p>
-                  <CopyButton text={s.clean} />
-                </div>
-              )}
-              {s.info && (
-                <div className="flex items-start gap-1.5">
-                  <span className="shrink-0 text-[10px] font-black text-cyan-600 mt-0.5 w-10">INFO</span>
-                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.info}</p>
-                  <CopyButton text={s.info} />
-                </div>
-              )}
-              {s.video && (
-                <div className="flex items-start gap-1.5">
-                  <span className="shrink-0 text-[10px] font-black text-amber-600 mt-0.5 w-10">영상</span>
-                  <p className="flex-1 text-[11px] text-neutral-600 leading-relaxed">{s.video}</p>
-                  <CopyButton text={s.video} />
-                </div>
-              )}
-              {s.media.length > 0 && (
-                <div>
-                  <p className="text-[10px] font-black text-neutral-400 mb-1">📎 자료</p>
-                  <div className="space-y-1">
-                    {s.media.map((url, mi) => (
-                      <div key={mi} className="flex items-center gap-1.5 bg-white border border-neutral-200 rounded-lg px-2 py-1">
-                        <a href={url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
-                          {url}
-                        </a>
-                        <CopyButton text={url} />
-                        <button
-                          onClick={() => removeSceneMedia(idx, mi)}
-                          title="첨부 삭제"
-                          className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500"
-                        >
-                          ✕
+      {scenes.length > 0 && (
+        <div className="overflow-x-auto border border-neutral-100 rounded-lg">
+          <table className="w-full text-[11px] border-collapse min-w-[640px]">
+            <thead>
+              <tr className="bg-neutral-50 text-neutral-400">
+                <th className="text-left font-black px-2 py-1.5 w-28">장면</th>
+                <th className="text-left font-black px-2 py-1.5 w-20">타임</th>
+                <th className="text-left font-black px-2 py-1.5 w-20">장면이미지</th>
+                <th className="text-left font-black px-2 py-1.5">이미지 프롬프트</th>
+                <th className="text-left font-black px-2 py-1.5">영상/전환 프롬프트</th>
+                <th className="text-left font-black px-2 py-1.5 w-14">관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scenes.map((s, idx) =>
+                editingIndex === idx ? (
+                  <tr key={s.id || idx}>
+                    <td colSpan={6} className="p-1.5 bg-neutral-50">
+                      <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={s.id || idx} className="border-t border-neutral-100 align-top">
+                    <td className="px-2 py-1.5">
+                      <span className="font-mono text-neutral-400">{s.id}</span>
+                      {s.title && <div className="font-bold truncate max-w-[7rem]">{s.title}</div>}
+                    </td>
+                    <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap">{s.time || '—'}</td>
+                    <td className="px-2 py-1.5">
+                      {s.sceneImage ? (
+                        <img src={s.sceneImage} alt={s.title} className="w-14 h-14 object-cover rounded-md border border-neutral-200" />
+                      ) : (
+                        <div className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight">
+                          없음
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {s.imagePrompt ? (
+                        <div className="flex items-start gap-1">
+                          <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-3">{s.imagePrompt}</p>
+                          <CopyButton text={s.imagePrompt} />
+                        </div>
+                      ) : (s.clean || s.info) ? (
+                        <div className="space-y-1">
+                          {s.clean && (
+                            <div className="flex items-start gap-1">
+                              <span className="shrink-0 text-[9px] font-black text-cyan-600 w-9">CLEAN</span>
+                              <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.clean}</p>
+                              <CopyButton text={s.clean} />
+                            </div>
+                          )}
+                          {s.info && (
+                            <div className="flex items-start gap-1">
+                              <span className="shrink-0 text-[9px] font-black text-cyan-600 w-9">INFO</span>
+                              <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.info}</p>
+                              <CopyButton text={s.info} />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-neutral-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {s.video ? (
+                        <div className="flex items-start gap-1">
+                          <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-3">{s.video}</p>
+                          <CopyButton text={s.video} />
+                        </div>
+                      ) : (
+                        <span className="text-neutral-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex flex-col gap-1">
+                        <button onClick={() => startEdit(idx)} className="text-[10px] font-bold text-blue-600 hover:underline text-left">
+                          수정
+                        </button>
+                        <button onClick={() => removeScene(idx)} className="text-[10px] font-bold text-red-500 hover:underline text-left">
+                          삭제
                         </button>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </td>
+                  </tr>
+                )
               )}
-            </div>
-          </details>
-        )
+            </tbody>
+          </table>
+        </div>
       )}
       {editingIndex === -1 && (
         <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
@@ -3179,11 +3282,29 @@ function CharacterDraftForm({
 // 반복해서 쓰는 캐릭터(호스트 젠틀맨 루즈, 출연 캐릭터 등)를 등록/수정/삭제한다. 특정 콘텐츠가
 // 아니라 채널 전체 자산이라 site.script_draft.characters(최상위)에 저장하고, 13번(이미지/영상
 // 생성)에서 프롬프트를 짤 때 여기 설명을 그대로 참고한다.
-function CharacterPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
-  const characters = site.script_draft?.characters || [];
+// CharacterPanel(채널 공용)과 유닛별 캐릭터 목록이 완전히 같은 목록+추가/수정/삭제 UI를 쓰기 때문에
+// (2026-09-07, 유닛별 분리 리팩터링 때) 공통 렌더링만 여기로 뽑았다. 저장 방식(어느 API body 필드로
+// 보낼지)은 부모가 onSave로 넘겨준다 — 이 컴포넌트는 무엇을 저장하는지 모른다.
+function CharacterListEditor({
+  characters,
+  onSave,
+  saving,
+  emptyText,
+  numbered,
+}: {
+  characters: Character[];
+  onSave: (next: Character[]) => void | Promise<void>;
+  saving: boolean;
+  emptyText: string;
+  // 2026-09-07 추가 — 메인 캐릭터(진행자) 목록 전용. 지금은 1명뿐이지만, 사용자가 "앞으로 여러
+  // 진행자를 만들어서 컨셉에 따라 골라 쓰면 좋겠다"고 해서 순번(1번/2번…)을 카드 위에 표시해둔다.
+  numbered?: boolean;
+}) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 캐릭터 추가 중
   const [draft, setDraft] = useState<CharacterDraft>(EMPTY_CHARACTER_DRAFT);
-  const [saving, setSaving] = useState(false);
+  // 2026-09-07 추가 — 캐릭터 썸네일이 너무 작아서 클릭하면 ImagePreviewModal(기존 컴포넌트 재사용)로
+  // 크게 볼 수 있게 함(사용자 지적: "클릭하면 보이지도 않고").
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
   function startEdit(idx: number) {
     setEditingIndex(idx);
@@ -3197,65 +3318,53 @@ function CharacterPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
     setEditingIndex(null);
     setDraft(EMPTY_CHARACTER_DRAFT);
   }
-  async function save(next: Character[]) {
-    setSaving(true);
-    try {
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, characters: next }),
-      });
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
-  }
   async function saveDraft() {
     const next = editingIndex === -1 ? [...characters, draft] : characters.map((c, i) => (i === editingIndex ? draft : c));
-    await save(next);
+    await onSave(next);
     setEditingIndex(null);
     setDraft(EMPTY_CHARACTER_DRAFT);
   }
   async function removeCharacter(idx: number) {
     if (!confirm(`"${characters[idx].name}" 캐릭터를 삭제할까요?`)) return;
-    await save(characters.filter((_, i) => i !== idx));
+    await onSave(characters.filter((_, i) => i !== idx));
   }
 
   return (
-    <div className="space-y-2">
-      <p className="text-[11px] text-neutral-400 leading-relaxed">
-        만화책의 등장인물 소개 페이지처럼, 이 채널에 반복해서 나올 캐릭터를 여기 등록해두세요. 13번(이미지/영상 생성)에서
-        프롬프트를 짤 때 여기 설명을 그대로 참고합니다.
-      </p>
-      {characters.length === 0 && editingIndex === null && <p className="text-[11px] text-neutral-300">아직 등록된 캐릭터가 없어요.</p>}
+    <div className="space-y-1.5">
+      {characters.length === 0 && editingIndex === null && <p className="text-[11px] text-neutral-300">{emptyText}</p>}
       {characters.map((c, idx) =>
         editingIndex === idx ? (
           <CharacterDraftForm key={c.id || idx} draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
         ) : (
-          <div key={c.id || idx} className="flex items-start gap-2 bg-white border border-neutral-100 rounded-lg p-2">
-            {c.imageUrl ? (
-              <img src={c.imageUrl} alt={c.name} className="w-14 h-14 object-cover rounded-lg border border-neutral-200 shrink-0" />
-            ) : (
-              <div className="w-14 h-14 rounded-lg bg-neutral-50 border border-neutral-200 shrink-0 flex items-center justify-center text-neutral-300 text-[10px] text-center leading-tight">
-                이미지
-                <br />
-                없음
+          <div key={c.id || idx}>
+            {numbered && <p className="text-[10px] font-black text-neutral-400 mb-0.5 ml-0.5">{idx + 1}번</p>}
+            <div className="flex items-start gap-2 bg-white border border-neutral-100 rounded-lg p-2">
+              {c.imageUrl ? (
+                <button type="button" onClick={() => setPreviewSrc(c.imageUrl!)} className="shrink-0">
+                  <img src={c.imageUrl} alt={c.name} className="w-14 h-14 object-cover rounded-lg border border-neutral-200 hover:opacity-80" />
+                </button>
+              ) : (
+                <div className="w-14 h-14 rounded-lg bg-neutral-50 border border-neutral-200 shrink-0 flex items-center justify-center text-neutral-300 text-[10px] text-center leading-tight">
+                  이미지
+                  <br />
+                  없음
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm font-bold truncate">{c.name}</span>
+                  {c.role && <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">{c.role}</span>}
+                </div>
+                {c.description && <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{c.description}</p>}
               </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold truncate">{c.name}</span>
-                {c.role && <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">{c.role}</span>}
+              <div className="shrink-0 flex items-center gap-1.5">
+                <button onClick={() => startEdit(idx)} className="text-[11px] font-bold text-blue-600 hover:underline">
+                  수정
+                </button>
+                <button onClick={() => removeCharacter(idx)} className="text-[11px] font-bold text-neutral-400 hover:text-red-500">
+                  삭제
+                </button>
               </div>
-              {c.description && <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{c.description}</p>}
-            </div>
-            <div className="shrink-0 flex items-center gap-1.5">
-              <button onClick={() => startEdit(idx)} className="text-[11px] font-bold text-blue-600 hover:underline">
-                수정
-              </button>
-              <button onClick={() => removeCharacter(idx)} className="text-[11px] font-bold text-neutral-400 hover:text-red-500">
-                삭제
-              </button>
             </div>
           </div>
         )
@@ -3267,6 +3376,93 @@ function CharacterPanel({ site, onRefresh }: { site: Site; onRefresh: () => void
           + 캐릭터 추가
         </button>
       )}
+      {previewSrc && <ImagePreviewModal src={previewSrc} onClose={() => setPreviewSrc(null)} />}
+    </div>
+  );
+}
+
+// 유닛(콘텐츠) 하나의 캐릭터 목록 — 자료조사(ResearchPanel) 등과 같은 펼치기 카드 패턴.
+function UnitCharacterCard({ site, unit, onRefresh }: { site: Site; unit: ContentUnit; onRefresh: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const units = site.script_draft?.units || [];
+  const chars = unit.characters || [];
+
+  async function saveUnitCharacters(next: Character[]) {
+    setSaving(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unit.id ? { ...u, characters: next } : u)) }),
+      });
+      onRefresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+      <button onClick={() => setOpen((v) => !v)} className="w-full text-left px-3 py-2 flex items-center gap-2">
+        <span className={`shrink-0 text-neutral-300 transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+        <span className="flex-1 min-w-0 text-[11px] font-bold truncate">{unit.title}</span>
+        <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">
+          캐릭터 {chars.length}
+        </span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 pt-1 border-t border-neutral-100">
+          <p className="text-[10px] text-neutral-400 mb-1.5">소재: {unit.material}</p>
+          <CharacterListEditor characters={chars} onSave={saveUnitCharacters} saving={saving} emptyText="이 콘텐츠 전용 캐릭터가 아직 없어요." />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CharacterPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
+  const mainCharacters = site.script_draft?.characters || [];
+  const units = site.script_draft?.units || [];
+  const [savingMain, setSavingMain] = useState(false);
+
+  async function saveMainCharacters(next: Character[]) {
+    setSavingMain(true);
+    try {
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, characters: next }),
+      });
+      onRefresh();
+    } finally {
+      setSavingMain(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <p className="text-[11px] text-neutral-400 leading-relaxed">
+          채널 전체를 관통하는 진행자처럼, 모든 콘텐츠에 재사용할 캐릭터만 여기 등록하세요. 특정 콘텐츠 하나에서만 쓰는
+          배역(소재를 의인화한 캐릭터 등)은 아래 "콘텐츠별 캐릭터"에서 그 콘텐츠 밑에 등록하세요. 지금은 1명뿐이지만
+          앞으로 컨셉별로 여러 진행자를 만들어 골라 쓸 수 있게 번호를 붙여둡니다.
+        </p>
+        <CharacterListEditor
+          characters={mainCharacters}
+          onSave={saveMainCharacters}
+          saving={savingMain}
+          emptyText="아직 등록된 메인 캐릭터가 없어요."
+          numbered
+        />
+      </div>
+      <div className="space-y-1.5">
+        <p className="text-[10px] font-black text-neutral-400">콘텐츠별 캐릭터 — 13번(이미지/영상 생성)에서 프롬프트를 짤 때 여기 설명을 그대로 참고합니다.</p>
+        {units.length === 0 && <p className="text-[11px] text-neutral-300">아직 등록된 콘텐츠가 없어요 — 5·6번에서 소재를 먼저 확정하세요.</p>}
+        {units.map((u) => (
+          <UnitCharacterCard key={u.id} site={site} unit={u} onRefresh={onRefresh} />
+        ))}
+      </div>
     </div>
   );
 }
