@@ -484,8 +484,21 @@ export function CharacterDraftForm({
             </button>
           </div>
         )}
+        {/* 2026-09-08 추가 — 지금까지 파일 업로드(uploadSceneMedia)만 있어서, Flow에서 이미지를
+            만든 뒤 로컬로 다운로드→업로드하는 왕복이 필요했다. Flow가 실제 이미지 파일 URL을
+            바로 주는 경우(다운로드 없이 "이미지 주소 복사" 등)엔 그 URL을 여기 바로 붙여넣게
+            해서 왕복을 없앤다(사용자 지시: "이미지 URL을 직접 붙여넣는 입력칸 추가"). Flow의
+            "공유" 페이지 링크(labs.google/fx/tools/flow/shared/...)는 HTML 페이지라 <img> src로
+            안 먹히니, 실제 이미지 파일 주소를 넣어야 한다는 걸 placeholder에 짧게 안내한다. */}
+        <input
+          type="text"
+          value={draft.imageUrl}
+          onChange={(e) => setDraft({ ...draft, imageUrl: e.target.value })}
+          placeholder="이미지 URL 붙여넣기 (실제 이미지 파일 주소 — Flow 공유 페이지 링크는 안 됨)"
+          className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] mb-1.5"
+        />
         <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
-          {uploading ? '업로드 중...' : draft.imageUrl ? '이미지 교체' : '+ 캐릭터 시트 이미지 업로드'}
+          {uploading ? '업로드 중...' : draft.imageUrl ? '이미지 교체(파일 업로드)' : '+ 캐릭터 시트 이미지 업로드'}
           <input
             type="file"
             accept="image/*"
@@ -588,11 +601,13 @@ export function CharacterListEditor({
                 </div>
               )}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm font-bold truncate">{c.name}</span>
-                  {c.role && <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">{c.role}</span>}
-                </div>
-                {c.description && <p className="text-[11px] text-neutral-500 leading-relaxed mt-0.5 line-clamp-2">{c.description}</p>}
+                {/* 2026-09-08 수정 — 이름+역할을 한 줄에 나란히 두면(이름은 truncate, 역할은
+                    shrink-0) 역할 텍스트가 길 때(예: 소재별 배역 설명) 이름이 거의 안 보이게
+                    잘렸다(사용자 지적: "이름이 가려서 안보이자나"). 이름/역할/설명을 각자 줄에
+                    풀네임으로 세로로 쌓는 걸로 바꿔서 셋 다 안 잘리고 다 보이게 했다. */}
+                <p className="text-sm font-bold leading-snug">{c.name}</p>
+                {c.role && <p className="text-[10px] font-bold text-neutral-400 mt-0.5 leading-snug">{c.role}</p>}
+                {c.description && <p className="text-[11px] text-neutral-500 leading-relaxed mt-1 line-clamp-2">{c.description}</p>}
               </div>
               <div className="shrink-0 flex items-center gap-1.5">
                 <button onClick={() => startEdit(idx)} className="text-[11px] font-bold text-blue-600 hover:underline">
