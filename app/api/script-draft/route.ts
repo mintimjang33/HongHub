@@ -161,7 +161,7 @@ ${itemLines || '(없음)'}
 방재 공학, 기후 온난화로 새롭게 부각되는 이상기후 대응 공학, 최근 뉴스에 나온 홍수·산사태 같은 재해와 그
 배경 원리 등. 다만 이런 최신 이슈는 특히 조심해야 해 — 최근 며칠~몇 주 안에 일어난 사건은 네가 정확한
 세부사항(날짜, 피해 규모, 원인)을 모를 수도 있으니, 구체적 수치를 확신 없이 쓰지 말고 "최근 [나라]에서
-발생한 [현상]" 정도로만 소재를 제안하고, 실제 대본 작성 전에 사람이 뉴스를 직접 검색해서 사실관계를
+발생한 [현상]" 정도로만 소재를 제안하고, 실제 대본 작성 전에 사람이 직접 뉴스를 검색해서 사실관계를
 확인해야 한다고 명시해줘. 다만 사상자가 크게 발생한 인명 피해 위주의 사건이면 여기(트리비아 톤) 대신
 "대참사/사건" 카테고리로 다루라고 알려줘 — 그쪽은 톤이 완전히 다르다.
 
@@ -711,7 +711,7 @@ export async function POST(request: Request) {
       reviewText = await callGeminiVision({
         systemPrompt:
           unitCategory === 'disaster'
-            ? '너는 재난·사고 보도 콘텐츠의 팩트체커 겸 편집장이다. 자극적인 표현이나 부적절한 톤을 엄격하게 걸러낸다.'
+            ? '너는 재난·사고 콘텐츠의 팩트체커 겸 편집장이다. 자극적인 표현이나 부적절한 톤을 엄격하게 걸러낸다.'
             : '너는 유튜브 쇼츠 콘텐츠 QA 담당자다. 냉정하고 구체적으로 평가한다.',
         userPrompt: buildReviewPrompt(site.analysis_result || {}, title, script, unitCategory),
         model: MODEL,
@@ -897,6 +897,18 @@ export async function POST(request: Request) {
 }
 
 // 소재/제목을 클릭으로 고르거나, 구독으로 받은 결과를 붙여넣어 저장할 때 쓰는 patch.
+//
+// ⚠️ 2026-09-08 버그 수정 — "유닛 하나의 필드 몇 개만 바꾸는" 대다수의 저장(전략/훅/기획서/사실확인/
+// 대본수정/캐릭터 등)이 지금까지 "이 화면이 들고 있는 units 배열 전체"를 통째로 다시 보내는 방식이었다.
+// 그런데 그 배열은 이 화면을 마지막으로 불러온 시점의 스냅샷이라서, 그 사이에 다른 탭이나 다른 경로
+// (예: MCP로 직접 DB에 쓴 결과)로 다른 유닛/다른 필드가 갱신됐다면, 그 갱신은 이 오래된 스냅샷으로 그냥
+// 덮어써져서 조용히 사라진다 — 실제로 전략(strategyOptions/selectedStrategy)을 MCP로 갱신해놨는데
+// 몇 분 뒤 화면에서 사소한 클릭 한 번 했다고 그 갱신이 통째로 원복되는 사고가 있었다. 원인은 여기 있던
+// `if ('units' in body) patch.units = body.units;` — 클라이언트가 보낸 배열을 검증 없이 그대로 믿고
+// 통째로 교체했기 때문. 이제 클라이언트가 "유닛 하나 + 바뀐 필드만"(unitPatch)을 보내면, 방금 위에서
+// 새로 읽어온 prevDraft.units(항상 최신)를 기준으로 그 필드만 병합한다 — 클라이언트가 들고 있는 나머지
+// 유닛/필드가 아무리 오래됐어도 서버의 최신 상태를 건드리지 않는다. 유닛을 통째로 추가/삭제/재배열하는
+// 것처럼 배열 구조 자체가 바뀌는 드문 작업(6번 콘텐츠 등록/삭제 등)만 기존처럼 `units` 전체 교체를 쓴다.
 export async function PATCH(request: Request) {
   const body = await request.json().catch(() => null);
   const siteId = body?.siteId?.trim();
@@ -920,8 +932,17 @@ export async function PATCH(request: Request) {
   if ('scriptJa' in body) patch.scriptJa = body.scriptJa;
   if ('sources' in body) patch.sources = body.sources;
   if ('factCheck' in body) patch.factCheck = body.factCheck;
-  if ('units' in body) patch.units = body.units;
   if ('characters' in body) patch.characters = body.characters;
+
+  // unitPatch: { id, fields } — 유닛 하나의 지정된 필드만, 방금 새로 읽어온 최신 units를 기준으로 병합.
+  // units: 배열 자체를 통째로 교체(유닛 추가/삭제 등 구조적 변경 전용, 하위호환 유지).
+  if (body?.unitPatch && typeof body.unitPatch === 'object' && body.unitPatch.id) {
+    const unitId: string = body.unitPatch.id;
+    const fields: Record<string, unknown> = body.unitPatch.fields || {};
+    patch.units = (prevDraft.units || []).map((u) => (u.id === unitId ? { ...u, ...fields } : u));
+  } else if ('units' in body) {
+    patch.units = body.units;
+  }
 
   const nextDraft: ScriptDraft = { ...prevDraft, ...patch, updated_at: new Date().toISOString() };
   const { error } = await supabase
