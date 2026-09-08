@@ -64,7 +64,7 @@ export function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () =
     await fetch('/api/script-draft', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, factCheck: nextFactCheck, sources: nextSources } : u)) }),
+      body: JSON.stringify({ siteId: site.id, unitPatch: { id, fields: { factCheck: nextFactCheck, sources: nextSources } } }),
     });
     onRefresh();
   }
@@ -75,7 +75,7 @@ export function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () =
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, factCheck } : u)) }),
+        body: JSON.stringify({ siteId: site.id, unitPatch: { id, fields: { factCheck } } }),
       });
       onRefresh();
     } finally {
@@ -90,7 +90,7 @@ export function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () =
     await fetch('/api/script-draft', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources: nextSources } : u)) }),
+      body: JSON.stringify({ siteId: site.id, unitPatch: { id, fields: { sources: nextSources } } }),
     });
     onRefresh();
   }
@@ -101,7 +101,7 @@ export function ResearchPanel({ site, onRefresh }: { site: Site; onRefresh: () =
     await fetch('/api/script-draft', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources: nextSources } : u)) }),
+      body: JSON.stringify({ siteId: site.id, unitPatch: { id, fields: { sources: nextSources } } }),
     });
     onRefresh();
   }
