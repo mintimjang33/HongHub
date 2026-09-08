@@ -10,11 +10,16 @@ import { CopyButton } from './shared';
 // 하는 대시보드로 잘못 만들었다가("저게 기획서야? 그냥 필드 나열 아니야?" 지적), 그 다음엔
 // "10단계의 핵심은 독립적으로 기획서를 새로 쓰는 것"이라는 지적으로 에디터를 추가했지만, 그
 // 에디터 문구도 여전히 "결정 사항을 종합해서 쓰라"는 요약 톤이었다 — "전략짜는 거라고" 지적을
-// 받고서야 placeholder/안내문을 "왜 이 조합이면 조회수가 잘 나올지"를 논증하게 바꿨다. 5·7·8·9번
-// 원본값은 "참고 자료"로만 접어두고, 진짜 기획서(planningDoc)는 그걸 근거로 사람이나 별도
-// 에이전트가 직접 조회수 전략을 한 편의 글로 써서 저장한다. **⚠️ 9번과 같은 이유의 독립성 규칙**:
-// 11번(대본)이 이미 쓰여 있는 콘텐츠라도, 그 대본을 훑어보고 기획서를 짜맞추면 안 된다 — 오직
-// 5(소재)·7(자료조사)·8(전략)·9(훅)만 근거로 새로 써야 한다.
+// 받고서야 placeholder/안내문을 "왜 이 조합이면 조회수가 잘 나올지"를 논증하게 바꿨다. **⚠️ 9번과
+// 같은 이유의 독립성 규칙**: 11번(대본)이 이미 쓰여 있는 콘텐츠라도, 그 대본을 훑어보고 기획서를
+// 짜맞추면 안 된다 — 오직 5(소재)·7(자료조사)·8(전략)·9(훅)만 근거로 새로 써야 한다.
+// 2026-09-08 수정 — 5·7·8·9번 원본값을 따로 접어서 보여주는 "참고자료" 섹션이 있었는데, 그 안의
+// 소재/자료조사/전략은 어차피 "🔍 제미나이 프롬프트" 복사 버튼 안에 이미 전문이 그대로 들어있어서
+// 중복이었고, 자료조사만 개수 요약("사실 약 20개 확보됨")으로 보여줘서 "이것도 따로 챙겨야 하나"
+// 혼란을 줬다(사용자 지적: "복사에 있는것을 쓸데없이 놔둬서 혼란을 주는거야?"). 반면 전략/훅을
+// "왜 골랐는지"(strategyReason/hookReason)는 참고자료 섹션에만 있고 복사 프롬프트엔 빠져있었다 —
+// 이건 실제로 유용한데 누락된 것이었다. 그래서 참고자료 섹션 자체는 없애고, 그 빠져있던 선택
+// 이유만 프롬프트에 추가했다.
 export function PlanningDocPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const draft = site.script_draft || {};
   const units = draft.units || [];
@@ -41,7 +46,6 @@ export function PlanningDocPanel({ site, onRefresh }: { site: Site; onRefresh: (
     <div className="space-y-2">
       {units.length === 0 && <p className="text-sm text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
       {units.map((u) => {
-        const factCount = (u.factCheck || '').split(/\n(?=①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|■)/).filter((s) => s.trim()).length;
         const inputsReady = Boolean(u.selectedStrategy && u.selectedHook);
         const docWritten = Boolean(u.planningDoc && u.planningDoc.trim());
         return (
@@ -88,8 +92,14 @@ ${u.factCheck || '(없음)'}
 [선택된 전략]
 ${u.selectedStrategy || '(미확정)'}
 
+[전략을 고른 이유]
+${u.strategyReason || '(없음)'}
+
 [선택된 훅]
-${u.selectedHook || '(미확정)'}`}
+${u.selectedHook || '(미확정)'}
+
+[훅을 고른 이유]
+${u.hookReason || '(없음)'}`}
                           />
                         </div>
                         {docWritten && <CopyButton text={u.planningDoc || ''} />}
@@ -108,7 +118,7 @@ ${u.selectedHook || '(미확정)'}`}
                   {editingDocId === u.id ? (
                     <div className="space-y-1.5">
                       <p className="text-[11px] text-amber-600 bg-amber-50 rounded-lg px-2 py-1.5 leading-relaxed">
-                        ⚠️ 이건 "왜 잘 나오는가" 논증문이 아니라 <b>실행 지침서</b>입니다 — 제목 후보·오프닝 초 단위 구성·본문 리듬·댓글유도 위치·길이를 구체적으로 지시하고, <b>위험요소·보완점도 최소 2개 이상</b> 반드시 쓰세요(자기 칭찬 금지). 아래 참고자료(5·7·8·9번)만 근거로 새로 쓰고, 11번에 이미 대본이 있어도 그걸 보고 짜맞추면 안 됩니다.
+                        ⚠️ 이건 "왜 잘 나오는가" 논증문이 아니라 <b>실행 지침서</b>입니다 — 제목 후보·오프닝 초 단위 구성·본문 리듬·댓글유도 위치·길이를 구체적으로 지시하고, <b>위험요소·보완점도 최소 2개 이상</b> 반드시 쓰세요(자기 칭찬 금지). 이 유닛의 5·7·8·9번(위 "🔍 제미나이 프롬프트" 안에 전문 포함)만 근거로 새로 쓰고, 11번에 이미 대본이 있어도 그걸 보고 짜맞추면 안 됩니다.
                       </p>
                       <textarea
                         value={docDraft}
@@ -141,45 +151,6 @@ ${u.selectedHook || '(미확정)'}`}
                     </p>
                   )}
                 </div>
-                <details className="text-xs">
-                  <summary className="cursor-pointer text-neutral-400 font-bold">참고자료 (5·7·8·9번 원본값 — 기획서 쓸 때만 참고, 그대로 베끼지 말 것)</summary>
-                  <div className="space-y-2 mt-2">
-                    <div>
-                      <p className="text-xs font-black text-neutral-400 mb-1">5. 소재</p>
-                      <p className="text-sm text-neutral-700 whitespace-pre-wrap leading-relaxed">{u.material || '(없음)'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-black text-neutral-400 mb-1">7. 자료조사</p>
-                      <p className="text-sm text-neutral-700">
-                        {u.factCheck ? `사실 약 ${factCount}개 확보됨` : '아직 없음 — 7번(자료조사)에서 먼저 채우세요.'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-black text-neutral-400 mb-1">8. 전략/컨셉</p>
-                      {u.selectedStrategy ? (
-                        <>
-                          <p className="text-sm font-bold text-neutral-800 whitespace-pre-wrap leading-relaxed">{u.selectedStrategy}</p>
-                          {u.strategyReason && (
-                            <p className="text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed mt-1">{u.strategyReason}</p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-sm text-neutral-300">아직 확정 안 됨 — 8번(전략/컨셉 확정)에서 먼저 고르세요.</p>
-                      )}
-                    </div>
-                    <div>
-                      <p className="text-xs font-black text-neutral-400 mb-1">9. 훅/인트로</p>
-                      {u.selectedHook ? (
-                        <>
-                          <p className="text-sm font-bold text-neutral-800 whitespace-pre-wrap leading-relaxed">{u.selectedHook}</p>
-                          {u.hookReason && <p className="text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed mt-1">{u.hookReason}</p>}
-                        </>
-                      ) : (
-                        <p className="text-sm text-neutral-300">아직 확정 안 됨 — 9번(훅/인트로 설계)에서 먼저 고르세요.</p>
-                      )}
-                    </div>
-                  </div>
-                </details>
               </div>
             )}
           </div>
