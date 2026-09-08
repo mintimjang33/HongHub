@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Site } from '../types';
+import { splitCandidates } from '../utils';
 import { CopyButton } from './shared';
 
 // 9번(훅/인트로 설계) 단계 전용 패널 — 본문 쓰기 전 도입부 후보를 여러 버전 적어보고 제일 강한 걸
@@ -42,7 +43,7 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
   async function addHook(id: string, text: string) {
     if (!text.trim()) return;
     const unit = units.find((u) => u.id === id);
-    await patchUnit(id, { hookOptions: [...(unit?.hookOptions || []), text.trim()] });
+    await patchUnit(id, { hookOptions: [...(unit?.hookOptions || []), ...splitCandidates(text)] });
   }
 
   async function deleteHook(id: string, idx: number) {
@@ -184,7 +185,8 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
                 <CopyButton
                   text={`[역할] 너는 우리 채널의 훅/인트로 작가다. 아래 소재·전략을 바탕으로, 시청자가 3초 안에 스크롤을 멈추게 만들 도입부 문장 후보를 2개 이상 실제 문장으로 써라. 구조 설명이 아니라 그대로 나레이션에 쓸 수 있는 완성된 문장으로 써라.
 
-[출력 형식]
+[출력 형식 — 반드시 정확히 지켜라]
+각 후보는 반드시 새 줄 맨 앞에서 "후보1:", "후보2:"처럼 "후보"+숫자+콜론으로 시작해라(예: "옵션 1:", "1.", "첫 번째:" 같은 다른 표기 금지). 이 형식으로 앱이 후보를 자동으로 나눠서 저장하니 절대 바꾸지 마라. 후보 외의 설명(왜 좋은지 등)은 붙이지 말고 문장만 출력해라.
 후보1: "[실제 도입부 문장, 2~4문장]"
 후보2: "[실제 도입부 문장, 2~4문장]"
 
