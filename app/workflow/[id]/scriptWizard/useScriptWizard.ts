@@ -1,21 +1,29 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Site, ContentUnit, UnitCategory } from '../types';
 
 // 5번(소재 선정)·11번(대본 작성)이 공유하는 위저드 상태/로직 — 원래 하나의 컴포넌트(Step5Panel)였던
-// 것을 번호별로 찾기 쉽게 파일을 나누기 위해 훅으로 뽑았다(2026-09-08). 소재→제목→대본이 draft
-// (site.script_draft) 최상위에 이어지는 하나의 상태라서, 5번(소재 고르기)과 11번(제목/대본 작성)은
-// 화면(JSX)만 다르고 상태는 반드시 같이 써야 한다 — 억지로 상태까지 쪼개면 두 파일이 서로의 상태를
-// props로 다시 주고받아야 해서 더 복잡해진다.
+// 것을 번호별로 찾기 쉽게 파일을 나누기 위해 훅으로 뽑았다(2026-09-08). 소재(draft.materials 등)는
+// 5번(소재 고르기)과 11번(제목/대본 작성) 둘 다 참조하는 하나의 상태라서 이 훅에 남아있다.
+// 2026-09-08 삭제 — "소재→제목 생성→대본 생성→제미나이 비교/업그레이드→finalizeUnit"으로 이어지던
+// 옛 단일 위저드는 이제 완전히 죽은 코드였다: 실제 흐름은 5번에서 소재만 확정하고, 6번
+// (ContentRegisterPanel)에서 제목을 직접 입력해 유닛을 바로 만든 다음, 11번에서 그 유닛에 제미나이
+// 프롬프트로 대본을 작성하는 방식으로 이미 바뀌어 있었다 — 5번은 소재(stage='materials') 생성만
+// 쓰고, 11번은 애초에 이 위저드 상태를 전혀 안 쓴다(사용자 지적: "죽은코드는 정리해"). 그래서
+// scriptDraftText, selectTitle, saveScript, finalizeUnit, 그리고 제미나이 비교/업그레이드
+// (copyComparePrompt/runCompare/runUpgrade 등, 유닛 전용 버전은 이미 이날 앞서 삭제됨)를 전부
+// 걷어내고, generate/copyPrompt/savePasted도 원래 4단계(소재/제목/대본/번역) 범용이었던 걸
+// 실제로 쓰이는 소재(materials) 생성 하나로 좁혔다. app/api/script-draft/route.ts 쪽 titles/
+// script/translate/compare/upgrade 핸들러는 이 UI에서는 더 이상 아무도 안 부르지만, 서버 파일이라
+// 더 큰 변경이라 이번엔 손대지 않았다 — 다음에 정리할 때 참고할 것.
 export function useScriptWizard(site: Site, onRefresh: () => void) {
   const draft = site.script_draft || {};
-  const [generating, setGenerating] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
-  const [copying, setCopying] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
-  const [copied, setCopied] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
-  const [pasteOpen, setPasteOpen] = useState<'materials' | 'titles' | 'script' | 'translate' | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [copying, setCopying] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
-  const [scriptDraftText, setScriptDraftText] = useState(draft.script || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
@@ -36,45 +44,20 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
   const [reviseCopiedId, setReviseCopiedId] = useState<string | null>(null);
   const [revisePasteOpenId, setRevisePasteOpenId] = useState<string | null>(null);
   const [revisePasteText, setRevisePasteText] = useState('');
-  // 한국어 대본 확정 전 "제미나이와 비교" 단계용 상태 — 결과는 고르는 게 아니라 합칠 재료라서
-  // draft에 바로 저장하지 않고 여기 임시로만 들고 있는다(2026-08-31).
-  const [compareCopying, setCompareCopying] = useState(false);
-  const [compareCopied, setCompareCopied] = useState(false);
-  const [comparePasteOpen, setComparePasteOpen] = useState(false);
-  const [comparePasteText, setComparePasteText] = useState('');
-  const [compareRunning, setCompareRunning] = useState(false);
-  const [compareResult, setCompareResult] = useState<{ factCheck: string; rewriteTitle?: string; rewriteScript?: string; sources?: string[] } | null>(null);
-  const [upgrading, setUpgrading] = useState(false);
-  const [upgradeCopying, setUpgradeCopying] = useState(false);
-  const [upgradeCopied, setUpgradeCopied] = useState(false);
-  const [upgradePasteOpen, setUpgradePasteOpen] = useState(false);
-  const [upgradePasteText, setUpgradePasteText] = useState('');
   const units = draft.units || [];
   // 소재(아이디어) 목록을 AI 추천/붙여넣기 말고 직접 추가·수정·삭제도 할 수 있게 하는 상태.
   const [newMaterialText, setNewMaterialText] = useState('');
   const [editingMaterialIdx, setEditingMaterialIdx] = useState<number | null>(null);
   const [editingMaterialText, setEditingMaterialText] = useState('');
 
-  useEffect(() => {
-    setScriptDraftText(draft.script || '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft.script]);
-
-  async function generate(stage: 'materials' | 'titles' | 'script' | 'translate') {
-    setGenerating(stage);
+  async function generate() {
+    setGenerating(true);
     setError('');
     try {
-      const body: Record<string, string> = { siteId: site.id, stage, category: draft.category || 'trivia' };
-      if (stage === 'titles') body.material = draft.selectedMaterial || '';
-      if (stage === 'script') body.title = draft.selectedTitle || '';
-      if (stage === 'translate') {
-        body.title = draft.selectedTitle || '';
-        body.script = scriptDraftText;
-      }
       const res = await fetch('/api/script-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ siteId: site.id, stage: 'materials', category: draft.category || 'trivia' }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '생성 실패');
@@ -82,82 +65,44 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setGenerating(null);
+      setGenerating(false);
     }
   }
 
-  async function copyPrompt(stage: 'materials' | 'titles' | 'script' | 'translate') {
-    setCopying(stage);
+  async function copyPrompt() {
+    setCopying(true);
     setError('');
     try {
-      const q = new URLSearchParams({ siteId: site.id, stage, category: draft.category || 'trivia' });
-      if (stage === 'titles') q.set('material', draft.selectedMaterial || '');
-      if (stage === 'script') q.set('title', draft.selectedTitle || '');
-      if (stage === 'translate') {
-        q.set('title', draft.selectedTitle || '');
-        q.set('script', scriptDraftText);
-      }
+      const q = new URLSearchParams({ siteId: site.id, stage: 'materials', category: draft.category || 'trivia' });
       const res = await fetch(`/api/script-draft?${q}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
       await navigator.clipboard.writeText(data.prompt);
-      setCopied(stage);
-      setPasteOpen(stage);
+      setCopied(true);
+      setPasteOpen(true);
       setPasteText('');
-      setTimeout(() => setCopied((cur) => (cur === stage ? null : cur)), 2500);
+      setTimeout(() => setCopied(false), 2500);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setCopying(null);
+      setCopying(false);
     }
   }
 
-  async function savePasted(stage: 'materials' | 'titles' | 'script' | 'translate') {
+  async function savePasted() {
     if (!pasteText.trim()) return;
     setSaving(true);
     setError('');
     try {
-      const patch: Record<string, unknown> = { siteId: site.id };
-      if (stage === 'materials') {
-        patch.materials = pasteText.split('\n').map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
-      } else if (stage === 'titles') {
-        patch.titles = pasteText.split('\n').map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
-      } else if (stage === 'translate') {
-        // stage=translate 응답은 [EN]/[JA]만 온다(한국어는 이미 확정된 상태).
-        const enMatch = pasteText.match(/\[EN\]([\s\S]*?)(?=\[JA\]|$)/);
-        const jaMatch = pasteText.match(/\[JA\]([\s\S]*?)$/);
-        const pickField = (block: string | undefined, field: 'Title' | 'Script') => {
-          if (!block) return undefined;
-          const m = block.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
-          return m ? m[1].trim() : undefined;
-        };
-        patch.titleEn = pickField(enMatch?.[1], 'Title') || null;
-        patch.scriptEn = pickField(enMatch?.[1], 'Script') || null;
-        patch.titleJa = pickField(jaMatch?.[1], 'Title') || null;
-        patch.scriptJa = pickField(jaMatch?.[1], 'Script') || null;
-      } else {
-        // stage=script 응답은 이제 한국어 대본 + 선택적 [SOURCES]만 온다(영어/일본어는 stage=translate로 분리).
-        const sourcesMatch = pasteText.match(/\[SOURCES\]([\s\S]*?)$/);
-        patch.script = pasteText.replace(/\[SOURCES\][\s\S]*$/, '').trim();
-        patch.sources = sourcesMatch
-          ? sourcesMatch[1].split('\n').map((s) => s.replace(/^\s*[-*\d.)]+\s*/, '').trim()).filter(Boolean)
-          : null;
-        // 새 한국어 대본이 나오면 이전 번역/사실확인은 이제 그 대본 것이 아니므로 같이 비운다.
-        // (JSON.stringify가 undefined 키는 그냥 통째로 빼먹어서 PATCH에 반영이 안 되니 null로 보내야 한다.)
-        patch.titleEn = null;
-        patch.scriptEn = null;
-        patch.titleJa = null;
-        patch.scriptJa = null;
-        patch.factCheck = null;
-      }
+      const materials = pasteText.split('\n').map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean);
       const res = await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
+        body: JSON.stringify({ siteId: site.id, materials }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '저장 실패');
-      setPasteOpen(null);
+      setPasteOpen(false);
       setPasteText('');
       onRefresh();
     } catch (err) {
@@ -250,7 +195,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
   // 있었다(전략 단계 저장이 몇 분 뒤 조용히 원복된 실사고). 서버(app/api/script-draft/route.ts의
   // PATCH)가 unitPatch를 받으면 방금 새로 읽은 최신 units를 기준으로 이 필드만 병합하므로, 이 화면이
   // 들고 있는 나머지 데이터가 오래됐어도 서버의 최신 상태를 건드리지 않는다. 유닛을 통째로 추가/삭제
-  // 하는 것처럼 배열 구조 자체가 바뀌는 작업(finalizeUnit 등)만 예외적으로 기존 방식(units 전체 교체)을 쓴다.
+  // 하는 것처럼 배열 구조 자체가 바뀌는 작업만 예외적으로 기존 방식(units 전체 교체)을 쓴다.
   async function patchUnitField(unitId: string, fields: Record<string, unknown>) {
     return fetch('/api/script-draft', {
       method: 'PATCH',
@@ -272,205 +217,6 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     onRefresh();
   }
 
-  async function selectTitle(t: string) {
-    await fetch('/api/script-draft', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, selectedTitle: t }),
-    });
-    onRefresh();
-  }
-
-  function parseComparePaste(text: string): { factCheck: string; rewriteTitle?: string; rewriteScript?: string; sources?: string[] } {
-    const factMatch = text.match(/\[FACT-CHECK\]([\s\S]*?)(?=\[REWRITE\]|\[SOURCES\]|$)/);
-    const rewriteMatch = text.match(/\[REWRITE\]([\s\S]*?)(?=\[SOURCES\]|$)/);
-    const sourcesMatch = text.match(/\[SOURCES\]([\s\S]*?)$/);
-    const pickField = (block: string | undefined, field: 'Title' | 'Script') => {
-      if (!block) return undefined;
-      const m = block.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
-      return m ? m[1].trim() : undefined;
-    };
-    return {
-      factCheck: (factMatch ? factMatch[1] : '').trim(),
-      rewriteTitle: pickField(rewriteMatch?.[1], 'Title'),
-      rewriteScript: pickField(rewriteMatch?.[1], 'Script'),
-      sources: sourcesMatch ? sourcesMatch[1].split('\n').map((s) => s.replace(/^\s*[-*\d.)]+\s*/, '').trim()).filter(Boolean) : undefined,
-    };
-  }
-
-  // "제미나이와 비교" — 확정 전 제목/대본을 실제 검색 그라운딩으로 사실확인 + 제미나이 자체 버전을 받아온다.
-  // 결과는 고르는 게 아니라 다음 단계(업그레이드)에서 원본과 합칠 재료라서 draft에 바로 저장하지 않는다.
-  async function copyComparePrompt() {
-    setCompareCopying(true);
-    setError('');
-    try {
-      const q = new URLSearchParams({ siteId: site.id, action: 'compare', title: draft.selectedTitle || '', script: scriptDraftText, category: draft.category || 'trivia' });
-      const res = await fetch(`/api/script-draft?${q}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
-      await navigator.clipboard.writeText(data.prompt);
-      setCompareCopied(true);
-      setComparePasteOpen(true);
-      setComparePasteText('');
-      setTimeout(() => setCompareCopied(false), 2500);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCompareCopying(false);
-    }
-  }
-
-  function saveComparePaste() {
-    if (!comparePasteText.trim()) return;
-    setCompareResult(parseComparePaste(comparePasteText));
-    setComparePasteOpen(false);
-  }
-
-  async function runCompare() {
-    setCompareRunning(true);
-    setError('');
-    try {
-      const res = await fetch('/api/script-draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, action: 'compare', title: draft.selectedTitle, script: scriptDraftText, category: draft.category || 'trivia' }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '비교 실패');
-      setCompareResult({ factCheck: data.factCheck || '', rewriteTitle: data.rewriteTitle, rewriteScript: data.rewriteScript, sources: data.sources });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCompareRunning(false);
-    }
-  }
-
-  // 원본 유지 — 비교는 했지만 제미나이 버전을 반영할 필요가 없다고 판단했을 때. 그래도 사실확인/출처는 남겨둔다.
-  async function keepOriginalAfterCompare() {
-    setSaving(true);
-    try {
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, factCheck: compareResult?.factCheck || null, sources: compareResult?.sources || null }),
-      });
-      setCompareResult(null);
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  // "업그레이드" — 원본과 제미나이 버전 중 하나를 고르는 게 아니라, 둘의 장점을 합친 제3의 최종본을 만든다.
-  // (사용자 지적: "교체가 아니라 두개를 보고 업그레이드를 해야지" — 2026-08-31)
-  async function runUpgrade() {
-    if (!compareResult) return;
-    setUpgrading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/script-draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId: site.id,
-          action: 'upgrade',
-          title: draft.selectedTitle,
-          script: scriptDraftText,
-          rewriteTitle: compareResult.rewriteTitle,
-          rewriteScript: compareResult.rewriteScript,
-          factCheck: compareResult.factCheck,
-          category: draft.category || 'trivia',
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '업그레이드 실패');
-      await applyUpgrade(data.title, data.script);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUpgrading(false);
-    }
-  }
-
-  async function copyUpgradePrompt() {
-    if (!compareResult) return;
-    setUpgradeCopying(true);
-    setError('');
-    try {
-      const q = new URLSearchParams({
-        siteId: site.id,
-        action: 'upgrade',
-        title: draft.selectedTitle || '',
-        script: scriptDraftText,
-        rewriteTitle: compareResult.rewriteTitle || '',
-        rewriteScript: compareResult.rewriteScript || '',
-        factCheck: compareResult.factCheck || '',
-        category: draft.category || 'trivia',
-      });
-      const res = await fetch(`/api/script-draft?${q}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
-      await navigator.clipboard.writeText(data.prompt);
-      setUpgradeCopied(true);
-      setUpgradePasteOpen(true);
-      setUpgradePasteText('');
-      setTimeout(() => setUpgradeCopied(false), 2500);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUpgradeCopying(false);
-    }
-  }
-
-  async function saveUpgradePaste() {
-    if (!upgradePasteText.trim()) return;
-    const pickField = (field: 'Title' | 'Script') => {
-      const m = upgradePasteText.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
-      return m ? m[1].trim() : undefined;
-    };
-    await applyUpgrade(pickField('Title'), pickField('Script'));
-    setUpgradePasteOpen(false);
-    setUpgradePasteText('');
-  }
-
-  async function applyUpgrade(title: string | undefined, script: string | undefined) {
-    const nextTitle = title || draft.selectedTitle || '';
-    const nextScript = script || scriptDraftText;
-    setScriptDraftText(nextScript);
-    setSaving(true);
-    try {
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId: site.id,
-          selectedTitle: nextTitle,
-          script: nextScript,
-          factCheck: compareResult?.factCheck || null,
-          sources: compareResult?.sources || null,
-        }),
-      });
-      setCompareResult(null);
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveScript() {
-    setSaving(true);
-    try {
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, script: scriptDraftText }),
-      });
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function resetAll() {
     if (!confirm('소재/제목/대본 선택을 전부 초기화할까요? (완성해서 저장해둔 콘텐츠 목록은 안 지워져요)')) return;
     await fetch('/api/script-draft', {
@@ -479,53 +225,6 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
       body: JSON.stringify({ siteId: site.id, materials: null, selectedMaterial: null, titles: null, selectedTitle: null, script: null, titleEn: null, scriptEn: null, titleJa: null, scriptJa: null, sources: null, factCheck: null }),
     });
     onRefresh();
-  }
-
-  // 소재 하나마다 별개 콘텐츠라서, 대본까지 완성되면 units 목록에 하나로 저장해두고
-  // 위저드는 비워서 같은 소재 추천 목록에서 바로 다음 걸 이어서 진행할 수 있게 한다.
-  async function finalizeUnit() {
-    if (!draft.selectedMaterial || !draft.selectedTitle || !scriptDraftText.trim()) return;
-    setSaving(true);
-    try {
-      const unit: ContentUnit = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        material: draft.selectedMaterial,
-        title: draft.selectedTitle,
-        script: scriptDraftText.trim(),
-        category: draft.category || 'trivia',
-        materialCandidates: draft.materials,
-        titleCandidates: draft.titles,
-        titleEn: draft.titleEn,
-        scriptEn: draft.scriptEn,
-        titleJa: draft.titleJa,
-        scriptJa: draft.scriptJa,
-        sources: draft.sources,
-        factCheck: draft.factCheck,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-      };
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId: site.id,
-          units: [...units, unit],
-          selectedMaterial: null,
-          titles: null,
-          selectedTitle: null,
-          script: null,
-          titleEn: null,
-          scriptEn: null,
-          titleJa: null,
-          scriptJa: null,
-          sources: null,
-          factCheck: null,
-        }),
-      });
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
   }
 
   // 2026-09-04 신규 — 이전엔 이 패널(11번 대본)의 삭제 버튼이 유닛 전체를 지우는 deleteUnit()을 그대로 써서,
@@ -702,8 +401,6 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     setPasteOpen,
     pasteText,
     setPasteText,
-    scriptDraftText,
-    setScriptDraftText,
     saving,
     error,
     openUnitId,
@@ -725,19 +422,6 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     revisePasteOpenId,
     revisePasteText,
     setRevisePasteText,
-    compareCopying,
-    compareCopied,
-    comparePasteOpen,
-    comparePasteText,
-    setComparePasteText,
-    compareRunning,
-    compareResult,
-    upgrading,
-    upgradeCopying,
-    upgradeCopied,
-    upgradePasteOpen,
-    upgradePasteText,
-    setUpgradePasteText,
     newMaterialText,
     setNewMaterialText,
     editingMaterialIdx,
@@ -755,17 +439,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     setCategory,
     setUnitTopic,
     saveSources,
-    selectTitle,
-    copyComparePrompt,
-    saveComparePaste,
-    runCompare,
-    keepOriginalAfterCompare,
-    runUpgrade,
-    copyUpgradePrompt,
-    saveUpgradePaste,
-    saveScript,
     resetAll,
-    finalizeUnit,
     clearScript,
     reviewUnit,
     copyReviewPrompt,
