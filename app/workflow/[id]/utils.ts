@@ -334,6 +334,17 @@ export function splitCandidates(text: string): string[] {
   return [trimmed];
 }
 
+// splitCandidates가 후보 분리 대상에서 빼버리는 "[최종 추천]" 뒤의 설명 — 후보 목록에는 안
+// 섞여야 하지만, 그렇다고 그냥 버려지면 안 된다(2026-09-08, 사용자 지적: "8번에서 A를 추천한
+// 이유가 아래에 있는데 왜 삭제되는거야?"). "+ 후보 추가"에서 이 함수로 따로 뽑아내서
+// strategyReason/hookReason에 자동으로 채워 넣는다. 라벨이 없으면(자유 텍스트만 붙여넣은 경우)
+// undefined를 돌려줘서 기존 선택 이유를 건드리지 않는다.
+export function extractRecommendation(text: string): string | undefined {
+  const match = text.match(/\[최종\s*추천\]([\s\S]*)$/);
+  const reason = match?.[1]?.trim();
+  return reason || undefined;
+}
+
 // 2026-09-01 이전엔 narrationUrls가 문자열 배열이었다 — 이미 저장된 예전 데이터를 위해
 // 문자열이 그대로 오면 라벨 없는 항목으로 취급한다.
 export function normalizeLabeledItems(raw: unknown): LabeledItem[] {
