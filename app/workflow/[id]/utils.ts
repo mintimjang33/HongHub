@@ -268,6 +268,12 @@ export function isImageVideoStep(step: Step): boolean {
 // 단계 이름/내용에 등장하는 키워드로 실제 작업 페이지 바로가기 링크를 만들어준다.
 // "채널 발굴"(1번), "소재 수집"(2번), "대본 수집"(3번) 단계는 이 페이지에서 바로 처리할 수 있게
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
+// 2026-09-09 수정 — isNarrationStep/isSubtitleStep/isImageVideoStep이 나중에(2026-09-06~07)
+// 신설됐을 때 이 제외 목록에 같이 추가하는 걸 빠뜨렸다. 그 결과 13(나레이션)·14(자막)·
+// 15(씬 분할+이미지 프롬프트) 단계는 전용 패널(NarrationPanel/SubtitlePanel/ImageVideoPanel)이
+// 이미 떠 있는데도, desc에 "생성"이라는 단어가 하나만 섞여 있으면(예: 14번 desc의 "음성에 맞춰
+// 생성") 엉뚱한 "🎯 소스 발굴 → 콘텐츠 생성 탭" 링크가 그 밑에 같이 붙어 나왔다(사용자 지적,
+// 14번 화면 스크린샷). 전용 패널이 있는 단계는 애초에 이 폴백 링크가 필요 없으므로 제외 목록에 추가.
 export function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
   if (
@@ -282,7 +288,10 @@ export function stepLink(step: Step): { href: string; label: string } | null {
     isStrategyStep(step) ||
     isHookStep(step) ||
     isPlanningDocStep(step) ||
-    isCharacterStep(step)
+    isCharacterStep(step) ||
+    isNarrationStep(step) ||
+    isSubtitleStep(step) ||
+    isImageVideoStep(step)
   )
     return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
