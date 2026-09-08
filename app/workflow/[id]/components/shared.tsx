@@ -47,7 +47,10 @@ export function ImagePreviewModal({ src, onClose }: { src: string; onClose: () =
 }
 
 // 프롬프트 한 줄(CLEAN/INFO/영상)을 클립보드에 복사하는 작은 버튼 — 눌렀을 때만 "복사됨"으로 잠깐 바뀐다.
-export function CopyButton({ text }: { text: string }) {
+// 2026-09-08 추가 — 선택적 label. 한 카드 안에 복사 버튼이 여러 개(예: 11번의 "전체 복사"/"TTS만
+// 복사") 있을 때 전부 "복사"로만 뜨면 뭘 누르는지 구분이 안 돼서, 버튼마다 다른 문구를 넣을 수
+// 있게 했다. label을 안 넘기면 기존 그대로 "복사"로 표시된다 — 기존 호출부는 전부 그대로 동작.
+export function CopyButton({ text, label }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   async function handleCopy() {
     try {
@@ -63,7 +66,7 @@ export function CopyButton({ text }: { text: string }) {
       onClick={handleCopy}
       className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full border bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300"
     >
-      {copied ? '복사됨' : '복사'}
+      {copied ? '복사됨' : label || '복사'}
     </button>
   );
 }
