@@ -232,7 +232,11 @@ ${u.factCheck || '(아직 없음 — 소재 설명만으로 판단)'}`}
                   </button>
                 </div>
               </div>
-              {u.selectedStrategy && (
+              {/* 2026-09-08 수정 — 예전엔 selectedStrategy가 있어야만 이 영역이 보여서, "+ 후보 추가"가
+                  자동으로 채워준 strategyReason이 있어도 "이 방향 선택"을 누르기 전까지는 화면에 아예
+                  안 보였다(사용자 지적: "[최종 추천]이 기록이 안되는데" — 실제로는 DB엔 저장돼 있었는데
+                  화면에 안 보였을 뿐). 선택 여부와 무관하게 이유가 있으면 보여준다. */}
+              {(u.selectedStrategy || u.strategyReason) && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-xs font-black text-neutral-400">선택 이유</p>
