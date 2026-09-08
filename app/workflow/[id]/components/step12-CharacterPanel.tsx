@@ -8,7 +8,6 @@ import { CharacterListEditor } from './shared';
 function UnitCharacterCard({ site, unit, onRefresh }: { site: Site; unit: ContentUnit; onRefresh: () => void }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const units = site.script_draft?.units || [];
   const chars = unit.characters || [];
 
   async function saveUnitCharacters(next: Character[]) {
@@ -17,7 +16,7 @@ function UnitCharacterCard({ site, unit, onRefresh }: { site: Site; unit: Conten
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unit.id ? { ...u, characters: next } : u)) }),
+        body: JSON.stringify({ siteId: site.id, unitPatch: { id: unit.id, fields: { characters: next } } }),
       });
       onRefresh();
     } finally {
