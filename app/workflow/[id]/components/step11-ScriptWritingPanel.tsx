@@ -176,7 +176,21 @@ export function ScriptWritingPanel({ site, onRefresh }: { site: Site; onRefresh:
 [젠틀맨 루즈 레퍼런스 이미지] https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/character-refs/economics-gentleman-rouge.jpg
 
 [이번 소재]
-${u.material}`}
+${u.material}
+
+[자료조사 — 이미 확인된 사실, 있으면 반드시 이 사실들을 근거로 써라]
+${u.factCheck || '(아직 없음 — 구글 검색으로 직접 조사해서 반영해도 좋음)'}
+
+[선택된 전략 — 이 방향으로 써라]
+${u.selectedStrategy || '(미확정)'}
+${u.strategyReason ? `(이 전략을 고른 이유: ${u.strategyReason})` : ''}
+
+[선택된 훅 — 콜드오픈/오프닝은 이 훅을 실제로 풀어서 써라]
+${u.selectedHook || '(미확정)'}
+${u.hookReason ? `(이 훅을 고른 이유: ${u.hookReason})` : ''}
+
+[기획서 — 오프닝 초단위 구성·본문 리듬·댓글유도 위치·길이·위험요소, 이 지침대로 써라]
+${u.planningDoc || '(미확정)'}`}
                         />
                       </div>
                       <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
