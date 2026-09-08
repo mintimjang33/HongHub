@@ -289,13 +289,15 @@ export function stepLink(step: Step): { href: string; label: string } | null {
   return null;
 }
 
-export function nextCharacterId(chars: { id: string }[]): string {
-  let max = 0;
-  for (const c of chars) {
-    const m = c.id.match(/(\d+)/);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return `C${String(max + 1).padStart(2, '0')}`;
+// 2026-09-08 수정 — 예전엔 "지금 화면이 들고 있는 characters 배열에서 최댓값+1"로 id를 계산했는데
+// (`C${max+1}`), 저장→onRefresh(재조회)가 비동기라 그 사이 짧은 시간차가 있고, 그 안에 "+ 캐릭터
+// 추가"를 다시 누르면 아직 방금 추가한 캐릭터가 반영 안 된 오래된 배열 기준으로 계산돼서 같은
+// id가 또 나왔다(실사고: 캐릭터를 연달아 추가하다 C01/C04가 두 번씩 나옴, 사용자 지적: "왜
+// id부여가 오류가 났는지 알아??"). 로컬 배열 상태에 의존하는 한 이 경쟁 상태는 근본적으로
+// 못 피한다 — 그래서 배열을 아예 안 보고, 유닛 id(finalizeUnit)·배역 추천 파서(parseCharacterPastes)
+// 등 이 코드베이스 다른 곳과 같은 방식(타임스탬프+랜덤)으로 항상 고유한 id를 만들도록 바꿨다.
+export function nextCharacterId(): string {
+  return `C${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 }
 
 // 제미나이가 여러 후보를 "후보1: ... \n\n후보2: ..." (9번 훅 프롬프트) 또는 "A) ... \nB) ..."
