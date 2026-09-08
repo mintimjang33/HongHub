@@ -7,6 +7,11 @@ import type { Site } from '../types';
 // 확정하면(✅ 이 소재로 확정) 6번(콘텐츠 등록) 탭으로 자동 이동한다. 제목·대본 작성은 11번
 // (step11-ScriptWritingPanel)의 몫 — 두 패널은 site.script_draft 최상위에 이어지는 같은 위저드
 // 상태를 useScriptWizard 훅으로 공유한다(2026-09-08, 번호별로 파일을 찾기 쉽게 분리).
+// 2026-09-08 삭제 — GenerateButtons/PasteBox가 원래 stage('materials'|'titles'|'script'|
+// 'translate') 파라미터를 받는 범용 컴포넌트였는데, 실제로는 이 패널에서 stage="materials"로만
+// 호출되고 있었다(제목·대본 생성은 11번이 별도 프롬프트로 처리, titles/script/translate 단계
+// 자체가 죽은 코드였음). useScriptWizard 훅에서 그 죽은 단계들을 걷어내면서(사용자 지적:
+// "죽은코드는 정리해"), 여기 stage 파라미터도 같이 없앴다 — 어차피 소재 추천 하나만 남았다.
 export function MaterialSelectionPanel({
   site,
   onRefresh,
@@ -20,22 +25,22 @@ export function MaterialSelectionPanel({
   const w = useScriptWizard(site, onRefresh);
   const { draft } = w;
 
-  function GenerateButtons({ stage }: { stage: 'materials' | 'titles' | 'script' | 'translate' }) {
+  function GenerateButtons() {
     return (
       <div className="flex gap-1.5 mb-2">
         <button
-          onClick={() => w.copyPrompt(stage)}
-          disabled={w.copying === stage}
+          onClick={w.copyPrompt}
+          disabled={w.copying}
           className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
         >
-          {w.copying === stage ? '준비 중...' : w.copied === stage ? '✅ 복사됨!' : '💬 Gemini·Claude 구독으로 만들기'}
+          {w.copying ? '준비 중...' : w.copied ? '✅ 복사됨!' : '💬 Gemini·Claude 구독으로 만들기'}
         </button>
         <button
-          onClick={() => w.generate(stage)}
-          disabled={w.generating === stage}
+          onClick={w.generate}
+          disabled={w.generating}
           className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
         >
-          {w.generating === stage ? '만드는 중... (1분 정도)' : '✨ Gemini Pro로 만들기'}
+          {w.generating ? '만드는 중... (1분 정도)' : '✨ Gemini Pro로 만들기'}
         </button>
       </div>
     );
@@ -52,23 +57,23 @@ export function MaterialSelectionPanel({
     );
   }
 
-  function PasteBox({ stage }: { stage: 'materials' | 'titles' | 'script' | 'translate' }) {
-    if (w.pasteOpen !== stage) return null;
+  function PasteBox() {
+    if (!w.pasteOpen) return null;
     return (
       <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 mb-2">
         <textarea
           value={w.pasteText}
           onChange={(e) => w.setPasteText(e.target.value)}
-          rows={stage === 'script' ? 6 : 4}
+          rows={4}
           placeholder="구독 채팅(Gemini/Claude) 답변을 여기에 붙여넣으세요"
           className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
         />
         <div className="flex justify-end gap-1.5">
-          <button onClick={() => w.setPasteOpen(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+          <button onClick={() => w.setPasteOpen(false)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
             취소
           </button>
           <button
-            onClick={() => w.savePasted(stage)}
+            onClick={w.savePasted}
             disabled={w.saving || !w.pasteText.trim()}
             className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
           >
@@ -118,8 +123,8 @@ export function MaterialSelectionPanel({
 
       <div className="bg-white border border-neutral-100 rounded-lg p-3 mb-2">
         <div className="text-[11px] font-black text-neutral-500 mb-2">1️⃣ 소재 추천</div>
-        <GenerateButtons stage="materials" />
-        <PasteBox stage="materials" />
+        <GenerateButtons />
+        <PasteBox />
         {draft.materials && draft.materials.length > 0 ? (
           <div className="space-y-1 mb-2">
             {draft.materials.map((m, idx) =>
