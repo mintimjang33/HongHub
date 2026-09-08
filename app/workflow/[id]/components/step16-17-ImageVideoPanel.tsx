@@ -21,7 +21,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, scenePrompts } : u)) }),
+        body: JSON.stringify({ siteId: site.id, unitPatch: { id, fields: { scenePrompts } } }),
       });
       onRefresh();
     } finally {
