@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Site } from '../types';
-import { splitCandidates } from '../utils';
+import { splitCandidates, extractRecommendation } from '../utils';
 import { CopyButton } from './shared';
 
 // 9번(훅/인트로 설계) 단계 전용 패널 — 본문 쓰기 전 도입부 후보를 여러 버전 적어보고 제일 강한 걸
@@ -43,7 +43,11 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
   async function addHook(id: string, text: string) {
     if (!text.trim()) return;
     const unit = units.find((u) => u.id === id);
-    await patchUnit(id, { hookOptions: [...(unit?.hookOptions || []), ...splitCandidates(text)] });
+    const recommendation = extractRecommendation(text);
+    await patchUnit(id, {
+      hookOptions: [...(unit?.hookOptions || []), ...splitCandidates(text)],
+      ...(recommendation ? { hookReason: recommendation } : {}),
+    });
   }
 
   async function deleteHook(id: string, idx: number) {
