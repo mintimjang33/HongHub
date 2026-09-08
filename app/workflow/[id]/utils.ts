@@ -345,6 +345,23 @@ export function extractRecommendation(text: string): string | undefined {
   return reason || undefined;
 }
 
+// extractRecommendation이 뽑아낸 "[최종 추천]" 설명 안에 실제로 어떤 후보(예: "A)", "후보2")를
+// 추천했다는 언급이 있는지 찾아서, splitCandidates가 돌려주는 배열 기준 순번(0-based)을 돌려준다.
+// 못 찾으면 null. 2026-09-08 추가 — 사용자 지적: "이 버전 선택 같은 짓을 하지 말라고" — 제미나이가
+// 이미 후보 하나를 콕 집어 추천했는데, 그걸 사람이 후보 목록에서 또 찾아서 수동으로 "이 방향
+// 선택"/"이 버전 선택"을 눌러야 하는 건 불필요한 손동작이라는 것. 추천 문장에 언급된 라벨을 찾아
+// addOption/addHook이 selectedStrategy/selectedHook까지 한 번에 채워 넣게 한다.
+export function extractRecommendedCandidateIndex(text: string): number | null {
+  const match = text.match(/\[최종\s*추천\]([\s\S]*)$/);
+  const reason = match?.[1];
+  if (!reason) return null;
+  const letterMatch = reason.match(/\b([A-Z])\)/);
+  if (letterMatch) return letterMatch[1].charCodeAt(0) - 'A'.charCodeAt(0);
+  const numMatch = reason.match(/후보\s*(\d+)/);
+  if (numMatch) return parseInt(numMatch[1], 10) - 1;
+  return null;
+}
+
 // 2026-09-01 이전엔 narrationUrls가 문자열 배열이었다 — 이미 저장된 예전 데이터를 위해
 // 문자열이 그대로 오면 라벨 없는 항목으로 취급한다.
 export function normalizeLabeledItems(raw: unknown): LabeledItem[] {
