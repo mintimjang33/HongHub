@@ -298,6 +298,42 @@ export function nextCharacterId(chars: { id: string }[]): string {
   return `C${String(max + 1).padStart(2, '0')}`;
 }
 
+// 제미나이가 여러 후보를 "후보1: ... \n\n후보2: ..." (9번 훅 프롬프트) 또는 "A) ... \nB) ..."
+// (8번 전략 프롬프트) 형식으로 한 번에 응답하는데, 사용자가 그 응답 전체를 통째로 붙여넣고
+// "+ 후보 추가"를 한 번만 눌러도 각 후보가 개별 항목으로 들어가도록 자동으로 나눈다(2026-09-08
+// — 사용자 지적: "이런 것을 그냥 넣으면 알아서 파싱을 해야지, 그래서 제미나이에게 어떤 식으로
+// 아웃풋을 줘야 하는지까지 전달을 해야 해"). 이 라벨 패턴은 각 패널의 "🔍 제미나이 프롬프트"
+// 안내문에 적힌 출력 형식과 반드시 일치해야 한다 — 프롬프트의 출력 형식을 바꾸면 이 패턴도 같이
+// 고칠 것. 라벨을 하나도 못 찾으면(자유 텍스트 하나만 붙여넣은 경우) 원문 그대로 한 개짜리
+// 배열로 돌려줘서 "붙여넣은 텍스트 전체를 후보 하나로 추가"하는 기존 동작을 그대로 유지한다.
+const CANDIDATE_LABEL_PATTERNS = [/^\s*후보\s*\d+\s*[:：]\s*/gim, /^\s*[A-Z]\)\s*/gm];
+
+export function splitCandidates(text: string): string[] {
+  // "[최종 추천]"은 후보 목록이 아니라 그중 하나를 고르는 설명(8번 전략 프롬프트의 출력 형식에
+  // 포함돼 있음) — 후보 분리 대상에서 제외한다. 안 그러면 그 설명이 마지막 후보 텍스트에 붙어버린다.
+  const withoutRecommendation = text.split(/\[최종\s*추천\]/)[0];
+  const trimmed = withoutRecommendation.trim();
+  if (!trimmed) return [];
+  for (const pattern of CANDIDATE_LABEL_PATTERNS) {
+    pattern.lastIndex = 0;
+    const matches = [...trimmed.matchAll(pattern)];
+    if (matches.length < 2) continue;
+    const parts: string[] = [];
+    for (let i = 0; i < matches.length; i++) {
+      const start = matches[i].index! + matches[i][0].length;
+      const end = i + 1 < matches.length ? matches[i + 1].index! : trimmed.length;
+      const chunk = trimmed
+        .slice(start, end)
+        .trim()
+        .replace(/^["“]|["”]$/g, '')
+        .trim();
+      if (chunk) parts.push(chunk);
+    }
+    if (parts.length >= 2) return parts;
+  }
+  return [trimmed];
+}
+
 // 2026-09-01 이전엔 narrationUrls가 문자열 배열이었다 — 이미 저장된 예전 데이터를 위해
 // 문자열이 그대로 오면 라벨 없는 항목으로 취급한다.
 export function normalizeLabeledItems(raw: unknown): LabeledItem[] {
