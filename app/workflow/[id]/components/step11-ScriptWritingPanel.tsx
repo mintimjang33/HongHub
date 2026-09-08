@@ -16,6 +16,12 @@ import { CopyButton } from './shared';
 // 왜 나와있어???"). 원인(6번의 상태 누수)은 step06-ContentRegisterPanel.tsx에서 고쳤고, 이
 // 파일에서는 아무도 안 쓰는 옛날 위저드 UI 자체를 들어냈다 — 실제 작업은 전부 아래 "완성된
 // 콘텐츠" 목록의 유닛 카드에서 한다.
+// 2026-09-08 수정 — 유닛 전체를 "✅ 완성된 콘텐츠 (n개)" 초록 박스 하나로 감싸서 보여줬는데,
+// 그 박스 안에 대본조차 없는(미완료) 유닛도 똑같이 들어가 있어 라벨과 실제 상태가 안 맞았고,
+// 콘텐츠는 원래 10번(PlanningDocPanel)처럼 유닛마다 완전히 독립적으로 다뤄야 하는데 이 박스가
+// 마치 한 묶음인 것처럼 보이게 만들었다(사용자 지적: "한컨텐츠 한컨텐츠 별도인데 11단계는
+// 완성된 컨텐츠 2개 이렇게 되어있자나?" / "10번 처럼 독자적으로"). 10번과 동일하게 그룹 박스·
+// 집계 헤더 없이 유닛 카드를 바로 나열하도록 걷어냈다.
 export function ScriptWritingPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const w = useScriptWizard(site, onRefresh);
   const { draft, units } = w;
@@ -59,72 +65,69 @@ export function ScriptWritingPanel({ site, onRefresh }: { site: Site; onRefresh:
       {units.length === 0 && (
         <p className="text-[11px] text-neutral-400 mb-2">아직 등록된 콘텐츠가 없어요 — 먼저 "6번 콘텐츠 등록"에서 콘텐츠를 등록하세요.</p>
       )}
-      {units.length > 0 && (
-        <div className="bg-emerald-50/40 border border-emerald-100 rounded-lg p-3 mb-2">
-          <div className="text-[11px] font-black text-emerald-700 mb-2">✅ 완성된 콘텐츠 ({units.length}개)</div>
-          <div className="space-y-1.5">
-            {units.map((u) => {
-              const pdTag =
-                u.status === 'approved'
-                  ? { label: 'PD 승인', cls: 'bg-emerald-100 text-emerald-700' }
-                  : u.status === 'rejected'
-                    ? { label: 'PD 반려', cls: 'bg-red-100 text-red-600' }
-                    : { label: 'PD 확인 대기', cls: 'bg-neutral-100 text-neutral-500' };
-              // 2026-09-04 추가 — "검토대기" 배지 하나로는 대본/사실확인/검수/PD확인 중 어디서
-              // 막혀있는지 알 수 없다는 지적을 받고, 단계별로 끝났는지를 각각 보여주게 분리함.
-              const stages = [
-                { label: '대본', done: !!u.script },
-                { label: '사실확인', done: !!u.factCheck },
-                { label: '검수', done: u.review?.score !== undefined },
-              ];
-              return (
-                <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
-                  <div className="flex items-center gap-2 px-3 py-2">
-                    <button onClick={() => w.setOpenUnitId((cur) => (cur === u.id ? null : u.id))} className="flex-1 min-w-0 text-left flex items-center gap-1.5">
-                      <span className={`inline-block transition-transform text-neutral-300 ${w.openUnitId === u.id ? 'rotate-90' : ''}`}>▶</span>
-                      {u.category === 'disaster' && <span className="shrink-0 text-[10px]">🚨</span>}
-                      <span className="text-[11px] font-bold truncate">{u.title}</span>
-                      {u.topic && <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">{u.topic}</span>}
-                      {u.factCheck && (
-                        <span
-                          className="shrink-0 text-[10px] font-bold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5"
-                          title={u.factCheck}
-                        >
-                          📎 자료조사 메모 있음
-                        </span>
-                      )}
-                      {u.review?.score !== undefined && (
-                        <span className="shrink-0 text-[10px] font-black text-neutral-400">({u.review.score}/10)</span>
-                      )}
-                    </button>
-                    <div className="shrink-0 flex items-center gap-1">
-                      {stages.map((s) => (
-                        <span
-                          key={s.label}
-                          title={s.done ? `${s.label} 완료` : `${s.label} 대기`}
-                          className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
-                            s.done ? 'bg-blue-50 text-blue-600' : 'bg-neutral-100 text-neutral-300'
-                          }`}
-                        >
-                          {s.done ? '✓' : '○'} {s.label}
-                        </span>
-                      ))}
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${pdTag.cls}`}>{pdTag.label}</span>
-                    </div>
-                    <button onClick={() => w.clearScript(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="대본만 삭제 (소재·자료조사·전략·훅·기획서는 유지)">
-                      ✕
-                    </button>
-                  </div>
-                  {w.openUnitId === u.id && (
-                    <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
-                      {/* 2026-09-08 이동 — 이 카드에서 실제로 제일 먼저 눌러야 하는 버튼(대본 자체를
-                          만드는 프롬프트)인데 예전엔 검토/승인 줄과 같이 맨 아래에 있어서 순서상
-                          헷갈렸다(사용자 지적: "이 복사 버튼이 각 컨텐츠 가장 위에 있어야 하는데").
-                          카드를 펼치자마자 바로 보이게 맨 위로 옮김. */}
-                      <div className="inline-flex items-center gap-1.5 text-[11px] font-black px-2 py-1 rounded-lg border border-amber-200 bg-amber-50">
-                        <span className="text-amber-700">🎬 제미나이 대본 프롬프트</span>
-                        <CopyButton
-                          text={`[역할] 너는 우리 채널(거시서사형 경제사)의 전속 대본 작가이자, 화면에 등장하는 진행자 캐릭터 "젠틀맨 루즈"(검은 톱햇, 금테 외알렌즈, 검은 연미복+금색 안감 망토, 능글맞고 자신감 있는 쇼맨) 본인이 되어 쓴다. 지식의 뒷골목을 산책하는 냉소적이고 연극적인 진행자로, 시청자에게 예의 바르지만 뼈를 때리는 질문을 던지고, 극적인 반전을 즐기는 도발적인 말투를 끝까지 유지한다. 정보를 나열하는 해설자가 아니라 위트 있고 능청스러운 이야기꾼이다 — 표준 다큐 내레이터 톤이면 실패다. 존댓말(합니다체)로 쓴다.
+      <div className="space-y-1.5">
+        {units.map((u) => {
+          const pdTag =
+            u.status === 'approved'
+              ? { label: 'PD 승인', cls: 'bg-emerald-100 text-emerald-700' }
+              : u.status === 'rejected'
+                ? { label: 'PD 반려', cls: 'bg-red-100 text-red-600' }
+                : { label: 'PD 확인 대기', cls: 'bg-neutral-100 text-neutral-500' };
+          // 2026-09-04 추가 — "검토대기" 배지 하나로는 대본/사실확인/검수/PD확인 중 어디서
+          // 막혀있는지 알 수 없다는 지적을 받고, 단계별로 끝났는지를 각각 보여주게 분리함.
+          const stages = [
+            { label: '대본', done: !!u.script },
+            { label: '사실확인', done: !!u.factCheck },
+            { label: '검수', done: u.review?.score !== undefined },
+          ];
+          return (
+            <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2">
+                <button onClick={() => w.setOpenUnitId((cur) => (cur === u.id ? null : u.id))} className="flex-1 min-w-0 text-left flex items-center gap-1.5">
+                  <span className={`inline-block transition-transform text-neutral-300 ${w.openUnitId === u.id ? 'rotate-90' : ''}`}>▶</span>
+                  {u.category === 'disaster' && <span className="shrink-0 text-[10px]">🚨</span>}
+                  <span className="text-[11px] font-bold truncate">{u.title}</span>
+                  {u.topic && <span className="shrink-0 text-[10px] font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">{u.topic}</span>}
+                  {u.factCheck && (
+                    <span
+                      className="shrink-0 text-[10px] font-bold text-blue-600 bg-blue-50 rounded-full px-2 py-0.5"
+                      title={u.factCheck}
+                    >
+                      📎 자료조사 메모 있음
+                    </span>
+                  )}
+                  {u.review?.score !== undefined && (
+                    <span className="shrink-0 text-[10px] font-black text-neutral-400">({u.review.score}/10)</span>
+                  )}
+                </button>
+                <div className="shrink-0 flex items-center gap-1">
+                  {stages.map((s) => (
+                    <span
+                      key={s.label}
+                      title={s.done ? `${s.label} 완료` : `${s.label} 대기`}
+                      className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${
+                        s.done ? 'bg-blue-50 text-blue-600' : 'bg-neutral-100 text-neutral-300'
+                      }`}
+                    >
+                      {s.done ? '✓' : '○'} {s.label}
+                    </span>
+                  ))}
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${pdTag.cls}`}>{pdTag.label}</span>
+                </div>
+                <button onClick={() => w.clearScript(u.id)} className="shrink-0 text-[11px] text-red-400 font-bold hover:text-red-600 px-1" title="대본만 삭제 (소재·자료조사·전략·훅·기획서는 유지)">
+                  ✕
+                </button>
+              </div>
+              {w.openUnitId === u.id && (
+                <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-2">
+                  {/* 2026-09-08 이동 — 이 카드에서 실제로 제일 먼저 눌러야 하는 버튼(대본 자체를
+                      만드는 프롬프트)인데 예전엔 검토/승인 줄과 같이 맨 아래에 있어서 순서상
+                      헷갈렸다(사용자 지적: "이 복사 버튼이 각 컨텐츠 가장 위에 있어야 하는데").
+                      카드를 펼치자마자 바로 보이게 맨 위로 옮김. */}
+                  <div className="inline-flex items-center gap-1.5 text-[11px] font-black px-2 py-1 rounded-lg border border-amber-200 bg-amber-50">
+                    <span className="text-amber-700">🎬 제미나이 대본 프롬프트</span>
+                    <CopyButton
+                      text={`[역할] 너는 우리 채널(거시서사형 경제사)의 전속 대본 작가이자, 화면에 등장하는 진행자 캐릭터 "젠틀맨 루즈"(검은 톱햇, 금테 외알렌즈, 검은 연미복+금색 안감 망토, 능글맞고 자신감 있는 쇼맨) 본인이 되어 쓴다. 지식의 뒷골목을 산책하는 냉소적이고 연극적인 진행자로, 시청자에게 예의 바르지만 뼈를 때리는 질문을 던지고, 극적인 반전을 즐기는 도발적인 말투를 끝까지 유지한다. 정보를 나열하는 해설자가 아니라 위트 있고 능청스러운 이야기꾼이다 — 표준 다큐 내레이터 톤이면 실패다. 존댓말(합니다체)로 쓴다.
 
 [톤앤매너]
 1. 질문을 던지고 스스로 즉시 답하는 핑퐁 리듬은 양념이다 — 전체 영상 통틀어 2~3회 이내로 아껴 쓴다.
@@ -216,263 +219,241 @@ ${u.hookReason ? `(이 훅을 고른 이유: ${u.hookReason})` : ''}
 
 [기획서 — 오프닝 초단위 구성·본문 리듬·댓글유도 위치·길이·위험요소, 이 지침대로 써라]
 ${u.planningDoc || '(미확정)'}`}
-                        />
-                      </div>
-                      <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
-                      {u.category === 'disaster' && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-[10px] font-black text-neutral-400">분야:</span>
-                          {['건축', '토목', '무기', '항공', '자연재해', '기타'].map((t) => (
+                    />
+                  </div>
+                  <p className="text-[10px] text-neutral-400">소재: {u.material}</p>
+                  {u.category === 'disaster' && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-black text-neutral-400">분야:</span>
+                      {['건축', '토목', '무기', '항공', '자연재해', '기타'].map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => w.setUnitTopic(u.id, u.topic === t ? '' : t)}
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            u.topic === t ? 'bg-black text-white border-black' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {u.titleCandidates && u.titleCandidates.filter((t) => t !== u.title).length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-black text-neutral-400 mb-1">그때 같이 나온 다른 제목 후보 (클릭하면 교체)</p>
+                      <div className="space-y-1">
+                        {u.titleCandidates
+                          .filter((t) => t !== u.title)
+                          .map((t, idx) => (
                             <button
-                              key={t}
-                              onClick={() => w.setUnitTopic(u.id, u.topic === t ? '' : t)}
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                                u.topic === t ? 'bg-black text-white border-black' : 'bg-white text-neutral-400 border-neutral-200 hover:border-neutral-400'
-                              }`}
+                              key={idx}
+                              onClick={() => w.swapUnitTitle(u.id, t)}
+                              className="block w-full text-left text-[11px] text-neutral-500 hover:text-black hover:bg-neutral-50 rounded px-1.5 py-1"
                             >
                               {t}
                             </button>
                           ))}
-                        </div>
-                      )}
-                      {u.titleCandidates && u.titleCandidates.filter((t) => t !== u.title).length > 0 && (
-                        <div>
-                          <p className="text-[10px] font-black text-neutral-400 mb-1">그때 같이 나온 다른 제목 후보 (클릭하면 교체)</p>
-                          <div className="space-y-1">
-                            {u.titleCandidates
-                              .filter((t) => t !== u.title)
-                              .map((t, idx) => (
-                                <button
-                                  key={idx}
-                                  onClick={() => w.swapUnitTitle(u.id, t)}
-                                  className="block w-full text-left text-[11px] text-neutral-500 hover:text-black hover:bg-neutral-50 rounded px-1.5 py-1"
-                                >
-                                  {t}
-                                </button>
-                              ))}
-                          </div>
-                        </div>
-                      )}
-                      <div>
-                        <div className="flex items-center justify-between mb-0.5">
-                          <p className="text-[10px] font-black text-neutral-400">🇰🇷 한국어 ({u.script.length}자)</p>
-                          <div className="flex items-center gap-2">
-                            {u.script && (
-                              <>
-                                <CopyButton text={u.script} label="전체 복사" />
-                                {/* 2026-09-08 추가 — 13번(나레이션 TTS) 제작 시 화면 연출·SFX·BGM
-                                    지시문 없이 실제 나레이션만 필요하다는 지적("tts 만들때 우린
-                                    tts만 추출해야하지 않아?" / "tts만 복사하기도 필요한거 같은데").
-                                    위 프롬프트가 [TTS] 라벨을 못박아뒀으니 그 줄만 뽑아서 복사한다. */}
-                                <CopyButton text={extractTtsLines(u.script)} label="TTS만 복사" />
-                              </>
-                            )}
-                            {w.editScriptId !== u.id && (
-                              <button
-                                onClick={() => {
-                                  w.setEditScriptId(u.id);
-                                  w.setEditScriptText(u.script);
-                                }}
-                                className="text-[10px] font-black text-neutral-400 hover:text-black"
-                              >
-                                ✏️ 직접 수정
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        {w.editScriptId === u.id ? (
-                          <div>
-                            <textarea
-                              value={w.editScriptText}
-                              onChange={(e) => w.setEditScriptText(e.target.value)}
-                              rows={16}
-                              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs leading-relaxed font-mono mb-1.5"
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <button onClick={() => w.setEditScriptId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
-                                취소
-                              </button>
-                              <button
-                                onClick={() => w.saveScriptEdit(u.id)}
-                                disabled={w.savingScriptEdit || !w.editScriptText.trim()}
-                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                              >
-                                {w.savingScriptEdit ? '저장 중...' : '저장'}
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <p className="text-[10px] font-black text-neutral-400">🇰🇷 한국어 ({u.script.length}자)</p>
+                      <div className="flex items-center gap-2">
+                        {u.script && (
+                          <>
+                            <CopyButton text={u.script} label="전체 복사" />
+                            {/* 2026-09-08 추가 — 13번(나레이션 TTS) 제작 시 화면 연출·SFX·BGM
+                                지시문 없이 실제 나레이션만 필요하다는 지적("tts 만들때 우린
+                                tts만 추출해야하지 않아?" / "tts만 복사하기도 필요한거 같은데").
+                                위 프롬프트가 [TTS] 라벨을 못박아뒀으니 그 줄만 뽑아서 복사한다. */}
+                            <CopyButton text={extractTtsLines(u.script)} label="TTS만 복사" />
+                          </>
+                        )}
+                        {w.editScriptId !== u.id && (
+                          <button
+                            onClick={() => {
+                              w.setEditScriptId(u.id);
+                              w.setEditScriptText(u.script);
+                            }}
+                            className="text-[10px] font-black text-neutral-400 hover:text-black"
+                          >
+                            ✏️ 직접 수정
+                          </button>
                         )}
                       </div>
-                      {u.scriptEn && (
-                        <div className="pt-2 border-t border-neutral-50">
-                          <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇺🇸 {u.titleEn}</p>
-                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptEn}</p>
-                        </div>
-                      )}
-                      {u.scriptJa && (
-                        <div className="pt-2 border-t border-neutral-50">
-                          <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇯🇵 {u.titleJa}</p>
-                          <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptJa}</p>
-                        </div>
-                      )}
-                      {/* 씬/이미지·영상 프롬프트 편집 UI는 16-17번 전용 ImageVideoPanel에만 둔다 — 여기 중복으로 있던 블록을 제거함(2026-09-04, 사용자 지적). */}
-                      {/* 자료조사(factCheck/sources) 편집 UI는 7번 자료조사 전용 ResearchPanel에만 둔다 — 여기 중복으로 있던 블록을 제거함(2026-09-03). */}
-
-                      {/* 제미나이와 비교→업그레이드 — "교체"가 아니라 원본+제미나이 버전을 합쳐서 최종본을 만든다. */}
-                      <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
-                        <p className="text-[10px] font-black text-neutral-500 mb-1.5">🔍 제미나이와 비교해서 사실확인 (선택)</p>
-                        <div className="flex flex-wrap gap-1.5 mb-2">
-                          <button
-                            onClick={() => w.copyUnitComparePrompt(u)}
-                            disabled={w.unitCompareCopyingId === u.id}
-                            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                          >
-                            {w.unitCompareCopyingId === u.id ? '준비 중...' : w.unitCompareCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 비교하기'}
+                    </div>
+                    {w.editScriptId === u.id ? (
+                      <div>
+                        <textarea
+                          value={w.editScriptText}
+                          onChange={(e) => w.setEditScriptText(e.target.value)}
+                          rows={16}
+                          className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs leading-relaxed font-mono mb-1.5"
+                        />
+                        <div className="flex justify-end gap-1.5">
+                          <button onClick={() => w.setEditScriptId(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                            취소
                           </button>
                           <button
-                            onClick={() => w.runUnitCompare(u)}
-                            disabled={w.unitCompareRunningId === u.id}
+                            onClick={() => w.saveScriptEdit(u.id)}
+                            disabled={w.savingScriptEdit || !w.editScriptText.trim()}
                             className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
                           >
-                            {w.unitCompareRunningId === u.id ? '비교 중...' : '✨ 자동으로 비교하기'}
+                            {w.savingScriptEdit ? '저장 중...' : '저장'}
                           </button>
                         </div>
-                        {w.unitComparePasteOpenId === u.id && (
-                          <div className="mb-2">
+                      </div>
+                    ) : (
+                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.script}</p>
+                    )}
+                  </div>
+                  {u.scriptEn && (
+                    <div className="pt-2 border-t border-neutral-50">
+                      <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇺🇸 {u.titleEn}</p>
+                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptEn}</p>
+                    </div>
+                  )}
+                  {u.scriptJa && (
+                    <div className="pt-2 border-t border-neutral-50">
+                      <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇯🇵 {u.titleJa}</p>
+                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{u.scriptJa}</p>
+                    </div>
+                  )}
+                  {/* 씬/이미지·영상 프롬프트 편집 UI는 16-17번 전용 ImageVideoPanel에만 둔다 — 여기 중복으로 있던 블록을 제거함(2026-09-04, 사용자 지적). */}
+                  {/* 자료조사(factCheck/sources) 편집 UI는 7번 자료조사 전용 ResearchPanel에만 둔다 — 여기 중복으로 있던 블록을 제거함(2026-09-03). */}
+
+                  {/* 제미나이와 비교→업그레이드 — "교체"가 아니라 원본+제미나이 버전을 합쳐서 최종본을 만든다. */}
+                  <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
+                    <p className="text-[10px] font-black text-neutral-500 mb-1.5">🔍 제미나이와 비교해서 사실확인 (선택)</p>
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      <button
+                        onClick={() => w.copyUnitComparePrompt(u)}
+                        disabled={w.unitCompareCopyingId === u.id}
+                        className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                      >
+                        {w.unitCompareCopyingId === u.id ? '준비 중...' : w.unitCompareCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 비교하기'}
+                      </button>
+                      <button
+                        onClick={() => w.runUnitCompare(u)}
+                        disabled={w.unitCompareRunningId === u.id}
+                        className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                      >
+                        {w.unitCompareRunningId === u.id ? '비교 중...' : '✨ 자동으로 비교하기'}
+                      </button>
+                    </div>
+                    {w.unitComparePasteOpenId === u.id && (
+                      <div className="mb-2">
+                        <textarea
+                          value={w.unitComparePasteText}
+                          onChange={(e) => w.setUnitComparePasteText(e.target.value)}
+                          rows={6}
+                          placeholder="구독 채팅 답변([FACT-CHECK]/[REWRITE]/[SOURCES])을 여기에 붙여넣으세요"
+                          className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                        />
+                        <div className="flex justify-end gap-1.5">
+                          <button onClick={() => w.saveUnitComparePaste(u.id)} disabled={!w.unitComparePasteText.trim()} className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40">
+                            결과 확인
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {w.unitCompareResult && w.unitCompareResult.unitId === u.id && (
+                      <div className="space-y-2">
+                        <div className="bg-white border border-neutral-200 rounded-lg p-2">
+                          <p className="text-[10px] font-black text-neutral-400 mb-1">사실확인 결과</p>
+                          <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{w.unitCompareResult.factCheck || '(내용 없음)'}</p>
+                        </div>
+                        {(w.unitCompareResult.rewriteTitle || w.unitCompareResult.rewriteScript) && (
+                          <div className="bg-white border border-neutral-200 rounded-lg p-2">
+                            <p className="text-[10px] font-black text-neutral-400 mb-1">제미나이가 다시 쓴 버전</p>
+                            {w.unitCompareResult.rewriteTitle && <p className="text-xs font-bold text-neutral-700 mb-1">{w.unitCompareResult.rewriteTitle}</p>}
+                            {w.unitCompareResult.rewriteScript && <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{w.unitCompareResult.rewriteScript}</p>}
+                          </div>
+                        )}
+                        <p className="text-[10px] text-neutral-400">둘 중 하나를 고르는 게 아니라, 두 버전의 장점을 합쳐서 업그레이드해요.</p>
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <button
+                            onClick={() => w.keepOriginalAfterUnitCompare(u.id)}
+                            disabled={w.saving}
+                            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                          >
+                            원본 유지
+                          </button>
+                          <button
+                            onClick={() => w.copyUnitUpgradePrompt(u)}
+                            disabled={w.unitUpgradeCopyingId === u.id}
+                            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                          >
+                            {w.unitUpgradeCopyingId === u.id ? '준비 중...' : w.unitUpgradeCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 업그레이드'}
+                          </button>
+                          <button
+                            onClick={() => w.runUnitUpgrade(u)}
+                            disabled={w.unitUpgradingId === u.id}
+                            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-emerald-600 text-white disabled:opacity-40"
+                          >
+                            {w.unitUpgradingId === u.id ? '업그레이드 중...' : '🔀 자동으로 업그레이드'}
+                          </button>
+                        </div>
+                        {w.unitUpgradePasteOpenId === u.id && (
+                          <div>
                             <textarea
-                              value={w.unitComparePasteText}
-                              onChange={(e) => w.setUnitComparePasteText(e.target.value)}
+                              value={w.unitUpgradePasteText}
+                              onChange={(e) => w.setUnitUpgradePasteText(e.target.value)}
                               rows={6}
-                              placeholder="구독 채팅 답변([FACT-CHECK]/[REWRITE]/[SOURCES])을 여기에 붙여넣으세요"
+                              placeholder="구독 채팅 답변(Title:/Script:)을 여기에 붙여넣으세요"
                               className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
                             />
                             <div className="flex justify-end gap-1.5">
-                              <button onClick={() => w.saveUnitComparePaste(u.id)} disabled={!w.unitComparePasteText.trim()} className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40">
-                                결과 확인
+                              <button
+                                onClick={() => w.saveUnitUpgradePaste(u)}
+                                disabled={w.saving || !w.unitUpgradePasteText.trim()}
+                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                              >
+                                붙여넣기 적용
                               </button>
                             </div>
-                          </div>
-                        )}
-                        {w.unitCompareResult && w.unitCompareResult.unitId === u.id && (
-                          <div className="space-y-2">
-                            <div className="bg-white border border-neutral-200 rounded-lg p-2">
-                              <p className="text-[10px] font-black text-neutral-400 mb-1">사실확인 결과</p>
-                              <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{w.unitCompareResult.factCheck || '(내용 없음)'}</p>
-                            </div>
-                            {(w.unitCompareResult.rewriteTitle || w.unitCompareResult.rewriteScript) && (
-                              <div className="bg-white border border-neutral-200 rounded-lg p-2">
-                                <p className="text-[10px] font-black text-neutral-400 mb-1">제미나이가 다시 쓴 버전</p>
-                                {w.unitCompareResult.rewriteTitle && <p className="text-xs font-bold text-neutral-700 mb-1">{w.unitCompareResult.rewriteTitle}</p>}
-                                {w.unitCompareResult.rewriteScript && <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{w.unitCompareResult.rewriteScript}</p>}
-                              </div>
-                            )}
-                            <p className="text-[10px] text-neutral-400">둘 중 하나를 고르는 게 아니라, 두 버전의 장점을 합쳐서 업그레이드해요.</p>
-                            <div className="flex flex-wrap justify-end gap-1.5">
-                              <button
-                                onClick={() => w.keepOriginalAfterUnitCompare(u.id)}
-                                disabled={w.saving}
-                                className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                              >
-                                원본 유지
-                              </button>
-                              <button
-                                onClick={() => w.copyUnitUpgradePrompt(u)}
-                                disabled={w.unitUpgradeCopyingId === u.id}
-                                className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                              >
-                                {w.unitUpgradeCopyingId === u.id ? '준비 중...' : w.unitUpgradeCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 업그레이드'}
-                              </button>
-                              <button
-                                onClick={() => w.runUnitUpgrade(u)}
-                                disabled={w.unitUpgradingId === u.id}
-                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-emerald-600 text-white disabled:opacity-40"
-                              >
-                                {w.unitUpgradingId === u.id ? '업그레이드 중...' : '🔀 자동으로 업그레이드'}
-                              </button>
-                            </div>
-                            {w.unitUpgradePasteOpenId === u.id && (
-                              <div>
-                                <textarea
-                                  value={w.unitUpgradePasteText}
-                                  onChange={(e) => w.setUnitUpgradePasteText(e.target.value)}
-                                  rows={6}
-                                  placeholder="구독 채팅 답변(Title:/Script:)을 여기에 붙여넣으세요"
-                                  className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-                                />
-                                <div className="flex justify-end gap-1.5">
-                                  <button
-                                    onClick={() => w.saveUnitUpgradePaste(u)}
-                                    disabled={w.saving || !w.unitUpgradePasteText.trim()}
-                                    className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                                  >
-                                    붙여넣기 적용
-                                  </button>
-                                </div>
-                              </div>
-                            )}
                           </div>
                         )}
                       </div>
+                    )}
+                  </div>
 
-                      {u.review && (
-                        <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
-                          <p className="text-[10px] font-black text-neutral-500 mb-1">
-                            🔍 AI 검토 {u.review.score !== undefined && `— ${u.review.score}/10점`}
-                          </p>
-                          <p className="text-[11px] text-neutral-600 leading-relaxed whitespace-pre-wrap mb-2">{u.review.feedback}</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            <button
-                              onClick={() => w.copyRevisePrompt(u)}
-                              disabled={w.reviseCopyingId === u.id}
-                              className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                            >
-                              {w.reviseCopyingId === u.id ? '준비 중...' : w.reviseCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 피드백 반영 수정'}
-                            </button>
-                            <button
-                              onClick={() => w.reviseUnit(u)}
-                              disabled={w.revisingId === u.id}
-                              className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
-                            >
-                              {w.revisingId === u.id ? '수정 중...' : '🔧 피드백 반영해서 수정'}
-                            </button>
-                          </div>
-                          {w.revisePasteOpenId === u.id && (
-                            <div className="bg-white border border-neutral-200 rounded-lg p-2 mt-1.5">
-                              <textarea
-                                value={w.revisePasteText}
-                                onChange={(e) => w.setRevisePasteText(e.target.value)}
-                                rows={5}
-                                placeholder="구독 채팅이 다시 써준 대본 전문을 여기에 붙여넣으세요"
-                                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-                              />
-                              <div className="flex justify-end gap-1.5">
-                                <button
-                                  onClick={() => w.savePastedRevise(u.id)}
-                                  disabled={w.saving || !w.revisePasteText.trim()}
-                                  className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                                >
-                                  {w.saving ? '저장 중...' : '붙여넣기 저장'}
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {w.reviewPasteOpenId === u.id && (
-                        <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2">
+                  {u.review && (
+                    <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
+                      <p className="text-[10px] font-black text-neutral-500 mb-1">
+                        🔍 AI 검토 {u.review.score !== undefined && `— ${u.review.score}/10점`}
+                      </p>
+                      <p className="text-[11px] text-neutral-600 leading-relaxed whitespace-pre-wrap mb-2">{u.review.feedback}</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          onClick={() => w.copyRevisePrompt(u)}
+                          disabled={w.reviseCopyingId === u.id}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                        >
+                          {w.reviseCopyingId === u.id ? '준비 중...' : w.reviseCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 피드백 반영 수정'}
+                        </button>
+                        <button
+                          onClick={() => w.reviseUnit(u)}
+                          disabled={w.revisingId === u.id}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
+                        >
+                          {w.revisingId === u.id ? '수정 중...' : '🔧 피드백 반영해서 수정'}
+                        </button>
+                      </div>
+                      {w.revisePasteOpenId === u.id && (
+                        <div className="bg-white border border-neutral-200 rounded-lg p-2 mt-1.5">
                           <textarea
-                            value={w.reviewPasteText}
-                            onChange={(e) => w.setReviewPasteText(e.target.value)}
-                            rows={4}
-                            placeholder="구독 채팅(Gemini/Claude)의 검토 답변을 여기에 붙여넣으세요 (SCORE:/FEEDBACK: 포함)"
+                            value={w.revisePasteText}
+                            onChange={(e) => w.setRevisePasteText(e.target.value)}
+                            rows={5}
+                            placeholder="구독 채팅이 다시 써준 대본 전문을 여기에 붙여넣으세요"
                             className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
                           />
                           <div className="flex justify-end gap-1.5">
                             <button
-                              onClick={() => w.savePastedReview(u.id)}
-                              disabled={w.saving || !w.reviewPasteText.trim()}
+                              onClick={() => w.savePastedRevise(u.id)}
+                              disabled={w.saving || !w.revisePasteText.trim()}
                               className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
                             >
                               {w.saving ? '저장 중...' : '붙여넣기 저장'}
@@ -480,46 +461,66 @@ ${u.planningDoc || '(미확정)'}`}
                           </div>
                         </div>
                       )}
-                      <div className="flex flex-wrap gap-1.5 pt-1">
+                    </div>
+                  )}
+                  {w.reviewPasteOpenId === u.id && (
+                    <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2">
+                      <textarea
+                        value={w.reviewPasteText}
+                        onChange={(e) => w.setReviewPasteText(e.target.value)}
+                        rows={4}
+                        placeholder="구독 채팅(Gemini/Claude)의 검토 답변을 여기에 붙여넣으세요 (SCORE:/FEEDBACK: 포함)"
+                        className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
+                      />
+                      <div className="flex justify-end gap-1.5">
                         <button
-                          onClick={() => w.copyReviewPrompt(u)}
-                          disabled={w.reviewCopyingId === u.id}
-                          className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                          onClick={() => w.savePastedReview(u.id)}
+                          disabled={w.saving || !w.reviewPasteText.trim()}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
                         >
-                          {w.reviewCopyingId === u.id ? '준비 중...' : w.reviewCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 검토하기'}
-                        </button>
-                        <button
-                          onClick={() => w.reviewUnit(u)}
-                          disabled={w.reviewingId === u.id}
-                          className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                        >
-                          {w.reviewingId === u.id ? '검토 중...' : u.review ? '🔍 다시 검토받기' : '🔍 AI 검토받기'}
-                        </button>
-                        <button
-                          onClick={() => w.setUnitStatus(u.id, 'approved')}
-                          className={`text-[11px] font-black px-3 py-1.5 rounded-lg border ${
-                            u.status === 'approved' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-neutral-200 hover:border-emerald-400 text-emerald-600'
-                          }`}
-                        >
-                          ✅ 승인
-                        </button>
-                        <button
-                          onClick={() => w.setUnitStatus(u.id, 'rejected')}
-                          className={`text-[11px] font-black px-3 py-1.5 rounded-lg border ${
-                            u.status === 'rejected' ? 'bg-red-500 text-white border-red-500' : 'bg-white border-neutral-200 hover:border-red-400 text-red-500'
-                          }`}
-                        >
-                          ❌ 반려
+                          {w.saving ? '저장 중...' : '붙여넣기 저장'}
                         </button>
                       </div>
                     </div>
                   )}
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    <button
+                      onClick={() => w.copyReviewPrompt(u)}
+                      disabled={w.reviewCopyingId === u.id}
+                      className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                    >
+                      {w.reviewCopyingId === u.id ? '준비 중...' : w.reviewCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 검토하기'}
+                    </button>
+                    <button
+                      onClick={() => w.reviewUnit(u)}
+                      disabled={w.reviewingId === u.id}
+                      className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
+                    >
+                      {w.reviewingId === u.id ? '검토 중...' : u.review ? '🔍 다시 검토받기' : '🔍 AI 검토받기'}
+                    </button>
+                    <button
+                      onClick={() => w.setUnitStatus(u.id, 'approved')}
+                      className={`text-[11px] font-black px-3 py-1.5 rounded-lg border ${
+                        u.status === 'approved' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-neutral-200 hover:border-emerald-400 text-emerald-600'
+                      }`}
+                    >
+                      ✅ 승인
+                    </button>
+                    <button
+                      onClick={() => w.setUnitStatus(u.id, 'rejected')}
+                      className={`text-[11px] font-black px-3 py-1.5 rounded-lg border ${
+                        u.status === 'rejected' ? 'bg-red-500 text-white border-red-500' : 'bg-white border-neutral-200 hover:border-red-400 text-red-500'
+                      }`}
+                    >
+                      ❌ 반려
+                    </button>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
