@@ -39,7 +39,7 @@ export function LabeledLinksPanel({
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, [fieldKey]: items } : u)) }),
+        body: JSON.stringify({ siteId: site.id, unitPatch: { id, fields: { [fieldKey]: items } } }),
       });
       onRefresh();
     } finally {
