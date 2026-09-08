@@ -147,7 +147,12 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
                           >
                             수정
                           </button>
-                          <button onClick={() => deleteHook(u.id, i)} className="shrink-0 font-black text-neutral-300 hover:text-red-500" title="후보 삭제">
+                          <button
+                            onClick={() => deleteHook(u.id, i)}
+                            disabled={saving}
+                            className="shrink-0 font-black text-neutral-300 hover:text-red-500 disabled:opacity-40"
+                            title="후보 삭제"
+                          >
                             ✕
                           </button>
                         </>
@@ -211,6 +216,17 @@ ${u.selectedStrategy || '(아직 미확정 — 소재만으로 판단)'}`}
                           className="text-xs font-bold text-blue-600 hover:underline"
                         >
                           수정
+                        </button>
+                        {/* 2026-09-08 추가 — 후보를 빠르게 연달아 삭제하다 selectedHook이 그 후보 텍스트와
+                            어긋나 버려서(연타로 인한 경합) 후보는 다 지웠는데 "확정됨" 배지가 안 없어지는
+                            사고가 있었음. 후보 목록과 무관하게 언제든 확정 상태 자체를 바로 풀 수 있게 추가. */}
+                        <button
+                          onClick={() => selectHook(u.id, u.selectedHook || '')}
+                          disabled={saving}
+                          className="text-xs font-bold text-neutral-400 hover:text-red-500 disabled:opacity-40"
+                          title="확정된 훅 선택을 해제합니다"
+                        >
+                          선택 해제
                         </button>
                       </div>
                     )}
