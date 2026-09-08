@@ -256,12 +256,24 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     onRefresh();
   }
 
-  async function setUnitTopic(id: string, topic: string) {
-    await fetch('/api/script-draft', {
+  // 2026-09-08 추가 — 유닛 하나의 필드 몇 개만 바꾸는 저장은 전부 이 함수를 통해서 보낸다. 예전엔
+  // 각 호출부가 "이 화면이 들고 있는 units 배열 전체"를 통째로 다시 만들어 서버에 보냈는데, 그
+  // 배열은 화면을 마지막으로 불러온 시점의 스냅샷이라서 그 사이 다른 탭이나 다른 경로(예: MCP로
+  // 직접 DB에 쓴 결과)로 다른 유닛/다른 필드가 바뀌어 있었다면 그 변경을 통째로 덮어써버리는 사고가
+  // 있었다(전략 단계 저장이 몇 분 뒤 조용히 원복된 실사고). 서버(app/api/script-draft/route.ts의
+  // PATCH)가 unitPatch를 받으면 방금 새로 읽은 최신 units를 기준으로 이 필드만 병합하므로, 이 화면이
+  // 들고 있는 나머지 데이터가 오래됐어도 서버의 최신 상태를 건드리지 않는다. 유닛을 통째로 추가/삭제
+  // 하는 것처럼 배열 구조 자체가 바뀌는 작업(finalizeUnit 등)만 예외적으로 기존 방식(units 전체 교체)을 쓴다.
+  async function patchUnitField(unitId: string, fields: Record<string, unknown>) {
+    return fetch('/api/script-draft', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, topic } : u)) }),
+      body: JSON.stringify({ siteId: site.id, unitPatch: { id: unitId, fields } }),
     });
+  }
+
+  async function setUnitTopic(id: string, topic: string) {
+    await patchUnitField(id, { topic });
     onRefresh();
   }
 
@@ -269,11 +281,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
   // 나중에 "그거 어디서 봤냐"는 지적에 근거로 내밀 수 있게 한다.
   async function saveSources(id: string, sourcesText: string) {
     const sources = sourcesText.split('\n').map((s) => s.trim()).filter(Boolean);
-    await fetch('/api/script-draft', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, sources } : u)) }),
-    });
+    await patchUnitField(id, { sources });
     onRefresh();
   }
 
@@ -539,14 +547,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
   // 승인상태(status)만 초기화하고 나머지 필드는 그대로 둔다.
   async function clearScript(id: string) {
     if (!confirm('이 콘텐츠의 대본만 지울까요? (소재·자료조사·전략·훅·기획서는 그대로 남아요)')) return;
-    await fetch('/api/script-draft', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        siteId: site.id,
-        units: units.map((u) => (u.id === id ? { ...u, script: '', status: 'pending' as const, review: undefined } : u)),
-      }),
-    });
+    await patchUnitField(id, { script: '', status: 'pending', review: null });
     onRefresh();
   }
 
@@ -604,11 +605,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
         feedback: feedbackMatch ? feedbackMatch[1].trim() : reviewPasteText.trim(),
         reviewedAt: new Date().toISOString(),
       };
-      const res = await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unitId ? { ...u, review } : u)) }),
-      });
+      const res = await patchUnitField(unitId, { review });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '저장 실패');
       setReviewPasteOpenId(null);
@@ -668,11 +665,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     setSaving(true);
     setError('');
     try {
-      const res = await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unitId ? { ...u, script: revisePasteText.trim(), review: undefined, status: 'pending' } : u)) }),
-      });
+      const res = await patchUnitField(unitId, { script: revisePasteText.trim(), review: null, status: 'pending' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '저장 실패');
       setRevisePasteOpenId(null);
@@ -737,11 +730,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     setSavingScriptEdit(true);
     setError('');
     try {
-      const res = await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unitId ? { ...u, script: editScriptText } : u)) }),
-      });
+      const res = await patchUnitField(unitId, { script: editScriptText });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '저장 실패');
       setEditScriptId(null);
@@ -757,11 +746,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     if (!unitCompareResult) return;
     setSaving(true);
     try {
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === unitId ? { ...u, factCheck: unitCompareResult.factCheck, sources: unitCompareResult.sources } : u)) }),
-      });
+      await patchUnitField(unitId, { factCheck: unitCompareResult.factCheck, sources: unitCompareResult.sources });
       setUnitCompareResult(null);
       onRefresh();
     } finally {
@@ -844,17 +829,13 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     const nextScript = script || unit.script;
     setSaving(true);
     try {
-      await fetch('/api/script-draft', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId: site.id,
-          units: units.map((u) =>
-            u.id === unit.id
-              ? { ...u, title: nextTitle, script: nextScript, factCheck: unitCompareResult?.factCheck, sources: unitCompareResult?.sources, review: undefined, status: 'pending' }
-              : u
-          ),
-        }),
+      await patchUnitField(unit.id, {
+        title: nextTitle,
+        script: nextScript,
+        factCheck: unitCompareResult?.factCheck ?? null,
+        sources: unitCompareResult?.sources ?? null,
+        review: null,
+        status: 'pending',
       });
       setUnitCompareResult(null);
       onRefresh();
@@ -864,21 +845,13 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
   }
 
   async function setUnitStatus(id: string, status: ContentUnit['status']) {
-    await fetch('/api/script-draft', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, status } : u)) }),
-    });
+    await patchUnitField(id, { status });
     onRefresh();
   }
 
   // 확정 당시 같이 추천받았던 다른 제목 후보로 바꿔치기 — 대본/번역/검토는 그 제목 기준으로 만든 거라 그대로 두고 제목만 교체.
   async function swapUnitTitle(id: string, newTitle: string) {
-    await fetch('/api/script-draft', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ siteId: site.id, units: units.map((u) => (u.id === id ? { ...u, title: newTitle } : u)) }),
-    });
+    await patchUnitField(id, { title: newTitle });
     onRefresh();
   }
 
