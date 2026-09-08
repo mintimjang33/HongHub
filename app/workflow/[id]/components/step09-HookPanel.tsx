@@ -234,7 +234,12 @@ ${u.selectedStrategy || '(아직 미확정 — 소재만으로 판단)'}`}
                   </button>
                 </div>
               </div>
-              {u.selectedHook && (
+              {/* 2026-09-08 수정 — StrategyPanel(8번)과 같은 버그: selectedHook이 있어야만 이 영역이
+                  보여서, "+ 후보 추가"가 자동으로 채워준 hookReason이 있어도 "이 버전 선택"을 누르기
+                  전까지는 화면에 아예 안 보였다(사용자 지적: "8단계9단계... 최종추천 결과가 파싱되서
+                  기록이 되어야 하는데 안되고 있어" — 8번은 먼저 고쳤는데 9번엔 반영이 안 돼 있었다).
+                  선택 여부와 무관하게 이유가 있으면 보여준다. */}
+              {(u.selectedHook || u.hookReason) && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-xs font-black text-neutral-400">선택 이유</p>
