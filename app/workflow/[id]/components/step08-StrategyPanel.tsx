@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Site } from '../types';
+import { splitCandidates } from '../utils';
 import { CopyButton } from './shared';
 
 // 8번(전략/컨셉 확정) 단계 전용 패널 — 7번(자료조사)에서 확보한 자료를 바탕으로 검토한 방향 후보를
@@ -40,7 +41,7 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
   async function addOption(id: string, text: string) {
     if (!text.trim()) return;
     const unit = units.find((u) => u.id === id);
-    await patchUnit(id, { strategyOptions: [...(unit?.strategyOptions || []), text.trim()] });
+    await patchUnit(id, { strategyOptions: [...(unit?.strategyOptions || []), ...splitCandidates(text)] });
   }
 
   async function deleteOption(id: string, idx: number) {
@@ -189,7 +190,8 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
 4. 캐릭터 스루라인(0~25) — 인물중심 앵글이라면, 그 인물의 관점이 콜드오픈부터 클로징까지 매 챕터 유지될 수 있는 구조인가(중반부에 "인물 서사"에서 "사실 나열"로 새는 구조는 감점).
 총점 밴드: 80~100 강력추천 / 60~79 무난(약점 1곳 있어도 진행 가능) / 40~59 보완 필요 / 40미만 재기획 권장.
 
-[출력 형식]
+[출력 형식 — 반드시 정확히 지켜라]
+각 후보는 반드시 새 줄 맨 앞에서 "A)", "B)"처럼 대문자 알파벳 한 글자+괄호로 시작해라(예: "옵션 A:", "1)", "①" 같은 다른 표기 금지). 이 형식으로 앱이 후보를 자동으로 나눠서 저장하니 절대 바꾸지 마라. "[최종 추천]"은 후보 목록이 끝난 뒤 반드시 이 정확한 대괄호 라벨로 시작해라 — 그래야 앱이 이 부분을 후보와 구분해서 뺀다.
 A) [앵글 이름] — [1~2문장 설명, 왜 이 앵글이 먹히는지] / 신선도 xx·차별화 xx·3초방지력 xx·캐릭터스루라인 xx → 총점 xx
 B) [앵글 이름] — [1~2문장 설명] / 총점 xx
 (필요하면 C, D도 추가)
