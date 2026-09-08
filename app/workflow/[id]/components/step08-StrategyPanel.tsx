@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Site } from '../types';
-import { splitCandidates, extractRecommendation } from '../utils';
+import { splitCandidates, extractRecommendation, extractRecommendedCandidateIndex } from '../utils';
 import { CopyButton } from './shared';
 
 // 8번(전략/컨셉 확정) 단계 전용 패널 — 7번(자료조사)에서 확보한 자료를 바탕으로 검토한 방향 후보를
@@ -42,9 +42,16 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
     if (!text.trim()) return;
     const unit = units.find((u) => u.id === id);
     const recommendation = extractRecommendation(text);
+    const newOptions = splitCandidates(text);
+    // 2026-09-08 추가 — 사용자 지적: "이 버전 선택 같은 짓을 하지 말라고". 제미나이가 이미
+    // "[최종 추천] A)..."처럼 후보를 콕 집어 추천했으면, 그 후보를 사람이 목록에서 다시 찾아
+    // "이 방향 선택"을 누를 필요 없이 바로 selectedStrategy로 확정해버린다.
+    const recommendedIdx = extractRecommendedCandidateIndex(text);
+    const recommendedOption = recommendedIdx != null ? newOptions[recommendedIdx] : undefined;
     await patchUnit(id, {
-      strategyOptions: [...(unit?.strategyOptions || []), ...splitCandidates(text)],
+      strategyOptions: [...(unit?.strategyOptions || []), ...newOptions],
       ...(recommendation ? { strategyReason: recommendation } : {}),
+      ...(recommendedOption ? { selectedStrategy: recommendedOption } : {}),
     });
   }
 
@@ -199,7 +206,7 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
 A) [앵글 이름] — [1~2문장 설명, 왜 이 앵글이 먹히는지] / 신선도 xx·차별화 xx·3초방지력 xx·캐릭터스루라인 xx → 총점 xx
 B) [앵글 이름] — [1~2문장 설명] / 총점 xx
 (필요하면 C, D도 추가)
-[최종 추천] 위 후보 중 하나를 골라 그 이유를 설명해라 — 점수가 가장 높은 것을 기계적으로 고르지 말고, 왜 그게 이 채널에 더 맞는지 설명해라.
+[최종 추천] 위 후보 중 하나를 골라 그 이유를 설명해라 — 점수가 가장 높은 것을 기계적으로 고르지 말고, 왜 그게 이 채널에 더 맞는지 설명해라. 반드시 문장 맨 앞부분에 추천하는 후보의 알파벳 라벨(예: "A)")을 정확히 한 번 언급해라 — 앱이 이 라벨을 읽고 그 후보를 자동으로 확정한다.
 
 [참고 자료] 우리 채널 정보(벤치마크 대본·캐릭터·이전 대본): https://honghub.vercel.app/share/${site.id}
 
@@ -235,7 +242,8 @@ ${u.factCheck || '(아직 없음 — 소재 설명만으로 판단)'}`}
               {/* 2026-09-08 수정 — 예전엔 selectedStrategy가 있어야만 이 영역이 보여서, "+ 후보 추가"가
                   자동으로 채워준 strategyReason이 있어도 "이 방향 선택"을 누르기 전까지는 화면에 아예
                   안 보였다(사용자 지적: "[최종 추천]이 기록이 안되는데" — 실제로는 DB엔 저장돼 있었는데
-                  화면에 안 보였을 뿐). 선택 여부와 무관하게 이유가 있으면 보여준다. */}
+                  화면에 안 보였을 뿐). 선택 여부와 무관하게 이유가 있으면 보여준다. 이제는 addOption이
+                  추천 라벨을 읽어 selectedStrategy까지 자동으로 채워주므로 대부분 바로 "확정됨"으로 뜬다. */}
               {(u.selectedStrategy || u.strategyReason) && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
