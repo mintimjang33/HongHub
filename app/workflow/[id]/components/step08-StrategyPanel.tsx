@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Site } from '../types';
-import { splitCandidates } from '../utils';
+import { splitCandidates, extractRecommendation } from '../utils';
 import { CopyButton } from './shared';
 
 // 8번(전략/컨셉 확정) 단계 전용 패널 — 7번(자료조사)에서 확보한 자료를 바탕으로 검토한 방향 후보를
@@ -41,7 +41,11 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
   async function addOption(id: string, text: string) {
     if (!text.trim()) return;
     const unit = units.find((u) => u.id === id);
-    await patchUnit(id, { strategyOptions: [...(unit?.strategyOptions || []), ...splitCandidates(text)] });
+    const recommendation = extractRecommendation(text);
+    await patchUnit(id, {
+      strategyOptions: [...(unit?.strategyOptions || []), ...splitCandidates(text)],
+      ...(recommendation ? { strategyReason: recommendation } : {}),
+    });
   }
 
   async function deleteOption(id: string, idx: number) {
