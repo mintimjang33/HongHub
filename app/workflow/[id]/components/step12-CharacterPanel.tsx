@@ -84,6 +84,11 @@ function UnitCharacterCard({
   // 프롬프트가 거대해지므로, 11번(대본) 프롬프트가 이미 쓰는 같은 공개 링크(/share/[id])를 그대로
   // 재사용해서 "이 제목의 대본을 열어서 읽어라"고 지시한다(사용자 지적: "대본 링크를 전달해야
   // 하는거 아니야?") — 항상 최신 저장본을 링크로 가리키고, 매번 최신 스냅샷을 복사해 넣을 필요가 없다.
+  // 2026-09-08 추가 수정 — [설명] 지시가 "Flow 프롬프트에 옮겨 쓸 수 있을 만큼 구체적으로"로만
+  // 돼있어서, 한국어 설명으로 대충 채우고 끝날 여지가 있었다(사용자 지적: "이미지 프롬프트를
+  // 뽑으라고 한거 맞아?"). 이미 등록된 캐릭터(C02~C05)들의 실제 형식 — 영어로 된 완성형
+  // "Character reference sheet, Korean webtoon vector illustration style: ..." 프롬프트 —
+  // 을 그대로 템플릿으로 박아서, 설명이 아니라 Flow에 바로 붙여넣을 프롬프트 문장 자체를 쓰게 했다.
   const characterPrompt = `[역할] 너는 우리 채널의 캐릭터 디자이너다. 아래 링크를 열어 "콘텐츠 유닛" 섹션에서 제목이 정확히 "${unit.title}"인 항목을 찾고, 그 대본을 읽어서 이야기 진행상 사물을 의인화한 배역 캐릭터로 등장시켜야 하는 지점을 전부 찾아 각각 캐릭터로 제안해라.
 
 [대본 링크]
@@ -102,9 +107,9 @@ ${host ? `- 진행자 캐릭터(${host.name})와 같은 화면에 등장해도 �
 ${unit.material}
 
 [출력 형식 — 캐릭터 하나당 아래 3줄 세트를 반복해라(필요한 만큼), 세트 사이는 빈 줄로 구분. 다른 설명 붙이지 마라]
-[이름] (캐릭터 이름)
-[역할] (한 줄 — 등장하는 챕터/장면과 이 콘텐츠에서 맡는 역할)
-[설명] (외형·색감·질감·표정·자세 — Flow 이미지 생성 프롬프트에 그대로 옮겨 쓸 수 있을 만큼 구체적으로, 위 NO-text 문구 포함)`;
+[이름] (캐릭터 이름 — 한국어/영어 상관없음)
+[역할] (한 줄, 한국어 — 등장하는 챕터/장면과 이 콘텐츠에서 맡는 역할)
+[설명] (한국어 설명이 아니라, Flow(이미지 생성 AI)에 그대로 붙여넣을 완성된 영어 이미지 생성 프롬프트 문장 그 자체를 써라. 반드시 아래 형식을 따라라: "Character reference sheet, Korean webtoon vector illustration style: [의인화된 사물의 외형·색감·질감·표정·자세를 구체적으로]. Clean line art, flat colors, vector-style graphics, minimalist and lively energy, [색상 팔레트]. Plain solid [색상] grey background, centered composition, character reference sheet presentation, single isolated figure. IMPORTANT: absolutely NO text, no captions, no title, no labels anywhere in the image." — 대괄호 부분을 실제 내용으로 채우고, 나머지 틀·문장 구조는 그대로 따라라)`;
 
   return (
     <div className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
