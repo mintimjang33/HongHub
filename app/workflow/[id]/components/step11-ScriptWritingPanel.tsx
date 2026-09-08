@@ -324,102 +324,15 @@ ${u.planningDoc || '(미확정)'}`}
                   )}
                   {/* 씬/이미지·영상 프롬프트 편집 UI는 16-17번 전용 ImageVideoPanel에만 둔다 — 여기 중복으로 있던 블록을 제거함(2026-09-04, 사용자 지적). */}
                   {/* 자료조사(factCheck/sources) 편집 UI는 7번 자료조사 전용 ResearchPanel에만 둔다 — 여기 중복으로 있던 블록을 제거함(2026-09-03). */}
-
-                  {/* 제미나이와 비교→업그레이드 — "교체"가 아니라 원본+제미나이 버전을 합쳐서 최종본을 만든다. */}
-                  <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
-                    <p className="text-[10px] font-black text-neutral-500 mb-1.5">🔍 제미나이와 비교해서 사실확인 (선택)</p>
-                    <div className="flex flex-wrap gap-1.5 mb-2">
-                      <button
-                        onClick={() => w.copyUnitComparePrompt(u)}
-                        disabled={w.unitCompareCopyingId === u.id}
-                        className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                      >
-                        {w.unitCompareCopyingId === u.id ? '준비 중...' : w.unitCompareCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 비교하기'}
-                      </button>
-                      <button
-                        onClick={() => w.runUnitCompare(u)}
-                        disabled={w.unitCompareRunningId === u.id}
-                        className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                      >
-                        {w.unitCompareRunningId === u.id ? '비교 중...' : '✨ 자동으로 비교하기'}
-                      </button>
-                    </div>
-                    {w.unitComparePasteOpenId === u.id && (
-                      <div className="mb-2">
-                        <textarea
-                          value={w.unitComparePasteText}
-                          onChange={(e) => w.setUnitComparePasteText(e.target.value)}
-                          rows={6}
-                          placeholder="구독 채팅 답변([FACT-CHECK]/[REWRITE]/[SOURCES])을 여기에 붙여넣으세요"
-                          className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-                        />
-                        <div className="flex justify-end gap-1.5">
-                          <button onClick={() => w.saveUnitComparePaste(u.id)} disabled={!w.unitComparePasteText.trim()} className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40">
-                            결과 확인
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {w.unitCompareResult && w.unitCompareResult.unitId === u.id && (
-                      <div className="space-y-2">
-                        <div className="bg-white border border-neutral-200 rounded-lg p-2">
-                          <p className="text-[10px] font-black text-neutral-400 mb-1">사실확인 결과</p>
-                          <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{w.unitCompareResult.factCheck || '(내용 없음)'}</p>
-                        </div>
-                        {(w.unitCompareResult.rewriteTitle || w.unitCompareResult.rewriteScript) && (
-                          <div className="bg-white border border-neutral-200 rounded-lg p-2">
-                            <p className="text-[10px] font-black text-neutral-400 mb-1">제미나이가 다시 쓴 버전</p>
-                            {w.unitCompareResult.rewriteTitle && <p className="text-xs font-bold text-neutral-700 mb-1">{w.unitCompareResult.rewriteTitle}</p>}
-                            {w.unitCompareResult.rewriteScript && <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{w.unitCompareResult.rewriteScript}</p>}
-                          </div>
-                        )}
-                        <p className="text-[10px] text-neutral-400">둘 중 하나를 고르는 게 아니라, 두 버전의 장점을 합쳐서 업그레이드해요.</p>
-                        <div className="flex flex-wrap justify-end gap-1.5">
-                          <button
-                            onClick={() => w.keepOriginalAfterUnitCompare(u.id)}
-                            disabled={w.saving}
-                            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                          >
-                            원본 유지
-                          </button>
-                          <button
-                            onClick={() => w.copyUnitUpgradePrompt(u)}
-                            disabled={w.unitUpgradeCopyingId === u.id}
-                            className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                          >
-                            {w.unitUpgradeCopyingId === u.id ? '준비 중...' : w.unitUpgradeCopiedId === u.id ? '✅ 복사됨!' : '💬 구독으로 업그레이드'}
-                          </button>
-                          <button
-                            onClick={() => w.runUnitUpgrade(u)}
-                            disabled={w.unitUpgradingId === u.id}
-                            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-emerald-600 text-white disabled:opacity-40"
-                          >
-                            {w.unitUpgradingId === u.id ? '업그레이드 중...' : '🔀 자동으로 업그레이드'}
-                          </button>
-                        </div>
-                        {w.unitUpgradePasteOpenId === u.id && (
-                          <div>
-                            <textarea
-                              value={w.unitUpgradePasteText}
-                              onChange={(e) => w.setUnitUpgradePasteText(e.target.value)}
-                              rows={6}
-                              placeholder="구독 채팅 답변(Title:/Script:)을 여기에 붙여넣으세요"
-                              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-                            />
-                            <div className="flex justify-end gap-1.5">
-                              <button
-                                onClick={() => w.saveUnitUpgradePaste(u)}
-                                disabled={w.saving || !w.unitUpgradePasteText.trim()}
-                                className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                              >
-                                붙여넣기 적용
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  {/* 2026-09-08 삭제 — "🔍 제미나이와 비교해서 사실확인" 섹션(비교→업그레이드)이 바로 아래
+                      "🔍 AI 검토받기 → 🔧 피드백 반영해서 수정" 섹션과 사실상 같은 일을 했다: 둘 다
+                      "LLM에게 대본을 다시 확인받고 → 새로 쓴 버전을 받아서 → 대본을 교체"로 끝났다
+                      (사용자 지적: "이 부분도 중복이 있는거 같아"). 게다가 비교 섹션이 저장하는 factCheck는
+                      7번(자료조사, ResearchPanel)이 사실+출처를 짝지어 관리하는 바로 그 필드를 덮어써서,
+                      7번의 사실확인 결과와 충돌할 위험도 있었다. 아래 검토(review)는 이미 SCORE/FEEDBACK에
+                      "(사실확인 필요)" 표시를 포함하고, 그 점수가 "검수" 진행 배지·승인/반려 흐름과도 이어져
+                      있어 파이프라인에 더 깊이 통합돼 있으므로 이쪽만 남기고 비교 섹션은 제거했다. 관련
+                      hook 함수/상태(copyUnitComparePrompt 등)도 useScriptWizard.ts에서 같이 제거함. */}
 
                   {u.review && (
                     <div className="pt-2 border-t border-neutral-50 bg-neutral-50 rounded-lg p-2">
