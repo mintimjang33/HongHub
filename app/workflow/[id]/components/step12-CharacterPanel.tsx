@@ -4,18 +4,27 @@ import { useState } from 'react';
 import type { Site, ContentUnit, Character } from '../types';
 import { CharacterListEditor, CopyButton } from './shared';
 
-// 콘텐츠별 배역(소재를 의인화한 캐릭터)을 파싱하는 응답 형식 — [이름]/[역할]/[설명] 3줄.
-function parseCharacterPaste(text: string): Character {
-  const pick = (label: string) => {
-    const m = text.match(new RegExp(`\\[${label}\\]([\\s\\S]*?)(?=\\[이름\\]|\\[역할\\]|\\[설명\\]|$)`));
-    return m ? m[1].trim() : '';
-  };
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: pick('이름'),
-    role: pick('역할'),
-    description: pick('설명'),
-  };
+// 콘텐츠별 배역(소재를 의인화한 캐릭터)을 파싱하는 응답 형식 — [이름]/[역할]/[설명] 3줄짜리
+// 세트가 캐릭터 수만큼 반복된다(대본 챕터마다 배역이 여러 개일 수 있음 — 아래 프롬프트 참고).
+function parseCharacterPastes(text: string): Character[] {
+  const blocks = text
+    .split(/(?=\[이름\])/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  return blocks
+    .map((block, idx) => {
+      const pick = (label: string) => {
+        const m = block.match(new RegExp(`\\[${label}\\]([\\s\\S]*?)(?=\\[이름\\]|\\[역할\\]|\\[설명\\]|$)`));
+        return m ? m[1].trim() : '';
+      };
+      return {
+        id: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
+        name: pick('이름'),
+        role: pick('역할'),
+        description: pick('설명'),
+      };
+    })
+    .filter((c) => c.name);
 }
 
 // 유닛(콘텐츠) 하나의 캐릭터 목록 — 자료조사(ResearchPanel) 등과 같은 펼치기 카드 패턴.
@@ -58,28 +67,43 @@ function UnitCharacterCard({
 
   async function saveParsedCharacter() {
     if (!pasteText.trim()) return;
-    await saveUnitCharacters([...chars, parseCharacterPaste(pasteText)]);
+    const parsed = parseCharacterPastes(pasteText);
+    if (parsed.length === 0) return;
+    await saveUnitCharacters([...chars, ...parsed]);
     setPasteOpen(false);
     setPasteText('');
   }
 
   const host = mainCharacters[0];
-  const characterPrompt = `[역할] 너는 우리 채널의 캐릭터 디자이너다. 아래 소재를 의인화한 배역 캐릭터 하나를 제안해라.
+  // 2026-09-08 수정 — 처음엔 소재(material) 한 줄만 보고 배역 "하나"를 뽑게 했는데, 실제로는
+  // 대본(script) 안에서 챕터마다 상징 사물이 바뀌거나(코카콜라 유닛: 초기형 병→곡선형 병 리디자인
+  // 장면) 카메오(백곰, 산타 버전)까지 여러 배역이 필요하다는 게 이미 등록된 데이터로 확인됐다
+  // (사용자 지적: "대본안에서 필요한 캐릭터들을 뽑는거 아니야?"). 그래서 필요한 배역을 빠짐없이
+  // 찾게 하고, 출력도 캐릭터 하나가 아니라 여러 개(각각 [이름]/[역할]/[설명] 세트 반복)를 받을
+  // 수 있게 바꿨다. 대본 자체는 만자 넘는 경우가 많아 통째로 프롬프트에 박아넣으면 복사할 때마다
+  // 프롬프트가 거대해지므로, 11번(대본) 프롬프트가 이미 쓰는 같은 공개 링크(/share/[id])를 그대로
+  // 재사용해서 "이 제목의 대본을 열어서 읽어라"고 지시한다(사용자 지적: "대본 링크를 전달해야
+  // 하는거 아니야?") — 항상 최신 저장본을 링크로 가리키고, 매번 최신 스냅샷을 복사해 넣을 필요가 없다.
+  const characterPrompt = `[역할] 너는 우리 채널의 캐릭터 디자이너다. 아래 링크를 열어 "콘텐츠 유닛" 섹션에서 제목이 정확히 "${unit.title}"인 항목을 찾고, 그 대본을 읽어서 이야기 진행상 사물을 의인화한 배역 캐릭터로 등장시켜야 하는 지점을 전부 찾아 각각 캐릭터로 제안해라.
+
+[대본 링크]
+https://honghub.vercel.app/share/${site.id}
 
 [채널 캐릭터 규칙 — 반드시 지킬 것]
-- 실존 인물을 사람 얼굴 캐릭터로 그리지 않는다. 대신 이 소재의 상징이 되는 사물/브랜드/제품 자체에 팔다리·눈·표정을 붙여 의인화한다(예: 코카콜라 편이면 유리병 캐릭터).
+- 실존 인물을 사람 얼굴 캐릭터로 그리지 않는다. 대신 그 장면의 상징이 되는 사물/브랜드/제품 자체에 팔다리·눈·표정을 붙여 의인화한다(예: 코카콜라 편이면 유리병 캐릭터).
 - 실제 인물의 동작이 꼭 필요한 장면은 캐릭터로 만들지 않고 손 클로즈업으로만 표현한다는 게 이 채널의 원칙이니, 배역 자체는 사물 의인화로만 제안해라.
-- 이 배역은 이 콘텐츠 하나에서만 쓰고, 채널 전체에 고정되는 캐릭터가 아니다 — 다음 소재에서는 또 다른 사물이 배역이 된다.
-- 이미지 안에 텍스트·캡션·라벨·제목을 절대 넣지 않는다 — 설명 끝에 "IMPORTANT: absolutely NO text, no captions, no title, no labels anywhere in the image"를 반드시 포함해라.
+- 대본 전체에서 필요한 배역을 빠짐없이 찾아라 — 같은 사물이라도 챕터가 넘어가며 디자인이 바뀌는 순간(예: 초기형→리디자인)이 있으면 그 각각을 별도 캐릭터로 뽑고, 카메오로 등장하는 관련 브랜드/마스코트가 있으면 그것도 별도로 뽑아라. 결과가 1개일 수도, 여러 개일 수도 있다 — 대본 내용을 보고 판단해라.
+- 이 배역들은 이 콘텐츠 하나에서만 쓰고, 채널 전체에 고정되는 캐릭터가 아니다 — 다음 소재에서는 또 다른 사물이 배역이 된다.
+- 이미지 안에 텍스트·캡션·라벨·제목을 절대 넣지 않는다 — 각 캐릭터 설명 끝에 "IMPORTANT: absolutely NO text, no captions, no title, no labels anywhere in the image"를 반드시 포함해라.
 - 재질/질감 지시는 반드시 "캐릭터 표면 자체의 재질"이라고 명시해라 — 비유를 배경 전체로 오인하지 않게, 배경은 별도로 "plain solid grey background"라고 명확히 지정해라.
 ${host ? `- 진행자 캐릭터(${host.name})와 같은 화면에 등장해도 어색하지 않게, 톤·스타일(색감·질감·과장 정도)을 맞춰라. 진행자 설명: ${host.description}` : ''}
 
 [이 콘텐츠의 소재]
 ${unit.material}
 
-[출력 형식 — 아래 라벨 그대로, 다른 설명 붙이지 마라]
+[출력 형식 — 캐릭터 하나당 아래 3줄 세트를 반복해라(필요한 만큼), 세트 사이는 빈 줄로 구분. 다른 설명 붙이지 마라]
 [이름] (캐릭터 이름)
-[역할] (한 줄 — 이 콘텐츠에서 맡는 역할)
+[역할] (한 줄 — 등장하는 챕터/장면과 이 콘텐츠에서 맡는 역할)
 [설명] (외형·색감·질감·표정·자세 — Flow 이미지 생성 프롬프트에 그대로 옮겨 쓸 수 있을 만큼 구체적으로, 위 NO-text 문구 포함)`;
 
   return (
@@ -94,19 +118,23 @@ ${unit.material}
       {open && (
         <div className="px-3 pb-3 pt-1 border-t border-neutral-100">
           <p className="text-[10px] text-neutral-400 mb-1.5">소재: {unit.material}</p>
-          <div className="inline-flex items-center gap-1.5 text-[11px] font-black px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 mb-2">
-            <span className="text-amber-700">🔍 제미나이 배역 추천</span>
-            <CopyButton text={characterPrompt} />
-            <button
-              onClick={() => {
-                setPasteOpen((v) => !v);
-                setPasteText('');
-              }}
-              className="text-[10px] font-bold text-neutral-400 hover:text-black"
-            >
-              {pasteOpen ? '접기' : '결과 붙여넣기'}
-            </button>
-          </div>
+          {unit.script ? (
+            <div className="inline-flex items-center gap-1.5 text-[11px] font-black px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 mb-2">
+              <span className="text-amber-700">🔍 제미나이 배역 추천</span>
+              <CopyButton text={characterPrompt} />
+              <button
+                onClick={() => {
+                  setPasteOpen((v) => !v);
+                  setPasteText('');
+                }}
+                className="text-[10px] font-bold text-neutral-400 hover:text-black"
+              >
+                {pasteOpen ? '접기' : '결과 붙여넣기'}
+              </button>
+            </div>
+          ) : (
+            <p className="text-[10px] text-neutral-300 mb-2">대본이 링크로 전달되니, 11번에서 대본을 먼저 작성해야 배역 추천을 받을 수 있어요.</p>
+          )}
           {pasteOpen && (
             <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 mb-2">
               <textarea
