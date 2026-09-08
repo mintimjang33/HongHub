@@ -22,17 +22,19 @@ import { CopyButton } from './shared';
 // 마치 한 묶음인 것처럼 보이게 만들었다(사용자 지적: "한컨텐츠 한컨텐츠 별도인데 11단계는
 // 완성된 컨텐츠 2개 이렇게 되어있자나?" / "10번 처럼 독자적으로"). 10번과 동일하게 그룹 박스·
 // 집계 헤더 없이 유닛 카드를 바로 나열하도록 걷어냈다.
+// 2026-09-08 삭제 — "🔄 처음부터"(resetAll) 버튼은 옛 소재→제목→대본 위저드가 쓰던
+// draft.materials/selectedMaterial/titles/selectedTitle 등을 지우는 용도인데, 그 위저드 UI는
+// 위 2026-09-08 삭제 이력대로 이미 11번 화면에서 없어졌다 — 눌러도 이 화면에선 아무것도
+// 안 바뀌는 죽은 버튼이었다(사용자 지적: "필요없는 코드는 정리해야지"). 그 위저드 상태를 실제로
+// 쓰는 5번(step05-MaterialSelectionPanel.tsx)엔 동일 버튼이 그대로 있으니 거기서 초기화하면 된다.
 export function ScriptWritingPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const w = useScriptWizard(site, onRefresh);
   const { draft, units } = w;
 
   return (
     <div className="border-t border-black/5 pt-3">
-      <div className="flex items-center justify-between mb-2">
+      <div className="mb-2">
         <span className="text-xs font-black text-neutral-500">✍️ 대본 작성</span>
-        <button onClick={w.resetAll} className="text-[11px] font-bold text-neutral-400 hover:text-red-500 px-2">
-          🔄 처음부터
-        </button>
       </div>
       <div className="flex items-center gap-1.5 mb-2">
         <span className="text-[10px] font-black text-neutral-400">카테고리:</span>
