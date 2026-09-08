@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Site, ContentUnit } from '../types';
+import type { Site } from '../types';
 import { CopyButton } from './shared';
 
 // 8번(전략/컨셉 확정) 단계 전용 패널 — 7번(자료조사)에서 확보한 자료를 바탕으로 검토한 방향 후보를
@@ -19,13 +19,17 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
   const [editOptionDraft, setEditOptionDraft] = useState('');
   const [saving, setSaving] = useState(false);
 
-  async function saveUnits(next: ContentUnit[]) {
+  // 2026-09-08 — 유닛 하나의 필드만 서버에 보내는 unitPatch를 쓴다. 예전엔 이 화면이 들고 있는
+  // units 배열 전체를 통째로 다시 보냈는데, 그 배열이 화면을 마지막으로 불러온 시점의 스냅샷이라서
+  // 그 사이 다른 탭/다른 경로(MCP 등)로 갱신된 다른 유닛·다른 필드를 그대로 덮어써버리는 사고가
+  // 있었다. 서버가 unitPatch를 받으면 방금 새로 읽은 최신 units를 기준으로 이 필드만 병합한다.
+  async function patchUnit(id: string, fields: Record<string, unknown>) {
     setSaving(true);
     try {
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: next }),
+        body: JSON.stringify({ siteId: site.id, unitPatch: { id, fields } }),
       });
       onRefresh();
     } finally {
@@ -35,20 +39,15 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
 
   async function addOption(id: string, text: string) {
     if (!text.trim()) return;
-    await saveUnits(units.map((u) => (u.id === id ? { ...u, strategyOptions: [...(u.strategyOptions || []), text.trim()] } : u)));
+    const unit = units.find((u) => u.id === id);
+    await patchUnit(id, { strategyOptions: [...(unit?.strategyOptions || []), text.trim()] });
   }
 
   async function deleteOption(id: string, idx: number) {
     const unit = units.find((u) => u.id === id);
     const nextOptions = (unit?.strategyOptions || []).filter((_, i) => i !== idx);
     const removed = unit?.strategyOptions?.[idx];
-    await saveUnits(
-      units.map((u) =>
-        u.id === id
-          ? { ...u, strategyOptions: nextOptions, selectedStrategy: u.selectedStrategy === removed ? undefined : u.selectedStrategy }
-          : u
-      )
-    );
+    await patchUnit(id, { strategyOptions: nextOptions, selectedStrategy: unit?.selectedStrategy === removed ? null : unit?.selectedStrategy });
   }
 
   // 후보 문구를 고침 — 그 후보가 이미 selectedStrategy로 골라져 있었다면 selectedStrategy도 새 문구로 같이 바꿔서 선택 상태가 안 풀리게 한다.
@@ -57,21 +56,16 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
     const unit = units.find((u) => u.id === id);
     const oldText = unit?.strategyOptions?.[idx];
     const nextOptions = (unit?.strategyOptions || []).map((o, i) => (i === idx ? newText.trim() : o));
-    await saveUnits(
-      units.map((u) =>
-        u.id === id
-          ? { ...u, strategyOptions: nextOptions, selectedStrategy: u.selectedStrategy === oldText ? newText.trim() : u.selectedStrategy }
-          : u
-      )
-    );
+    await patchUnit(id, { strategyOptions: nextOptions, selectedStrategy: unit?.selectedStrategy === oldText ? newText.trim() : unit?.selectedStrategy });
   }
 
   async function selectOption(id: string, text: string) {
-    await saveUnits(units.map((u) => (u.id === id ? { ...u, selectedStrategy: u.selectedStrategy === text ? undefined : text } : u)));
+    const unit = units.find((u) => u.id === id);
+    await patchUnit(id, { selectedStrategy: unit?.selectedStrategy === text ? null : text });
   }
 
   async function saveReason(id: string, reason: string) {
-    await saveUnits(units.map((u) => (u.id === id ? { ...u, strategyReason: reason } : u)));
+    await patchUnit(id, { strategyReason: reason });
   }
 
   return (
