@@ -362,6 +362,21 @@ export function extractRecommendedCandidateIndex(text: string): number | null {
   return null;
 }
 
+// 11번 대본은 [화면/음향 연출]과 [TTS] 줄이 번갈아 나오는 형식으로 쓰라고 프롬프트에 못박혀
+// 있다(2026-09-08 추가 — 사용자 지적: "tts 만들때 우린 tts만 추출해야하지 않아?"). 13번(나레이션
+// TTS 제작) 단계에서 ElevenLabs 등에 넣을 때는 화면 연출·SFX·BGM 지시문 없이 나레이션만
+// 필요하므로, [TTS] 라벨이 붙은 줄만 뽑아 이어붙인다. 라벨을 하나도 못 찾으면(이 규칙 이전에
+// 저장된 옛날 대본이거나 자유 형식으로 쓴 경우) 원문 그대로 돌려줘서 최소한 복사 자체는 항상
+// 되게 한다 — 이 경우 화면 연출 지시문이 섞여 나올 수 있으니 사람이 눈으로 한 번 더 걸러야 한다.
+export function extractTtsLines(script: string): string {
+  const matches = [...script.matchAll(/\[TTS\]\s*([\s\S]*?)(?=\n\s*\[|$)/g)];
+  if (matches.length === 0) return script;
+  return matches
+    .map((m) => m[1].trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 // 2026-09-01 이전엔 narrationUrls가 문자열 배열이었다 — 이미 저장된 예전 데이터를 위해
 // 문자열이 그대로 오면 라벨 없는 항목으로 취급한다.
 export function normalizeLabeledItems(raw: unknown): LabeledItem[] {
