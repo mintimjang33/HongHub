@@ -56,12 +56,13 @@ export function ContentRegisterPanel({
   async function saveEdit(id: string) {
     setSavingEditId(id);
     try {
+      const target = units.find((u) => u.id === id);
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           siteId: site.id,
-          units: units.map((u) => (u.id === id ? { ...u, title: editTitle.trim() || u.title, material: editMaterial.trim() || u.material } : u)),
+          unitPatch: { id, fields: { title: editTitle.trim() || target?.title, material: editMaterial.trim() || target?.material } },
         }),
       });
       setEditingId(null);
