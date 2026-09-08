@@ -42,7 +42,16 @@ export function ContentRegisterPanel({
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: [...units, unit] }),
+        // 2026-09-08 수정 — 5번에서 confirmMaterial()이 selectedMaterial을 세팅해두는데, 여기서
+        // 등록을 마쳐도 그 값을 안 지워서 11번(대본 작성) 화면이 이미 등록 끝난 소재를 계속
+        // "선택된 소재"로 보여주며 아무도 안 쓰는 옛날 2️⃣제목추천/3️⃣대본 위저드를 되살리는
+        // 버그가 있었다(사용자 지적: "컨텐츠 안에 들어가 있어야 하는 내용이 왜 나와있어???").
+        // 등록이 끝나면 그 소재는 이 유닛으로 넘어간 것이므로 selectedMaterial을 비운다.
+        body: JSON.stringify({
+          siteId: site.id,
+          units: [...units, unit],
+          ...(draft.selectedMaterial === unit.material ? { selectedMaterial: null } : {}),
+        }),
       });
       setNewTitle('');
       setNewMaterial('');
