@@ -562,7 +562,7 @@ export function CharacterListEditor({
   }
   function startAdd() {
     setEditingIndex(-1);
-    setDraft({ ...EMPTY_CHARACTER_DRAFT, id: nextCharacterId(characters) });
+    setDraft({ ...EMPTY_CHARACTER_DRAFT, id: nextCharacterId() });
   }
   function cancel() {
     setEditingIndex(null);
