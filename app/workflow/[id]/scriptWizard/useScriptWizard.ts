@@ -49,19 +49,6 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
   const [upgradeCopied, setUpgradeCopied] = useState(false);
   const [upgradePasteOpen, setUpgradePasteOpen] = useState(false);
   const [upgradePasteText, setUpgradePasteText] = useState('');
-  // 완성된 콘텐츠 유닛용 "제미나이와 비교→업그레이드" 상태 — 위저드 단계와 같은 방식이지만
-  // 유닛 하나마다 별개로 열릴 수 있어서 unitId를 같이 들고 있는다(2026-08-31).
-  const [unitCompareCopyingId, setUnitCompareCopyingId] = useState<string | null>(null);
-  const [unitCompareCopiedId, setUnitCompareCopiedId] = useState<string | null>(null);
-  const [unitComparePasteOpenId, setUnitComparePasteOpenId] = useState<string | null>(null);
-  const [unitComparePasteText, setUnitComparePasteText] = useState('');
-  const [unitCompareRunningId, setUnitCompareRunningId] = useState<string | null>(null);
-  const [unitCompareResult, setUnitCompareResult] = useState<{ unitId: string; factCheck: string; rewriteTitle?: string; rewriteScript?: string; sources?: string[] } | null>(null);
-  const [unitUpgradingId, setUnitUpgradingId] = useState<string | null>(null);
-  const [unitUpgradeCopyingId, setUnitUpgradeCopyingId] = useState<string | null>(null);
-  const [unitUpgradeCopiedId, setUnitUpgradeCopiedId] = useState<string | null>(null);
-  const [unitUpgradePasteOpenId, setUnitUpgradePasteOpenId] = useState<string | null>(null);
-  const [unitUpgradePasteText, setUnitUpgradePasteText] = useState('');
   const units = draft.units || [];
   // 소재(아이디어) 목록을 AI 추천/붙여넣기 말고 직접 추가·수정·삭제도 할 수 있게 하는 상태.
   const [newMaterialText, setNewMaterialText] = useState('');
@@ -678,54 +665,6 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     }
   }
 
-  // 완성된 유닛용 "제미나이와 비교→업그레이드" — 위저드 단계 것과 똑같은 규칙이지만 draft가 아니라
-  // units 배열의 특정 유닛에 바로 적용한다. AI 검토(review)만 받고 끝나던 걸 개선한 revise와 별개로,
-  // "한쪽으로 교체가 아니라 둘을 합쳐서 업그레이드"해야 한다는 지시를 유닛에도 그대로 적용한다(2026-08-31).
-  async function copyUnitComparePrompt(unit: ContentUnit) {
-    setUnitCompareCopyingId(unit.id);
-    setError('');
-    try {
-      const q = new URLSearchParams({ siteId: site.id, action: 'compare', title: unit.title, script: unit.script, category: unit.category || 'trivia' });
-      const res = await fetch(`/api/script-draft?${q}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
-      await navigator.clipboard.writeText(data.prompt);
-      setUnitCompareCopiedId(unit.id);
-      setUnitComparePasteOpenId(unit.id);
-      setUnitComparePasteText('');
-      setTimeout(() => setUnitCompareCopiedId((cur) => (cur === unit.id ? null : cur)), 2500);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUnitCompareCopyingId(null);
-    }
-  }
-
-  function saveUnitComparePaste(unitId: string) {
-    if (!unitComparePasteText.trim()) return;
-    setUnitCompareResult({ unitId, ...parseComparePaste(unitComparePasteText) });
-    setUnitComparePasteOpenId(null);
-  }
-
-  async function runUnitCompare(unit: ContentUnit) {
-    setUnitCompareRunningId(unit.id);
-    setError('');
-    try {
-      const res = await fetch('/api/script-draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, action: 'compare', title: unit.title, script: unit.script, category: unit.category || 'trivia' }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '비교 실패');
-      setUnitCompareResult({ unitId: unit.id, factCheck: data.factCheck || '', rewriteTitle: data.rewriteTitle, rewriteScript: data.rewriteScript, sources: data.sources });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUnitCompareRunningId(null);
-    }
-  }
-
   async function saveScriptEdit(unitId: string) {
     setSavingScriptEdit(true);
     setError('');
@@ -739,108 +678,6 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingScriptEdit(false);
-    }
-  }
-
-  async function keepOriginalAfterUnitCompare(unitId: string) {
-    if (!unitCompareResult) return;
-    setSaving(true);
-    try {
-      await patchUnitField(unitId, { factCheck: unitCompareResult.factCheck, sources: unitCompareResult.sources });
-      setUnitCompareResult(null);
-      onRefresh();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function runUnitUpgrade(unit: ContentUnit) {
-    if (!unitCompareResult || unitCompareResult.unitId !== unit.id) return;
-    setUnitUpgradingId(unit.id);
-    setError('');
-    try {
-      const res = await fetch('/api/script-draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          siteId: site.id,
-          action: 'upgrade',
-          title: unit.title,
-          script: unit.script,
-          rewriteTitle: unitCompareResult.rewriteTitle,
-          rewriteScript: unitCompareResult.rewriteScript,
-          factCheck: unitCompareResult.factCheck,
-          category: unit.category || 'trivia',
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '업그레이드 실패');
-      await applyUnitUpgrade(unit, data.title, data.script);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUnitUpgradingId(null);
-    }
-  }
-
-  async function copyUnitUpgradePrompt(unit: ContentUnit) {
-    if (!unitCompareResult || unitCompareResult.unitId !== unit.id) return;
-    setUnitUpgradeCopyingId(unit.id);
-    setError('');
-    try {
-      const q = new URLSearchParams({
-        siteId: site.id,
-        action: 'upgrade',
-        title: unit.title,
-        script: unit.script,
-        rewriteTitle: unitCompareResult.rewriteTitle || '',
-        rewriteScript: unitCompareResult.rewriteScript || '',
-        factCheck: unitCompareResult.factCheck || '',
-        category: unit.category || 'trivia',
-      });
-      const res = await fetch(`/api/script-draft?${q}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '프롬프트 생성 실패');
-      await navigator.clipboard.writeText(data.prompt);
-      setUnitUpgradeCopiedId(unit.id);
-      setUnitUpgradePasteOpenId(unit.id);
-      setUnitUpgradePasteText('');
-      setTimeout(() => setUnitUpgradeCopiedId((cur) => (cur === unit.id ? null : cur)), 2500);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUnitUpgradeCopyingId(null);
-    }
-  }
-
-  async function saveUnitUpgradePaste(unit: ContentUnit) {
-    if (!unitUpgradePasteText.trim()) return;
-    const pickField = (field: 'Title' | 'Script') => {
-      const m = unitUpgradePasteText.match(new RegExp(`${field}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:Title|Script)\\s*:|$)`, 'i'));
-      return m ? m[1].trim() : undefined;
-    };
-    await applyUnitUpgrade(unit, pickField('Title'), pickField('Script'));
-    setUnitUpgradePasteOpenId(null);
-    setUnitUpgradePasteText('');
-  }
-
-  async function applyUnitUpgrade(unit: ContentUnit, title: string | undefined, script: string | undefined) {
-    const nextTitle = title || unit.title;
-    const nextScript = script || unit.script;
-    setSaving(true);
-    try {
-      await patchUnitField(unit.id, {
-        title: nextTitle,
-        script: nextScript,
-        factCheck: unitCompareResult?.factCheck ?? null,
-        sources: unitCompareResult?.sources ?? null,
-        review: null,
-        status: 'pending',
-      });
-      setUnitCompareResult(null);
-      onRefresh();
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -901,19 +738,6 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     upgradePasteOpen,
     upgradePasteText,
     setUpgradePasteText,
-    unitCompareCopyingId,
-    unitCompareCopiedId,
-    unitComparePasteOpenId,
-    unitComparePasteText,
-    setUnitComparePasteText,
-    unitCompareRunningId,
-    unitCompareResult,
-    unitUpgradingId,
-    unitUpgradeCopyingId,
-    unitUpgradeCopiedId,
-    unitUpgradePasteOpenId,
-    unitUpgradePasteText,
-    setUnitUpgradePasteText,
     newMaterialText,
     setNewMaterialText,
     editingMaterialIdx,
@@ -949,14 +773,7 @@ export function useScriptWizard(site: Site, onRefresh: () => void) {
     reviseUnit,
     copyRevisePrompt,
     savePastedRevise,
-    copyUnitComparePrompt,
-    saveUnitComparePaste,
-    runUnitCompare,
     saveScriptEdit,
-    keepOriginalAfterUnitCompare,
-    runUnitUpgrade,
-    copyUnitUpgradePrompt,
-    saveUnitUpgradePaste,
     setUnitStatus,
     swapUnitTitle,
   };
