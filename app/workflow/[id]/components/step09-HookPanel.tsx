@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Site, ContentUnit } from '../types';
+import type { Site } from '../types';
 import { CopyButton } from './shared';
 
 // 9번(훅/인트로 설계) 단계 전용 패널 — 본문 쓰기 전 도입부 후보를 여러 버전 적어보고 제일 강한 걸
@@ -20,13 +20,18 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
   const [reasonDraft, setReasonDraft] = useState('');
   const [saving, setSaving] = useState(false);
 
-  async function saveUnits(next: ContentUnit[]) {
+  // 2026-09-08 — 유닛 하나의 필드만 서버에 보내는 unitPatch를 쓴다. 예전엔 이 화면이 들고 있는
+  // units 배열 전체를 통째로 다시 보냈는데, 그 배열이 화면을 마지막으로 불러온 시점의 스냅샷이라서
+  // 그 사이 다른 탭/다른 경로(MCP 등)로 갱신된 다른 유닛·다른 필드를 그대로 덮어써버리는 사고가
+  // 있었다(8번 전략 단계에서 실제로 겪음). 서버가 unitPatch를 받으면 방금 새로 읽은 최신 units를
+  // 기준으로 이 필드만 병합한다.
+  async function patchUnit(id: string, fields: Record<string, unknown>) {
     setSaving(true);
     try {
       await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId: site.id, units: next }),
+        body: JSON.stringify({ siteId: site.id, unitPatch: { id, fields } }),
       });
       onRefresh();
     } finally {
@@ -36,16 +41,15 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
 
   async function addHook(id: string, text: string) {
     if (!text.trim()) return;
-    await saveUnits(units.map((u) => (u.id === id ? { ...u, hookOptions: [...(u.hookOptions || []), text.trim()] } : u)));
+    const unit = units.find((u) => u.id === id);
+    await patchUnit(id, { hookOptions: [...(unit?.hookOptions || []), text.trim()] });
   }
 
   async function deleteHook(id: string, idx: number) {
     const unit = units.find((u) => u.id === id);
     const nextOptions = (unit?.hookOptions || []).filter((_, i) => i !== idx);
     const removed = unit?.hookOptions?.[idx];
-    await saveUnits(
-      units.map((u) => (u.id === id ? { ...u, hookOptions: nextOptions, selectedHook: u.selectedHook === removed ? undefined : u.selectedHook } : u))
-    );
+    await patchUnit(id, { hookOptions: nextOptions, selectedHook: unit?.selectedHook === removed ? null : unit?.selectedHook });
   }
 
   // 후보 문구를 고침 — 그 후보가 이미 selectedHook으로 골라져 있었다면 selectedHook도 새 문구로 같이 바꿔서 선택 상태가 안 풀리게 한다.
@@ -54,19 +58,16 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
     const unit = units.find((u) => u.id === id);
     const oldText = unit?.hookOptions?.[idx];
     const nextOptions = (unit?.hookOptions || []).map((o, i) => (i === idx ? newText.trim() : o));
-    await saveUnits(
-      units.map((u) =>
-        u.id === id ? { ...u, hookOptions: nextOptions, selectedHook: u.selectedHook === oldText ? newText.trim() : u.selectedHook } : u
-      )
-    );
+    await patchUnit(id, { hookOptions: nextOptions, selectedHook: unit?.selectedHook === oldText ? newText.trim() : unit?.selectedHook });
   }
 
   async function selectHook(id: string, text: string) {
-    await saveUnits(units.map((u) => (u.id === id ? { ...u, selectedHook: u.selectedHook === text ? undefined : text } : u)));
+    const unit = units.find((u) => u.id === id);
+    await patchUnit(id, { selectedHook: unit?.selectedHook === text ? null : text });
   }
 
   async function saveReason(id: string, reason: string) {
-    await saveUnits(units.map((u) => (u.id === id ? { ...u, hookReason: reason } : u)));
+    await patchUnit(id, { hookReason: reason });
   }
 
   return (
