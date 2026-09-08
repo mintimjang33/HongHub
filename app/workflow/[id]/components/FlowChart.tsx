@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useRef } from 'react';
 import type { Step, Site } from '../types';
 import {
   statusTone,
@@ -50,6 +51,15 @@ export function FlowChart({
   onRefreshSite: () => void;
 }) {
   const siteName = site.name;
+  // 2026-09-08 추가 — 사용자 지적: "10단계에서 8단계,9단계로 이동도 안되네". 단계가 20개까지 늘어나면서
+  // 이 칩 목록이 가로 스크롤(overflow-x-auto) 한 줄에 다 안 들어가는데, 선택된 단계가 바뀌어도 스크롤
+  // 위치는 그대로라 멀리 떨어진 단계로 점프하면 그 칩 자체가 화면 밖으로 밀려나 있었다 — 클릭이 안
+  // 되는 게 아니라 칩이 안 보여서 못 누르는 상황. 선택이 바뀔 때마다 그 칩을 자동으로 화면 안으로
+  // 스크롤해서, 어느 단계에서 어느 단계로 이동해도 항상 보이게 한다.
+  const chipRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  useEffect(() => {
+    chipRefs.current[selected]?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [selected]);
   if (steps.length === 0) return null;
   const active = steps[Math.min(selected, steps.length - 1)];
   const activeTone = statusTone(active.status);
@@ -72,6 +82,9 @@ export function FlowChart({
             return (
               <div key={i} className="flex items-center shrink-0">
                 <button
+                  ref={(el) => {
+                    chipRefs.current[i] = el;
+                  }}
                   onClick={() => onSelect(i)}
                   className={`group flex items-center gap-2 border rounded-lg px-2.5 py-2 text-left whitespace-nowrap cursor-pointer transition ${
                     isSelected
