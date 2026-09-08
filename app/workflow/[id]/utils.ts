@@ -369,6 +369,15 @@ export function normalizeLabeledItems(raw: unknown): LabeledItem[] {
   return raw.map((item) => (typeof item === 'string' ? { label: '', url: item } : (item as LabeledItem)));
 }
 
+// 상태 칸이 "미착수"/"진행 중"/"완료" 같은 정해진 키워드 대신 긴 서술문(예: "게이트 원칙 적용
+// 중 — ... 각 유닛의 `factCheck` 필드가 기록이다")으로 채워지는 단계들이 있다(8~11번 등). 이런
+// 경우 아래 keyword 매칭에 하나도 안 걸려 fallback으로 떨어지는데, 예전엔 fallback이 `label:
+// status`로 원문 전체를 그대로 돌려줘서, 이 라벨을 그대로 뿌리는 작은 pill 배지(FlowChart.tsx의
+// 단계 상세 헤더)에 문장 전체가 욱여넣어지며 레이아웃이 깨지는 버그가 있었다(2026-09-08 실측 —
+// "기획서작성" 제목이 세로로 한 글자씩 밀려 쪼개짐). 배지에는 짧게 잘라서만 보여주고, 전체
+// 원문은 어차피 "진행 로그 보기"에서 그대로 다 보여주므로 정보 손실은 없다.
+const FALLBACK_LABEL_MAX = 20;
+
 export function statusTone(status: string): { bg: string; border: string; text: string; label: string } {
   const s = status || '';
   if (/⚠️|막힘|막히는/.test(s)) return { bg: 'bg-red-50', border: 'border-red-300', text: 'text-red-600', label: '막힘' };
@@ -376,5 +385,7 @@ export function statusTone(status: string): { bg: string; border: string; text: 
   if (/진행\s*중|상시/.test(s)) return { bg: 'bg-blue-50', border: 'border-blue-300', text: 'text-blue-600', label: '진행 중' };
   if (/검증|완료|확인|가능|결정됨/.test(s)) return { bg: 'bg-green-50', border: 'border-green-300', text: 'text-green-600', label: '완료' };
   if (!s.trim()) return { bg: 'bg-neutral-50', border: 'border-neutral-200', text: 'text-neutral-300', label: '-' };
-  return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-600', label: status };
+  const trimmed = s.replace(/[*`#]/g, '').trim();
+  const label = trimmed.length > FALLBACK_LABEL_MAX ? `${trimmed.slice(0, FALLBACK_LABEL_MAX)}…` : trimmed;
+  return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-600', label };
 }
