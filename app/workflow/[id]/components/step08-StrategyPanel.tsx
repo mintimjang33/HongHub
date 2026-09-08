@@ -73,15 +73,33 @@ export function StrategyPanel({ site, onRefresh }: { site: Site; onRefresh: () =
       {units.length === 0 && <p className="text-sm text-neutral-300">아직 등록된 콘텐츠가 없어요 — 먼저 6번(콘텐츠 등록)에서 콘텐츠를 등록하세요.</p>}
       {units.map((u) => (
         <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
-          <button onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))} className="w-full text-left px-3 py-2.5 flex items-center gap-2">
-            <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
-            <span className="flex-1 min-w-0 text-sm font-bold truncate">{u.title}</span>
+          <div className="w-full flex items-center gap-2 px-3 py-2.5">
+            <button
+              onClick={() => setOpenId((cur) => (cur === u.id ? null : u.id))}
+              className="flex-1 min-w-0 flex items-center gap-2 text-left"
+            >
+              <span className={`shrink-0 text-neutral-300 transition-transform ${openId === u.id ? 'rotate-90' : ''}`}>▶</span>
+              <span className="flex-1 min-w-0 text-sm font-bold truncate">{u.title}</span>
+            </button>
             {u.selectedStrategy ? (
-              <span className="shrink-0 text-xs font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 확정됨</span>
+              <span className="shrink-0 flex items-center gap-1">
+                <span className="text-xs font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">✅ 확정됨</span>
+                {/* 2026-09-08 추가 — "선택 이유" 안에 있던 해제 버튼을 배지 바로 옆으로 옮김(사용자 지적:
+                    카드를 펼쳐야만 보이는 곳 말고 확정됨 배지 옆에 바로 있어야 함). 후보 목록과 무관하게
+                    언제든 확정 상태 자체를 바로 풀 수 있다. */}
+                <button
+                  onClick={() => selectOption(u.id, u.selectedStrategy || '')}
+                  disabled={saving}
+                  className="text-[10px] font-bold text-neutral-400 hover:text-red-500 disabled:opacity-40"
+                  title="확정된 전략 선택을 해제합니다"
+                >
+                  해제
+                </button>
+              </span>
             ) : (
               <span className="shrink-0 text-xs font-bold text-neutral-400 bg-neutral-100 rounded-full px-2 py-0.5">미착수</span>
             )}
-          </button>
+          </div>
           {openId === u.id && (
             <div className="px-3 pb-3 pt-1 border-t border-neutral-100 space-y-3">
               <p className="text-xs text-neutral-400">소재: {u.material}</p>
@@ -223,18 +241,6 @@ ${u.factCheck || '(아직 없음 — 소재 설명만으로 판단)'}`}
                           className="text-xs font-bold text-blue-600 hover:underline"
                         >
                           수정
-                        </button>
-                        {/* 2026-09-08 추가 — 후보를 빠르게 연달아 삭제하다 selectedStrategy가 그 후보 텍스트와
-                            어긋나 버려서(연타로 인한 경합) 후보는 다 지웠는데 "확정됨" 배지가 안 없어지는
-                            사고가 있었음(9번 훅 패널에서 실제 발생). 후보 목록과 무관하게 언제든 확정 상태
-                            자체를 바로 풀 수 있게 추가. */}
-                        <button
-                          onClick={() => selectOption(u.id, u.selectedStrategy || '')}
-                          disabled={saving}
-                          className="text-xs font-bold text-neutral-400 hover:text-red-500 disabled:opacity-40"
-                          title="확정된 전략 선택을 해제합니다"
-                        >
-                          선택 해제
                         </button>
                       </div>
                     )}
