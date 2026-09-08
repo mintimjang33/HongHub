@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Site } from '../types';
-import { splitCandidates, extractRecommendation } from '../utils';
+import { splitCandidates, extractRecommendation, extractRecommendedCandidateIndex } from '../utils';
 import { CopyButton } from './shared';
 
 // 9번(훅/인트로 설계) 단계 전용 패널 — 본문 쓰기 전 도입부 후보를 여러 버전 적어보고 제일 강한 걸
@@ -44,9 +44,16 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
     if (!text.trim()) return;
     const unit = units.find((u) => u.id === id);
     const recommendation = extractRecommendation(text);
+    const newOptions = splitCandidates(text);
+    // 2026-09-08 추가 — 사용자 지적: "이 버전 선택 같은 짓을 하지 말라고". 제미나이가 이미
+    // "[최종 추천] 후보2..."처럼 후보를 콕 집어 추천했으면, 그 후보를 사람이 목록에서 다시 찾아
+    // "이 버전 선택"을 누를 필요 없이 바로 selectedHook으로 확정해버린다.
+    const recommendedIdx = extractRecommendedCandidateIndex(text);
+    const recommendedOption = recommendedIdx != null ? newOptions[recommendedIdx] : undefined;
     await patchUnit(id, {
-      hookOptions: [...(unit?.hookOptions || []), ...splitCandidates(text)],
+      hookOptions: [...(unit?.hookOptions || []), ...newOptions],
       ...(recommendation ? { hookReason: recommendation } : {}),
+      ...(recommendedOption ? { selectedHook: recommendedOption } : {}),
     });
   }
 
@@ -201,7 +208,7 @@ export function HookPanel({ site, onRefresh }: { site: Site; onRefresh: () => vo
 후보1: "[실제 도입부 문장, 2~4문장]" / 신선도 xx·차별화 xx·3초방지력 xx·캐릭터스루라인 xx → 총점 xx
 후보2: "[실제 도입부 문장, 2~4문장]" / 총점 xx
 후보3: "[실제 도입부 문장, 2~4문장]" / 총점 xx
-[최종 추천] 위 후보 중 하나를 골라 그 이유를 설명해라 — 점수가 가장 높은 것을 기계적으로 고르지 말고, 왜 그게 이 채널에 더 맞는지 설명해라.
+[최종 추천] 위 후보 중 하나를 골라 그 이유를 설명해라 — 점수가 가장 높은 것을 기계적으로 고르지 말고, 왜 그게 이 채널에 더 맞는지 설명해라. 반드시 문장 맨 앞부분에 추천하는 후보 번호(예: "후보2")를 정확히 한 번 언급해라 — 앱이 이 번호를 읽고 그 후보를 자동으로 확정한다.
 
 [참고 자료] 우리 채널 정보(벤치마크 대본·캐릭터·이전 대본): https://honghub.vercel.app/share/${site.id}
 
@@ -238,7 +245,8 @@ ${u.selectedStrategy || '(아직 미확정 — 소재만으로 판단)'}`}
                   보여서, "+ 후보 추가"가 자동으로 채워준 hookReason이 있어도 "이 버전 선택"을 누르기
                   전까지는 화면에 아예 안 보였다(사용자 지적: "8단계9단계... 최종추천 결과가 파싱되서
                   기록이 되어야 하는데 안되고 있어" — 8번은 먼저 고쳤는데 9번엔 반영이 안 돼 있었다).
-                  선택 여부와 무관하게 이유가 있으면 보여준다. */}
+                  선택 여부와 무관하게 이유가 있으면 보여준다. 이제는 addHook이 추천 번호를 읽어
+                  selectedHook까지 자동으로 채워주므로 대부분 바로 "확정됨"으로 뜬다. */}
               {(u.selectedHook || u.hookReason) && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
