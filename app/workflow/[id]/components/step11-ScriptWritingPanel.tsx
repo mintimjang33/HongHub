@@ -4,84 +4,29 @@ import { useScriptWizard } from '../scriptWizard/useScriptWizard';
 import type { Site } from '../types';
 import { CopyButton } from './shared';
 
-// 11번(대본 작성) 단계 패널 — 5번(소재 선정)에서 확정된 소재를 이어받아 제목 추천 → 대본 작성 →
-// (선택)번역/사실확인/업그레이드 → 완성 콘텐츠로 저장까지 진행한다. 완성된 콘텐츠 목록(검토·승인·
-// PD 게이트)도 여기서 관리한다. 5번(step05-MaterialSelectionPanel)과 site.script_draft 최상위에
-// 이어지는 같은 위저드 상태를 useScriptWizard 훅으로 공유한다(2026-09-08, 번호별로 파일을 찾기 쉽게 분리).
+// 11번(대본 작성) 단계 패널 — 6번(콘텐츠 등록)에서 만든 유닛마다 대본을 작성한다. 완성된 콘텐츠
+// 목록(검토·승인·PD 게이트)도 여기서 관리한다. useScriptWizard 훅으로 site.script_draft 상태를
+// 5번(step05-MaterialSelectionPanel)과 공유한다(2026-09-08, 번호별로 파일을 찾기 쉽게 분리).
+// 2026-09-08 삭제 — 예전엔 draft.selectedMaterial이 세팅돼 있으면 "선택된 소재"+"2️⃣ 제목 추천"+
+// "3️⃣ 대본"이라는 옛날 위저드(소재→제목 생성→대본 생성→finalizeUnit)를 여기서 그렸다. 그런데
+// 실제로 쓰는 흐름은 6번(ContentRegisterPanel)에서 제목을 직접 입력해 유닛을 바로 만드는
+// 방식으로 바뀌었고, 6번의 addUnit()이 selectedMaterial을 안 지워서 이미 등록 끝난 소재가 이
+// 죽은 위저드를 계속 되살리는 버그가 있었다(사용자 지적: "컨텐츠 안에 들어가 있어야 하는 내용이
+// 왜 나와있어???"). 원인(6번의 상태 누수)은 step06-ContentRegisterPanel.tsx에서 고쳤고, 이
+// 파일에서는 아무도 안 쓰는 옛날 위저드 UI 자체를 들어냈다 — 실제 작업은 전부 아래 "완성된
+// 콘텐츠" 목록의 유닛 카드에서 한다.
 export function ScriptWritingPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const w = useScriptWizard(site, onRefresh);
   const { draft, units } = w;
 
-  function GenerateButtons({ stage }: { stage: 'materials' | 'titles' | 'script' | 'translate' }) {
-    return (
-      <div className="flex gap-1.5 mb-2">
-        <button
-          onClick={() => w.copyPrompt(stage)}
-          disabled={w.copying === stage}
-          className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-        >
-          {w.copying === stage ? '준비 중...' : w.copied === stage ? '✅ 복사됨!' : '💬 Gemini·Claude 구독으로 만들기'}
-        </button>
-        <button
-          onClick={() => w.generate(stage)}
-          disabled={w.generating === stage}
-          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white hover:bg-neutral-800 disabled:opacity-40"
-        >
-          {w.generating === stage ? '만드는 중... (1분 정도)' : '✨ Gemini Pro로 만들기'}
-        </button>
-      </div>
-    );
-  }
-
-  function GenerateHint() {
-    return (
-      <p className="text-[10px] text-neutral-400 mb-2">
-        "✨ Gemini Pro"는 유료 API를 직접 호출해서 바로 저장해요. "💬 Gemini·Claude 구독으로 만들기"는 비용 없이
-        프롬프트만 클립보드에 복사해줘요 — Gemini 웹앱이든 Claude(claude.ai나 이 대화)든 아무 구독 채팅에 붙여넣어서
-        물어보고, 답변을 아래 붙여넣기 칸에 넣으면 저장돼요. (Vercel에서 도는 앱이라 두 구독 계정을 여기서 자동으로
-        대신 불러낼 순 없어요.)
-      </p>
-    );
-  }
-
-  function PasteBox({ stage }: { stage: 'materials' | 'titles' | 'script' | 'translate' }) {
-    if (w.pasteOpen !== stage) return null;
-    return (
-      <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 mb-2">
-        <textarea
-          value={w.pasteText}
-          onChange={(e) => w.setPasteText(e.target.value)}
-          rows={stage === 'script' ? 6 : 4}
-          placeholder="구독 채팅(Gemini/Claude) 답변을 여기에 붙여넣으세요"
-          className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-        />
-        <div className="flex justify-end gap-1.5">
-          <button onClick={() => w.setPasteOpen(null)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
-            취소
-          </button>
-          <button
-            onClick={() => w.savePasted(stage)}
-            disabled={w.saving || !w.pasteText.trim()}
-            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-          >
-            {w.saving ? '저장 중...' : '붙여넣기 저장'}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="border-t border-black/5 pt-3">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-black text-neutral-500">
-          ✍️ 대본 작성 — 제목 추천 → 대본
-        </span>
+        <span className="text-xs font-black text-neutral-500">✍️ 대본 작성</span>
         <button onClick={w.resetAll} className="text-[11px] font-bold text-neutral-400 hover:text-red-500 px-2">
           🔄 처음부터
         </button>
       </div>
-      <GenerateHint />
       <div className="flex items-center gap-1.5 mb-2">
         <span className="text-[10px] font-black text-neutral-400">카테고리:</span>
         <button
@@ -110,6 +55,9 @@ export function ScriptWritingPanel({ site, onRefresh }: { site: Site; onRefresh:
       )}
       {w.error && <p className="text-[11px] text-red-500 font-bold mb-2">{w.error}</p>}
 
+      {units.length === 0 && (
+        <p className="text-[11px] text-neutral-400 mb-2">아직 등록된 콘텐츠가 없어요 — 먼저 "6번 콘텐츠 등록"에서 콘텐츠를 등록하세요.</p>
+      )}
       {units.length > 0 && (
         <div className="bg-emerald-50/40 border border-emerald-100 rounded-lg p-3 mb-2">
           <div className="text-[11px] font-black text-emerald-700 mb-2">✅ 완성된 콘텐츠 ({units.length}개)</div>
@@ -505,228 +453,6 @@ ${u.material}`}
                 </div>
               );
             })}
-          </div>
-        </div>
-      )}
-
-      {draft.selectedMaterial && (
-        <div className="bg-white border border-neutral-100 rounded-lg p-3 mb-2">
-          <p className="text-[10px] font-black text-neutral-400 mb-1">선택된 소재 (5번 탭에서 선정됨)</p>
-          <p className="text-[11px] text-neutral-600 leading-relaxed">{draft.selectedMaterial}</p>
-        </div>
-      )}
-      {!draft.selectedMaterial && (
-        <p className="text-[11px] text-neutral-400 mb-2">아직 선택된 소재가 없어요 — 먼저 &quot;5번 소재 선정&quot; 탭에서 소재를 고르세요.</p>
-      )}
-
-      {/* 2단계: 제목 추천 — 소재를 고른 다음에만 진행 */}
-      {draft.selectedMaterial && (
-        <div className="bg-white border border-neutral-100 rounded-lg p-3 mb-2">
-          <div className="text-[11px] font-black text-neutral-500 mb-1">2️⃣ 제목 추천</div>
-          <p className="text-[10px] text-neutral-400 mb-2">선택한 소재: {draft.selectedMaterial}</p>
-          <GenerateButtons stage="titles" />
-          <PasteBox stage="titles" />
-          {draft.titles && draft.titles.length > 0 ? (
-            <div className="space-y-1">
-              {draft.titles.map((t, idx) => (
-                <label
-                  key={idx}
-                  className={`flex items-start gap-2 text-[11px] rounded-lg px-2.5 py-2 cursor-pointer border ${
-                    draft.selectedTitle === t ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-neutral-100 hover:border-neutral-300'
-                  }`}
-                >
-                  <input type="radio" checked={draft.selectedTitle === t} onChange={() => w.selectTitle(t)} className="mt-0.5" />
-                  <span className="leading-relaxed font-bold">{t}</span>
-                </label>
-              ))}
-            </div>
-          ) : (
-            <p className="text-[11px] text-neutral-300">아직 추천받은 제목이 없어요.</p>
-          )}
-        </div>
-      )}
-
-      {/* 3단계: 대본 — 제목을 고른 다음에만 진행 */}
-      {draft.selectedTitle && (
-        <div className="bg-white border border-neutral-100 rounded-lg p-3">
-          <div className="text-[11px] font-black text-neutral-500 mb-1">3️⃣ 대본</div>
-          <p className="text-[10px] text-neutral-400 mb-2">선택한 제목: {draft.selectedTitle}</p>
-          <GenerateButtons stage="script" />
-          <PasteBox stage="script" />
-          <textarea
-            value={w.scriptDraftText}
-            onChange={(e) => w.setScriptDraftText(e.target.value)}
-            rows={8}
-            placeholder="위 버튼으로 대본을 만들거나 직접 작성하세요"
-            className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-          />
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] text-neutral-300">{w.scriptDraftText.length.toLocaleString()}자</span>
-            <button
-              onClick={w.saveScript}
-              disabled={w.saving}
-              className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-            >
-              {w.saving ? '저장 중...' : '대본 저장'}
-            </button>
-          </div>
-
-          {/* 3-1단계: 제미나이와 비교해서 사실확인 (제목도 대본만큼 엉망일 수 있어서 같이 확인) */}
-          {w.scriptDraftText.trim() && (
-            <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 mb-1.5">
-              <p className="text-[10px] font-black text-neutral-500 mb-1.5">🔍 제미나이와 비교해서 사실확인 (선택)</p>
-              <div className="flex gap-1.5 mb-2">
-                <button
-                  onClick={w.copyComparePrompt}
-                  disabled={w.compareCopying}
-                  className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                >
-                  {w.compareCopying ? '준비 중...' : w.compareCopied ? '✅ 복사됨!' : '💬 구독으로 비교하기'}
-                </button>
-                <button
-                  onClick={w.runCompare}
-                  disabled={w.compareRunning}
-                  className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                >
-                  {w.compareRunning ? '비교 중...' : '✨ 자동으로 비교하기'}
-                </button>
-              </div>
-              {w.comparePasteOpen && (
-                <div className="mb-2">
-                  <textarea
-                    value={w.comparePasteText}
-                    onChange={(e) => w.setComparePasteText(e.target.value)}
-                    rows={6}
-                    placeholder="구독 채팅 답변을 여기에 붙여넣으세요"
-                    className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-                  />
-                  <div className="flex justify-end gap-1.5">
-                    <button
-                      onClick={w.saveComparePaste}
-                      disabled={!w.comparePasteText.trim()}
-                      className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                    >
-                      결과 확인
-                    </button>
-                  </div>
-                </div>
-              )}
-              {w.compareResult && (
-                <div className="space-y-2">
-                  <div className="bg-white border border-neutral-200 rounded-lg p-2">
-                    <p className="text-[10px] font-black text-neutral-400 mb-1">사실확인 결과</p>
-                    <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{w.compareResult.factCheck || '(내용 없음)'}</p>
-                  </div>
-                  {(w.compareResult.rewriteTitle || w.compareResult.rewriteScript) && (
-                    <div className="bg-white border border-neutral-200 rounded-lg p-2">
-                      <p className="text-[10px] font-black text-neutral-400 mb-1">제미나이가 다시 쓴 버전</p>
-                      {w.compareResult.rewriteTitle && <p className="text-xs font-bold text-neutral-700 mb-1">{w.compareResult.rewriteTitle}</p>}
-                      {w.compareResult.rewriteScript && <p className="text-xs text-neutral-600 whitespace-pre-wrap leading-relaxed">{w.compareResult.rewriteScript}</p>}
-                    </div>
-                  )}
-                  <p className="text-[10px] text-neutral-400">
-                    둘 중 하나를 고르는 게 아니라, 두 버전의 장점을 합쳐서 업그레이드해요.
-                  </p>
-                  <div className="flex justify-end gap-1.5">
-                    <button
-                      onClick={w.keepOriginalAfterCompare}
-                      disabled={w.saving}
-                      className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                    >
-                      원본 유지
-                    </button>
-                    <button
-                      onClick={w.copyUpgradePrompt}
-                      disabled={w.upgradeCopying}
-                      className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                    >
-                      {w.upgradeCopying ? '준비 중...' : w.upgradeCopied ? '✅ 복사됨!' : '💬 구독으로 업그레이드'}
-                    </button>
-                    <button
-                      onClick={w.runUpgrade}
-                      disabled={w.upgrading}
-                      className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-emerald-600 text-white disabled:opacity-40"
-                    >
-                      {w.upgrading ? '업그레이드 중...' : '🔀 자동으로 업그레이드'}
-                    </button>
-                  </div>
-                  {w.upgradePasteOpen && (
-                    <div>
-                      <textarea
-                        value={w.upgradePasteText}
-                        onChange={(e) => w.setUpgradePasteText(e.target.value)}
-                        rows={6}
-                        placeholder="구독 채팅 답변(Title:/Script:)을 여기에 붙여넣으세요"
-                        className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed mb-1.5"
-                      />
-                      <div className="flex justify-end gap-1.5">
-                        <button
-                          onClick={w.saveUpgradePaste}
-                          disabled={w.saving || !w.upgradePasteText.trim()}
-                          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                        >
-                          붙여넣기 적용
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 3-2단계: 한국어가 확정된 다음 영어/일본어 */}
-          {w.scriptDraftText.trim() && (
-            <div className="bg-neutral-50 border border-neutral-100 rounded-lg p-2 mb-1.5">
-              <p className="text-[10px] font-black text-neutral-500 mb-1.5">🌐 영어/일본어 대본 생성</p>
-              <div className="flex gap-1.5 mb-2">
-                <button
-                  onClick={() => w.copyPrompt('translate')}
-                  disabled={w.copying === 'translate'}
-                  className="text-[11px] font-black px-3 py-1.5 rounded-lg border border-neutral-200 hover:border-neutral-400 bg-white disabled:opacity-40"
-                >
-                  {w.copying === 'translate' ? '준비 중...' : w.copied === 'translate' ? '✅ 복사됨!' : '💬 구독으로 번역하기'}
-                </button>
-                <button
-                  onClick={() => w.generate('translate')}
-                  disabled={w.generating === 'translate'}
-                  className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                >
-                  {w.generating === 'translate' ? '만드는 중...' : '✨ Gemini Pro로 번역하기'}
-                </button>
-              </div>
-              <PasteBox stage="translate" />
-              {(draft.scriptEn || draft.scriptJa) && (
-                <div className="space-y-2">
-                  <p className="text-[10px] text-neutral-400">
-                    번역은 그대로 옮기지 않고 현지화 각색이에요 — 완성 콘텐츠로 저장하면 이 버전도 같이 저장돼요.
-                  </p>
-                  {draft.scriptEn && (
-                    <div>
-                      <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇺🇸 {draft.titleEn}</p>
-                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{draft.scriptEn}</p>
-                    </div>
-                  )}
-                  {draft.scriptJa && (
-                    <div className="pt-2 border-t border-neutral-100">
-                      <p className="text-[10px] font-black text-neutral-400 mb-0.5">🇯🇵 {draft.titleJa}</p>
-                      <p className="text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{draft.scriptJa}</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="flex justify-end">
-            <button
-              onClick={w.finalizeUnit}
-              disabled={w.saving || !w.scriptDraftText.trim()}
-              className="bg-black text-white text-[11px] font-black px-4 py-2 rounded-lg disabled:opacity-40"
-              title="완성 목록에 저장하고 다음 소재로 넘어가기"
-            >
-              ✅ 완성 콘텐츠로 저장 → 다음 소재
-            </button>
           </div>
         </div>
       )}
