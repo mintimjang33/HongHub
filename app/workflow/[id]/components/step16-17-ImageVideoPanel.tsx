@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Site } from '../types';
-import { parseSceneBlocks, normalizeLabeledItems } from '../utils';
+import type { SceneBlock } from '../types';
+import { parseSceneBlocks, serializeSceneBlocks, normalizeLabeledItems } from '../utils';
 import { CopyButton, SceneEditorList } from './shared';
 
 // 14번(구 16-17번, 씬별 이미지 프롬프트 작성·생성) 단계 패널 — 완성된 콘텐츠 목록에서 이름을
@@ -11,7 +12,19 @@ import { CopyButton, SceneEditorList } from './shared';
 // 이미지/영상을 만들 때 찾는 곳은 여기라서 이 패널에서도 똑같이 보여주고 편집도 여기서 끝낼 수 있게 한다.
 // (코드상 이름은 구버전 "Step6Panel" — 파이프라인이 5~20번 구조로 재편되며 16·17번, 이후 14번으로 옮겨졌다.)
 //
-// 2026-09-09 링크 방식 → 텍스트 직접 포함 방식으로 되돌림 (3차 수정, 가장 근본적인 수정):
+// 2026-09-09 제미나이 응답 붙여넣기 → 자동 파싱 등록 기능 추가:
+// 8) 14번 프롬프트가 "구간(장면 25~35개)씩 만들고 '계속'으로 이어받는" 자기분할 방식이 되면서,
+//    받는 응답이 JSON 배열 여러 개(+ "(다음 구간 준비됨...)"/"[최종: ...]" 안내문)로 나뉜다.
+//    사용자가 제미나이 채팅에서 "계속"을 다 끝낸 뒤 전체 대화 내용을 한 번에 복사해서 등록하겠다고
+//    했는데, 그때까지는 "+ 장면 추가" 폼으로 장면을 하나씩 손으로 입력하는 방법밖에 없어서
+//    수십 개 장면을 수동으로 옮겨 적어야 하는 상황이었다 — 그래서 원문을 그대로 붙여넣으면 안에
+//    섞여 있는 JSON 배열들을 전부 찾아 하나로 합쳐 등록하는 붙여넣기 칸+버튼을 추가했다.
+//    `extractSceneArrays()`가 중괄호/따옴표를 추적하는 괄호 매칭으로 텍스트 안의 모든 최상위
+//    `[...]` 블록을 찾아 JSON.parse를 시도하고, 배열이면 순서대로 이어붙인다 — 안내문 줄
+//    ("(다음 구간 준비됨...)", "[최종: ...]")은 유효한 JSON이 아니라서 자동으로 걸러진다.
+//    장면 id는 제미나이가 구간마다 S01부터 다시 매길 수 있어(충돌 위험) 파싱 후 등장 순서대로
+//    S01, S02...로 새로 번호를 매긴다. "등록"은 기존 scenePrompts를 통째로 교체한다(사용자가
+//    전체를 한 번에 붙여넣는다는 전제).
 // 7) 실기 테스트 중 제미나이가 "보안 및 외부 접근 제한으로 접속 불가"라고 답해서 원인을 추적한
 //    결과, 실제로는 /share 페이지도 SRT 파일도 전혀 막혀있지 않았다(curl로 구글봇 UA까지 써서
 //    200 정상 응답 + 실제 대본 텍스트가 HTML에 그대로 포함된 것까지 확인). 사용자가 직접
@@ -54,6 +67,69 @@ import { CopyButton, SceneEditorList } from './shared';
 //    텍스트 안에 직접 적어 넣는 것으로 전환했었다(이제는 URL이 아니라 fetch한 본문을 넣음).
 // 3) 대본 전문을 프롬프트에 통째로 박아넣던 것을 12번 패턴을 따라 링크로 바꿨었으나, 위 7번
 //    사유로 다시 텍스트 직접 포함으로 되돌아왔다.
+function formatSec(sec: number): string {
+  const total = Math.max(0, Math.round(sec || 0));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+type RawScene = {
+  id?: string;
+  startSec?: number;
+  endSec?: number;
+  screenDescription?: string;
+  imagePrompt?: string;
+  transitionPrompt?: string;
+  needsVideoClip?: boolean;
+};
+
+// 텍스트 안에서 최상위 `[...]` JSON 배열 블록을 전부 찾아(따옴표 안의 대괄호는 무시하도록 깊이를
+// 추적) 파싱을 시도한다 — 유효한 JSON 배열이면 그 원소들을 결과에 이어붙이고, 아니면
+// ("(다음 구간 준비됨...)" 같은 안내문 등) 조용히 건너뛴다.
+function extractSceneArrays(raw: string): RawScene[] {
+  const results: RawScene[] = [];
+  let i = 0;
+  while (i < raw.length) {
+    if (raw[i] === '[') {
+      const start = i;
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      let j = i;
+      for (; j < raw.length; j++) {
+        const ch = raw[j];
+        if (inString) {
+          if (escape) escape = false;
+          else if (ch === '\\') escape = true;
+          else if (ch === '"') inString = false;
+        } else {
+          if (ch === '"') inString = true;
+          else if (ch === '[') depth++;
+          else if (ch === ']') {
+            depth--;
+            if (depth === 0) {
+              j++;
+              break;
+            }
+          }
+        }
+      }
+      const candidate = raw.slice(start, j);
+      try {
+        const parsed = JSON.parse(candidate);
+        if (Array.isArray(parsed)) results.push(...parsed);
+      } catch {
+        // 유효한 JSON 배열이 아니면 건너뜀(이어가기 안내문/완료 표시 등)
+      }
+      i = Math.max(j, start + 1);
+    } else {
+      i++;
+    }
+  }
+  return results;
+}
+
 export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const units = site.script_draft?.units || [];
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
@@ -61,6 +137,8 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   const [srtTexts, setSrtTexts] = useState<Record<string, string>>({});
   const [srtErrors, setSrtErrors] = useState<Record<string, string>>({});
   const fetchedSrtRef = useRef<Record<string, boolean>>({});
+  const [pasteTexts, setPasteTexts] = useState<Record<string, string>>({});
+  const [parseInfos, setParseInfos] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!openUnitId) return;
@@ -90,6 +168,33 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
     } finally {
       setSaving(false);
     }
+  }
+
+  function registerParsed(unitId: string) {
+    const raw = pasteTexts[unitId] || '';
+    const rawScenes = extractSceneArrays(raw);
+    if (rawScenes.length === 0) {
+      setParseInfos((cur) => ({ ...cur, [unitId]: '❌ 유효한 JSON 배열을 찾지 못했습니다 — 제미나이 응답 전체를 그대로 붙여넣었는지 확인해주세요.' }));
+      return;
+    }
+    const blocks: SceneBlock[] = rawScenes.map((s, idx) => ({
+      id: `S${String(idx + 1).padStart(2, '0')}`,
+      title: s.screenDescription || '',
+      script: '',
+      note: '',
+      time: `${formatSec(s.startSec ?? 0)}-${formatSec(s.endSec ?? 0)}`,
+      sceneImage: '',
+      imagePrompt: s.imagePrompt || '',
+      clean: '',
+      info: '',
+      video: [s.needsVideoClip ? '[영상클립 필요]' : '', s.transitionPrompt || ''].filter(Boolean).join(' '),
+      media: [],
+    }));
+    setParseInfos((cur) => ({ ...cur, [unitId]: `✅ ${blocks.length}개 장면 파싱 완료 — 등록 중...` }));
+    save(unitId, serializeSceneBlocks(blocks)).then(() => {
+      setParseInfos((cur) => ({ ...cur, [unitId]: `✅ ${blocks.length}개 장면 등록 완료` }));
+      setPasteTexts((cur) => ({ ...cur, [unitId]: '' }));
+    });
   }
 
   if (units.length === 0) {
@@ -142,7 +247,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
                   )}
 
                   <p className="text-[10px] text-neutral-400 mb-2">
-                    대본이 길면(10분 이상) 제미나이가 한 응답에 다 끝내려다 스토리를 요약해버릴 수 있습니다 — 아래 프롬프트는 한 구간만 만들고 멈추도록 지시해뒀습니다. 응답 끝에 "계속"이라고 답하면 이어서 다음 구간을 만듭니다(11번 대본 작성과 동일한 방식). 대본·자막 원문이 프롬프트 안에 이미 통째로 들어있으니 링크를 열 필요 없이 바로 붙여넣으면 됩니다. 여러 응답으로 나눠 받은 JSON 배열들은 순서대로 이어붙여서 등록하세요.
+                    대본이 길면(10분 이상) 제미나이가 한 응답에 다 끝내려다 스토리를 요약해버릴 수 있습니다 — 아래 프롬프트는 한 구간만 만들고 멈추도록 지시해뒀습니다. 응답 끝에 "계속"이라고 답하면 이어서 다음 구간을 만듭니다(11번 대본 작성과 동일한 방식). 대본·자막 원문이 프롬프트 안에 이미 통째로 들어있으니 링크를 열 필요 없이 바로 붙여넣으면 됩니다. 제미나이 채팅에서 "계속"으로 끝까지 다 받은 뒤, 대화 전체(JSON 배열 여러 개 포함)를 그대로 복사해서 아래 붙여넣기 칸에 한 번에 넣고 등록하면 자동으로 합쳐서 저장됩니다.
                   </p>
 
                   <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 mb-2">
@@ -202,6 +307,28 @@ ${srtText || '(자막 없음)'}`}
                       <span className="text-[10px] text-neutral-300">대기 중...</span>
                     )}
                   </div>
+
+                  <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 mb-2">
+                    <p className="text-[10px] font-black text-neutral-500 mb-1">📥 제미나이 응답 붙여넣기 (구간 여러 개 한 번에 가능 — JSON 배열만 자동으로 찾아 합쳐줍니다)</p>
+                    <textarea
+                      value={pasteTexts[u.id] || ''}
+                      onChange={(e) => setPasteTexts((cur) => ({ ...cur, [u.id]: e.target.value }))}
+                      rows={6}
+                      placeholder='제미나이 채팅에서 "계속"으로 다 받은 뒤, 대화 내용 전체를 그대로 여기 붙여넣으세요.'
+                      className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed mb-1.5"
+                    />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => registerParsed(u.id)}
+                        disabled={saving || !(pasteTexts[u.id] || '').trim()}
+                        className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                      >
+                        {saving ? '등록 중...' : '파싱해서 등록 (기존 장면 전체 교체)'}
+                      </button>
+                      {parseInfos[u.id] && <span className="text-[10px] font-bold text-neutral-500">{parseInfos[u.id]}</span>}
+                    </div>
+                  </div>
+
                   <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => save(u.id, text)} />
                 </div>
               )}
