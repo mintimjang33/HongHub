@@ -2,14 +2,23 @@
 
 import { useState } from 'react';
 import type { Site } from '../types';
-import { parseSceneBlocks } from '../utils';
+import { parseSceneBlocks, normalizeLabeledItems } from '../utils';
 import { CopyButton, SceneEditorList } from './shared';
 
-// 16·17번(씬별 이미지 프롬프트 작성·생성 / 영상 생성) 단계 패널 — 완성된 콘텐츠 목록에서 이름을
+// 14번(구 16-17번, 씬별 이미지 프롬프트 작성·생성) 단계 패널 — 완성된 콘텐츠 목록에서 이름을
 // 클릭하면 펼쳐지면서 그 콘텐츠의 장면별 CLEAN/INFO/영상 프롬프트가 타임라인 순서로 나온다.
 // 데이터 자체는 11번(대본 작성)의 콘텐츠 유닛(ContentUnit.scenePrompts)에 저장되지만, 실제로
 // 이미지/영상을 만들 때 찾는 곳은 여기라서 이 패널에서도 똑같이 보여주고 편집도 여기서 끝낼 수 있게 한다.
-// (코드상 이름은 구버전 "Step6Panel" — 파이프라인이 5~20번 구조로 재편되며 16·17번으로 옮겨졌다.)
+// (코드상 이름은 구버전 "Step6Panel" — 파이프라인이 5~20번 구조로 재편되며 16·17번, 이후 14번으로 옮겨졌다.)
+//
+// 2026-09-09 수정 — 예전 프롬프트는 "13번에서 뽑은 나레이션을 들으며 챕터별/문단별 시작~끝 초를
+// 직접 채워 넣으세요"처럼 사람이 귀로 듣고 타임코드를 수기로 채우는 걸 전제했다. 지금은 13번에서
+// faster-whisper(또는 ElevenLabs with-timestamps)로 실측 타임코드가 담긴 자막(SRT) 파일이 이미
+// 만들어져 있으므로, 그 파일을 다운로드해서 이 프롬프트와 함께 제미나이에 첨부하는 방식으로
+// 바꿨다(사용자 지적: "이걸 이렇게 주면 어떻게 해, 홍허브 14단계 복사버튼에 지침이 안 들어가 있어?"
+// — 코카콜라 한 유닛에만 쓸 프롬프트를 채팅으로 즉석에서 만들어줬다가, 66개 유닛 전부가 재사용할
+// 앱 코드 자체를 안 고쳤다는 지적을 받음). 자막 파일 링크를 복사 버튼 바로 위에 노출해서, 사용자가
+// 그 자리에서 다운로드→복사 버튼 클릭→제미나이에 둘 다 전달하는 흐름이 되게 했다.
 export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const units = site.script_draft?.units || [];
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
@@ -43,6 +52,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
       <div className="space-y-1.5">
         {units.map((u) => {
           const scenes = u.scenePrompts ? parseSceneBlocks(u.scenePrompts) : [];
+          const subtitleItems = normalizeLabeledItems(u.subtitleUrls);
           return (
             <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
               <button
@@ -63,28 +73,66 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
               {openUnitId === u.id && (
                 <div className="px-3 pb-3 pt-1 border-t border-neutral-50">
                   <p className="text-[10px] text-neutral-400 mb-1">소재: {u.material}</p>
-                  <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 mb-2">
-                    <span className="text-amber-700">🔍 제미나이 프롬프트 (13번 TTS 타임코드 채운 뒤 사용)</span>
-                    <CopyButton
-                      text={`[역할] 너는 우리 채널 영상의 편집 감독(edit director)이다. 완성된 대본과 실제 TTS 나레이션의 타임코드를 기반으로, 정확한 초 단위 스토리보드와 각 장면의 이미지 생성 프롬프트를 설계한다.
 
-[입력]
-- 최종 확정 대본:
+                  <div className="mb-2">
+                    <p className="text-[10px] font-black text-neutral-400 mb-1">📎 1단계 — 13번에서 등록된 자막(SRT) 파일을 먼저 다운로드하세요 (실측 타임코드)</p>
+                    {subtitleItems.length > 0 ? (
+                      <div className="space-y-1">
+                        {subtitleItems.map((item, idx) => (
+                          <a
+                            key={idx}
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            download
+                            className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1 text-[11px] text-blue-600 hover:underline"
+                          >
+                            ⬇ {item.label || '자막 파일'} 다운로드
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-red-500 font-bold">아직 13번에 자막이 없습니다 — 먼저 13번에서 자막을 등록해주세요.</p>
+                    )}
+                  </div>
+
+                  <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 mb-2">
+                    <span className="text-amber-700">🔍 2단계 — 제미나이 프롬프트 복사 (위 자막 파일과 함께 첨부해서 전달)</span>
+                    <CopyButton
+                      text={`[역할] 너는 우리 채널 영상의 편집 감독(edit director)이다. 완성된 대본과, 함께 첨부한 자막(SRT) 파일의 정확한 타임코드를 기반으로, 초 단위 스토리보드와 각 장면의 이미지/전환 프롬프트를 설계한다.
+
+[중요 — 타임코드 처리 원칙] 첨부한 SRT 파일은 실제 나레이션 음성을 정밀 전사한 것으로, 각 줄의 시작~끝 초는 이미 확정된 실측값이다. 이 시간 값을 새로 추측하거나 반올림하지 말고, 반드시 SRT의 타임코드를 그대로 기준 삼아 장면 경계를 정한다 — 여러 줄을 하나의 장면으로 묶을 땐 그 줄들의 시작 초~마지막 줄의 끝 초를 그대로 장면의 startSec/endSec으로 쓴다.
+
+[입력 — 최종 확정 대본 (화면 연출 지시 포함)]
 ${u.script || '(아직 11번에서 대본이 완성되지 않았습니다)'}
-- 실제 TTS 낭독 타임코드: [13번에서 뽑은 나레이션을 들으며 챕터별/문단별 시작~끝 초를 직접 채워 넣으세요]
 
 [작업 지시]
-1. 6~7초 단위로 장면을 나눈다. 장면 경계는 반드시 위 타임코드에 맞춰, 문장이 끊기는 자연스러운 호흡 지점에서 나눈다 — 임의로 초를 배분하지 않는다.
-2. 장면마다 다음 4개 열로 구성된 표를 만든다: (1) 타임(시작~끝, 초 단위) (2) 화면 설명(한국어) (3) 이미지 프롬프트(영어, Flow AI 이미지 생성용) (4) 영상/전환 프롬프트(영어)
+1. 첨부된 SRT의 타임코드 줄들을 순서대로 묶어서, 하나의 장면이 대략 6~7초가 되도록 나눈다. 문장이 끊기는 자연스러운 호흡 지점(SRT 줄 경계)에서만 나누고, 문장 중간을 억지로 자르지 않는다.
+2. 씬 대부분은 정지 이미지 + 줌/패닝/컷 전환으로 처리한다(이미지는 0크레딧). 대본에 [영상화] 표시가 붙은 지점(콜드오픈, 챕터 전환부 등 후킹이 강한 순간)만 실제 짧은 영상 클립이 필요한 장면으로 표시한다(needsVideoClip: true) — 전체 장면의 15~20% 이내로 제한한다.
+3. transitionPrompt에는 카메라 움직임(줌인/줌아웃/패닝/틸트), 정지 이미지 간 전환 방식, needsVideoClip이 true인 경우엔 그 장면에서 실제로 어떤 동작이 일어나는지(짧은 모션)까지 영어로 구체적으로 쓴다.
 
-[이미지 프롬프트 작성 규칙 — 반드시 지킬 것]
+[이미지 프롬프트(imagePrompt) 작성 규칙 — 반드시 지킬 것, 전부 영어로]
 - 진행자가 등장하는 장면은 항상 "젠틀맨 루즈"(검은 톱햇, 금테 외알렌즈, 검은 연미복+금색 안감 망토, 능글맞고 자신감 있는 쇼맨, 반전 순간 망토를 젖히는 제스처)로 묘사한다. 레퍼런스 이미지: https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/character-refs/economics-gentleman-rouge.jpg
 - 실존 인물의 동작이 필요한 장면은 얼굴을 그리지 않고 손 클로즈업으로만 표현한다.
 - 이 소재의 상징 사물을 의인화한 배역이 등장할 수 있다 — 팔다리·눈·표정을 붙이되 사람 얼굴 캐릭터로 그리지 않는다.
 - 이미지 안에 텍스트·캡션·라벨·제목을 절대 넣지 않는다 — 프롬프트 끝에 "IMPORTANT: absolutely NO text, no captions, no title, no labels anywhere in the image"를 반드시 포함한다.
 - 재질/질감 지시는 반드시 "캐릭터 표면 자체의 재질"이라고 명시한다 — 배경은 별도로 "plain solid grey background" 등으로 명확히 지정한다.
+- Korean webtoon vector illustration style, flat colors, clean line art로 통일한다.
 
-[출력 형식] 위 표만 챕터 순서대로 전체 대본 분량만큼 빠짐없이 작성해줘. 표 앞뒤에 부연설명 붙이지 마.`}
+[출력 형식 — 반드시 아래 JSON 스키마의 배열 하나만 출력한다. 앞뒤 설명·마크다운 코드펜스 없이 순수 JSON 배열만.]
+[
+  {
+    "id": "S01",
+    "startSec": 0.0,
+    "endSec": 9.0,
+    "screenDescription": "한국어로 이 장면에서 무슨 일이 일어나는지 요약",
+    "imagePrompt": "영어, Flow AI 이미지 생성용 완성된 프롬프트",
+    "transitionPrompt": "영어, 카메라 움직임/전환 또는(needsVideoClip이 true일 때) 실제 동작 묘사",
+    "needsVideoClip": false
+  }
+]
+
+전체 대본 분량(콜드오픈부터 아웃트로까지)만큼 빠짐없이 장면을 다 만들어줘. SRT에 없는 구간을 임의로 지어내지 마.`}
                     />
                   </div>
                   <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => save(u.id, text)} />
