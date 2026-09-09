@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Site } from '../types';
 import { parseSceneBlocks, normalizeLabeledItems } from '../utils';
 import { CopyButton, SceneEditorList } from './shared';
@@ -11,43 +11,72 @@ import { CopyButton, SceneEditorList } from './shared';
 // 이미지/영상을 만들 때 찾는 곳은 여기라서 이 패널에서도 똑같이 보여주고 편집도 여기서 끝낼 수 있게 한다.
 // (코드상 이름은 구버전 "Step6Panel" — 파이프라인이 5~20번 구조로 재편되며 16·17번, 이후 14번으로 옮겨졌다.)
 //
-// 2026-09-09 구간 분할 방식 전면 수정(2차):
+// 2026-09-09 링크 방식 → 텍스트 직접 포함 방식으로 되돌림 (3차 수정, 가장 근본적인 수정):
+// 7) 실기 테스트 중 제미나이가 "보안 및 외부 접근 제한으로 접속 불가"라고 답해서 원인을 추적한
+//    결과, 실제로는 /share 페이지도 SRT 파일도 전혀 막혀있지 않았다(curl로 구글봇 UA까지 써서
+//    200 정상 응답 + 실제 대본 텍스트가 HTML에 그대로 포함된 것까지 확인). 사용자가 직접
+//    제미나이에게 캐물은 결과, 제미나이 스스로 "이 채팅 환경엔애초에 URL을 열어서 읽는 웹
+//    브라우징 기능 자체가 없다"고 인정 — 링크를 준 것 자체가 애초에 성립하지 않는 접근이었다.
+//    "파일을 직접 주면 안 되냐"는 대안도 검토했으나, 이 패널의 SRT 링크는 이미 2026-09-09 수정
+//    이력 2번에서 기록된 것처럼 Content-Disposition 헤더가 없어 <a download>가 브라우저에서
+//    무시되고 새 탭에 텍스트만 열리는 문제가 있어 "파일 첨부"가 오히려 더 번거롭다. 그래서
+//    11번(대본 작성)이 처음에 하던 방식 그대로 — 대본 전문(u.script, 이미 클라이언트에 있음)과
+//    자막(SRT, subtitleUrl에서 fetch로 받아옴 — Supabase Storage가 Access-Control-Allow-Origin: *
+//    라 브라우저에서 바로 fetch 가능함을 확인)을 프롬프트 안에 통째로 박아넣는 방식으로 되돌렸다.
+//    이러면 사용자는 복사 버튼 하나만 누르면 되고, 66개 유닛 전부에 자동 적용된다(사용자가 매번
+//    직접 대본·자막을 긁어모아 전달할 필요 없음 — 사용자 지적: "그걸 언제 맨날 대본 자막을 다
+//    전달해"). SRT는 패널을 펼칠 때 한 번 fetch해서 상태에 캐싱해두고, 로딩 중엔 복사 버튼 대신
+//    "자막 불러오는 중..."을 보여준다.
 // 6) 11번과의 대칭성을 다시 점검하니(사용자 지적: "앞단계에서 한 방식을 그대로 따라 한거
 //    맞아???"), 11번은 진짜 마지막 응답에서만 [글자수: 전체 TTS 합계 N자]를 적어 "정말 끝까지
 //    다 됐는지" 검증 가능하게 하는데, 14번엔 그 완료 검증 표시가 빠져 있었다. 마지막 구간
 //    응답에 [최종: 총 장면 N개, 마지막 endSec X초 — SRT 끝까지 도달함]을 적게 하는 문장을
-//    추가해서 11번과 동일하게 "완료 여부를 스스로 보고"하도록 맞췄다.
+//    추가해서 11번과 동일하게 "완료 여부를 스스로 보고"하도록 맞췄다. (아래 프롬프트에도 유지)
 // 5) 1차로는 "구간(시작~끝) 직접 입력" UI를 만들어서, 사용자가 시분초를 직접 계산해 넣어야
 //    새 프롬프트를 복사할 수 있게 했다. 그런데 이건 11번(대본 작성)이 이미 검증해둔 훨씬 간단한
 //    방식 — 프롬프트 안에 "한 번에 다 쓰지 말고 일정 분량만 쓰고 멈춘 뒤, 사용자가 '계속'이라고
 //    답하면 이어서 쓰라"는 자기 분할 지시를 넣고, 제미나이 채팅 안에서 그냥 "계속"만 치면 되는
 //    방식 — 을 두고 굳이 사람이 시간을 계산해 입력하게 만든 불필요하게 번거로운 구현이었다
-//    (사용자 지적: "앞에 어떻게 이어서 받았는지 안나와있었어?? 이렇게 병신같이 하래?" — 11번의
-//    "계속" 패턴을 이미 알고 있는데 왜 14번만 수동 시간 입력을 시키냐는 지적). 구간 입력 UI를
-//    걷어내고, 11번과 동일한 "한 구간 쓰고 멈춤 → '계속' → 이어서" 자기분할 지시로 교체했다.
+//    (사용자 지적: "앞에 어떻게 이어서 받았는지 안나와있었어?? 이렇게 병신같이 하래?"). 구간
+//    입력 UI를 걷어내고, 11번과 동일한 "한 구간 쓰고 멈춤 → '계속' → 이어서" 자기분할 지시로
+//    교체했다(이 자기분할 지시 자체는 이번 수정에서도 그대로 유지).
 // 4) 코카콜라 유닛(13분19초 SRT)으로 실기 테스트했더니, 전체 구간을 한 번에 요청하자 제미나이가
-//    스토리 전체를 6개 장면·42초로 요약해버렸다(SRT 타임코드를 실제로 따라가지 않고 자기가 아는
-//    줄거리를 압축한 것) — 그래서 애초에 구간 분할이 필요하다는 게 확인됐다.
+//    스토리 전체를 6개 장면·42초로 요약해버렸다 — 그래서 애초에 구간 분할이 필요하다는 게
+//    확인됐다(원인은 위 7번 항목대로 애초에 링크를 못 읽어서 지어낸 것이었지만, 구간 분할 자체는
+//    한 응답 분량을 안전하게 유지하는 데 여전히 유효하다).
 //
-// 2026-09-09 수정 이력:
-// 1) 예전 프롬프트는 "13번에서 뽑은 나레이션을 들으며 챕터별/문단별 시작~끝 초를 직접 채워
-//    넣으세요"처럼 사람이 귀로 듣고 타임코드를 수기로 채우는 걸 전제했다. 지금은 13번에서
-//    faster-whisper(또는 ElevenLabs with-timestamps)로 실측 타임코드가 담긴 자막(SRT) 파일이
-//    이미 만들어져 있으므로 그 링크를 전달하는 방식으로 바꿨다(사용자 지적: "홍허브 14단계
-//    복사버튼에 지침이 안 들어가 있어?" — 코카콜라 한 유닛에만 쓸 프롬프트를 채팅으로 즉석에서
-//    만들어줬다가, 66개 유닛 전부가 재사용할 앱 코드 자체를 안 고쳤다는 지적).
-// 2) <a download> 버튼으로 자막 파일을 따로 받게 했으나, Supabase Storage 공개 URL이
-//    Content-Disposition 헤더 없이 text/plain으로만 응답해서(cross-origin이라 download 속성이
-//    브라우저에서 무시됨) 클릭하면 다운로드 대신 새 탭에 텍스트가 그냥 열려버렸다. 별도 다운로드
-//    버튼 대신 자막 URL을 프롬프트 텍스트 안에 직접 적어 넣는 것으로 전환.
-// 3) 대본 전문(u.script)을 프롬프트에 통째로 박아넣고 있었는데, 사용자가 "대본 링크와 tts 링크를
-//    전달하면 제미나이가 못보나?"라고 지적 — 12번(캐릭터) 프롬프트가 이미 `/share/[id]` 공개
-//    페이지 링크를 제미나이가 직접 열어 대본을 읽게 하는 방식으로 검증돼 있었다. 대본도 같은
-//    패턴으로 통일해서, 프롬프트엔 텍스트 대신 공유 링크+자막 링크만 넣는다(12번 패턴 재사용).
+// 2026-09-09 수정 이력 (레거시 — 위 7번에서 링크 방식 자체를 되돌렸지만, 자막 링크 필드
+// (subtitleUrls)와 UI 구조는 그대로 재사용하므로 배경 맥락으로 남겨둠):
+// 1) 예전 프롬프트는 사람이 귀로 듣고 타임코드를 수기로 채우는 걸 전제했다가, 13번의 실측
+//    SRT 파일이 생기면서 그 링크를 전달하는 방식으로 바뀌었었다.
+// 2) <a download> 버튼으로 자막 파일을 따로 받게 했으나, Content-Disposition 헤더가 없어
+//    cross-origin download 속성이 무시되고 새 탭에 텍스트만 열려서, 자막 URL을 프롬프트
+//    텍스트 안에 직접 적어 넣는 것으로 전환했었다(이제는 URL이 아니라 fetch한 본문을 넣음).
+// 3) 대본 전문을 프롬프트에 통째로 박아넣던 것을 12번 패턴을 따라 링크로 바꿨었으나, 위 7번
+//    사유로 다시 텍스트 직접 포함으로 되돌아왔다.
 export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const units = site.script_draft?.units || [];
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [srtTexts, setSrtTexts] = useState<Record<string, string>>({});
+  const [srtErrors, setSrtErrors] = useState<Record<string, string>>({});
+  const fetchedSrtRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!openUnitId) return;
+    const u = units.find((x) => x.id === openUnitId);
+    const url = normalizeLabeledItems(u?.subtitleUrls)[0]?.url;
+    if (!url || fetchedSrtRef.current[openUnitId]) return;
+    fetchedSrtRef.current[openUnitId] = true;
+    fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then((text) => setSrtTexts((cur) => ({ ...cur, [openUnitId]: text })))
+      .catch((err) => setSrtErrors((cur) => ({ ...cur, [openUnitId]: err instanceof Error ? err.message : String(err) })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openUnitId, units]);
 
   async function save(id: string, scenePrompts: string) {
     setSaving(true);
@@ -78,7 +107,9 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
         {units.map((u) => {
           const scenes = u.scenePrompts ? parseSceneBlocks(u.scenePrompts) : [];
           const subtitleItems = normalizeLabeledItems(u.subtitleUrls);
-          const subtitleUrl = subtitleItems[0]?.url || '';
+          const srtText = srtTexts[u.id];
+          const srtError = srtErrors[u.id];
+          const srtReady = !!srtText;
           return (
             <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
               <button
@@ -101,28 +132,29 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
                   <p className="text-[10px] text-neutral-400 mb-1">소재: {u.material}</p>
 
                   {subtitleItems.length === 0 && (
-                    <p className="text-[10px] text-red-500 font-bold mb-2">아직 13번에 자막이 없습니다 — 먼저 13번에서 자막을 등록해주세요. (자막 링크가 아래 프롬프트에 자동으로 포함됩니다)</p>
+                    <p className="text-[10px] text-red-500 font-bold mb-2">아직 13번에 자막이 없습니다 — 먼저 13번에서 자막을 등록해주세요.</p>
+                  )}
+                  {subtitleItems.length > 0 && !srtReady && !srtError && (
+                    <p className="text-[10px] text-neutral-400 mb-2">자막(SRT) 불러오는 중...</p>
+                  )}
+                  {srtError && (
+                    <p className="text-[10px] text-red-500 font-bold mb-2">자막을 불러오지 못했습니다({srtError}) — 새로고침 후 다시 시도해주세요.</p>
                   )}
 
                   <p className="text-[10px] text-neutral-400 mb-2">
-                    대본이 길면(10분 이상) 제미나이가 한 응답에 다 끝내려다 스토리를 요약해버릴 수 있습니다 — 아래 프롬프트는 한 구간만 만들고 멈추도록 지시해뒀습니다. 응답 끝에 "계속"이라고 답하면 이어서 다음 구간을 만듭니다(11번 대본 작성과 동일한 방식). 여러 응답으로 나눠 받은 JSON 배열들은 순서대로 이어붙여서 등록하세요.
+                    대본이 길면(10분 이상) 제미나이가 한 응답에 다 끝내려다 스토리를 요약해버릴 수 있습니다 — 아래 프롬프트는 한 구간만 만들고 멈추도록 지시해뒀습니다. 응답 끝에 "계속"이라고 답하면 이어서 다음 구간을 만듭니다(11번 대본 작성과 동일한 방식). 대본·자막 원문이 프롬프트 안에 이미 통째로 들어있으니 링크를 열 필요 없이 바로 붙여넣으면 됩니다. 여러 응답으로 나눠 받은 JSON 배열들은 순서대로 이어붙여서 등록하세요.
                   </p>
 
                   <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 mb-2">
-                    <span className="text-amber-700">🔍 제미나이 프롬프트 (대본 공유링크 + 13번 자막 링크 포함됨)</span>
-                    <CopyButton
-                      text={`[역할] 너는 우리 채널 영상의 편집 감독(edit director)이다. 아래 두 링크(대본, 자막 타임코드)를 열어 내용을 확인하고, 이를 기반으로 초 단위 스토리보드와 각 장면의 이미지/전환 프롬프트를 설계한다.
+                    <span className="text-amber-700">🔍 제미나이 프롬프트 (대본·자막 원문 포함됨)</span>
+                    {srtReady || subtitleItems.length === 0 ? (
+                      <CopyButton
+                        text={`[역할] 너는 우리 채널 영상의 편집 감독(edit director)이다. 아래에 대본 전문과 자막(SRT) 전문을 직접 첨부했다. 이 텍스트를 그대로 읽고, 이를 기반으로 초 단위 스토리보드와 각 장면의 이미지/전환 프롬프트를 설계한다. (링크를 열 필요 없음 — 아래 텍스트가 원문 그대로다.)
 
-[대본 링크] https://honghub.vercel.app/share/${site.id}
-이 링크를 열어 "콘텐츠 유닛" 섹션에서 제목이 정확히 "${u.title}"인 항목을 찾고, 그 대본(화면/음향 연출 지시 포함)을 읽어라.
-
-[자막(SRT) 링크] ${subtitleUrl || '(아직 13번에 자막이 등록되지 않았습니다 — 먼저 13번에서 자막을 등록하세요)'}
-이 링크를 열어서 내용을 확인하고, 거기 담긴 타임코드를 아래 작업 지시의 기준으로 삼아라.
-
-[중요 — 타임코드 처리 원칙] 위 SRT는 실제 나레이션 음성을 정밀 전사한 것으로, 각 줄의 시작~끝 초는 이미 확정된 실측값이다. 이 시간 값을 새로 추측하거나 반올림하지 말고, 반드시 SRT의 타임코드를 그대로 기준 삼아 장면 경계를 정한다 — 여러 줄을 하나의 장면으로 묶을 땐 그 줄들의 시작 초~마지막 줄의 끝 초를 그대로 장면의 startSec/endSec으로 쓴다. 스토리 전체를 몇 개의 요약 장면으로 압축하지 않는다 — 처리 대상 구간에 포함된 모든 문장을 실제 길이 그대로 촘촘히(6~7초 단위로) 장면화한다.
+[중요 — 타임코드 처리 원칙] 아래 SRT는 실제 나레이션 음성을 정밀 전사한 것으로, 각 줄의 시작~끝 초는 이미 확정된 실측값이다. 이 시간 값을 새로 추측하거나 반올림하지 말고, 반드시 SRT의 타임코드를 그대로 기준 삼아 장면 경계를 정한다 — 여러 줄을 하나의 장면으로 묶을 땐 그 줄들의 시작 초~마지막 줄의 끝 초를 그대로 장면의 startSec/endSec으로 쓴다. 스토리 전체를 몇 개의 요약 장면으로 압축하지 않는다 — 아래 SRT에 있는 모든 줄을, 처리 대상 구간 안에서는 하나도 빠짐없이 실제 길이 그대로 촘촘히(6~7초 단위로) 장면화한다.
 
 [분량 처리 방식 — 한 번에 전체를 다 만들지 말고 반드시 아래처럼 나눠서 진행할 것]
-SRT 전체 분량을 한 응답에 다 처리하려 하지 마라 — 대본이 길면 스토리를 요약해서 압축해버리는 실패가 자주 발생한다. 대신 SRT 맨 처음부터 시작해서, 장면 25~35개 안팎(대략 3~4분 분량)을 만들었으면 그 지점에서 멈추고, 그때까지 만든 장면들만 아래 [출력 형식]의 JSON 배열로 출력한 뒤, 그 JSON 배열 바로 다음 줄에 정확히 이렇게만 적어라: (다음 구간 준비됨 — "계속"이라고 답하면 이어서 만듭니다)
+SRT 전체 분량을 한 응답에 다 처리하려 하지 마라. 대신 SRT 맨 처음부터 시작해서, 장면 25~35개 안팎(대략 3~4분 분량)을 만들었으면 그 지점에서 멈추고, 그때까지 만든 장면들만 아래 [출력 형식]의 JSON 배열로 출력한 뒤, 그 JSON 배열 바로 다음 줄에 정확히 이렇게만 적어라: (다음 구간 준비됨 — "계속"이라고 답하면 이어서 만듭니다)
 사용자가 "계속"이라고 답하면, 방금 만든 마지막 장면의 endSec 바로 다음 시점부터 이어서 — 앞서 만든 장면들을 요약하거나 다시 만들지 말고 — 다음 3~4분 분량만 새로 만들어 같은 형식(JSON 배열 + 안내문)으로 출력해라. 이 과정을 SRT의 마지막 줄(자막 끝)까지 반복한다.
 SRT 마지막 줄까지 실제로 다 만든 진짜 마지막 응답에서는, 이어가기 안내문 대신 JSON 배열 바로 다음 줄에 정확히 이렇게 완료 표시를 적어라(N·X는 지금까지 만든 전체 누적 기준 실제 값으로): [최종: 총 장면 N개, 마지막 장면 endSec X초 — SRT 마지막 줄(자막 끝)까지 도달함]
 
@@ -139,7 +171,7 @@ SRT 마지막 줄까지 실제로 다 만든 진짜 마지막 응답에서는, �
 - 재질/질감 지시는 반드시 "캐릭터 표면 자체의 재질"이라고 명시한다 — 배경은 별도로 "plain solid grey background" 등으로 명확히 지정한다.
 - Korean webtoon vector illustration style, flat colors, clean line art로 통일한다.
 
-[출력 형식 — 이번 구간에서 새로 만든 장면들만 담은 JSON 배열 하나. 앞뒤 설명·마크다운 코드펜스 없이 순수 JSON 배열만, 위 [분량 처리 방식]에서 지시한 이어가기 안내문/완료 표시는 배열 바깥 다음 줄에만.]
+[출력 형식 — 이번 구간에서 새로 만든 장면들만 담은 JSON 배열 하나. 앞뒤 설명·마크다운 코드펜스 없이 순수 JSON 배열만, 이어가기 안내문/완료 표시는 배열 바깥 다음 줄에만.]
 [
   {
     "id": "S01",
@@ -152,8 +184,23 @@ SRT 마지막 줄까지 실제로 다 만든 진짜 마지막 응답에서는, �
   }
 ]
 
-SRT에 없는 구간을 임의로 지어내지 마.`}
-                    />
+SRT에 없는 구간을 임의로 지어내지 마.
+
+======================================================================
+[대본 전문 — "${u.title}"]
+======================================================================
+
+${u.script || '(아직 11번에 대본이 없습니다)'}
+
+======================================================================
+[자막(SRT) 전문 — 실측 타임코드]
+======================================================================
+
+${srtText || '(자막 없음)'}`}
+                      />
+                    ) : (
+                      <span className="text-[10px] text-neutral-300">대기 중...</span>
+                    )}
                   </div>
                   <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => save(u.id, text)} />
                 </div>
