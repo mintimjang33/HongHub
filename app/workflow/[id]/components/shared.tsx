@@ -293,6 +293,14 @@ export function SceneEditorList({
     if (!confirm(`${scenes[idx].id} 장면을 삭제할까요?`)) return;
     await onSave(serializeSceneBlocks(scenes.filter((_, i) => i !== idx)));
   }
+  // 2026-09-09 추가 — 이미지 스타일 규칙이 전면 재정의되면서 옛 규칙으로 만든 씬 전체(예:
+  // 코카콜라 101씬)를 통째로 갈아엎어야 하는 상황이 생겼는데, 한 번에 지우는 방법이 없어서
+  // "삭제"를 수십 번 눌러야 했다(사용자 지적: "일괄삭제가 없어 추가해줘"). scenePrompts를
+  // 빈 문자열로 저장하면 모든 장면이 한 번에 사라진다 — 실수 방지로 confirm에 개수를 보여준다.
+  async function removeAll() {
+    if (!confirm(`장면 ${scenes.length}개를 전부 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    await onSave('');
+  }
   // 형식이 안 맞는 예전 자유 텍스트 — 그대로 보여주되 장면 추가는 여전히 가능하게 둔다.
   if (scenes.length === 0 && scenePrompts.trim()) {
     return (
@@ -315,6 +323,13 @@ export function SceneEditorList({
   return (
     <div className="space-y-1.5 mt-1">
       {scenes.length === 0 && editingIndex === null && <p className="text-[11px] text-neutral-300">아직 없음</p>}
+      {scenes.length > 0 && (
+        <div className="flex justify-end">
+          <button onClick={removeAll} className="text-[10px] font-bold text-red-500 hover:underline">
+            🗑 전체 삭제 ({scenes.length}개)
+          </button>
+        </div>
+      )}
       {scenes.length > 0 && (
         <div className="overflow-x-auto border border-neutral-100 rounded-lg">
           <table className="w-full text-[11px] border-collapse min-w-[640px]">
