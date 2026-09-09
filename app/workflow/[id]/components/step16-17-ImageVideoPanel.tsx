@@ -11,6 +11,13 @@ import { CopyButton, SceneEditorList } from './shared';
 // 이미지/영상을 만들 때 찾는 곳은 여기라서 이 패널에서도 똑같이 보여주고 편집도 여기서 끝낼 수 있게 한다.
 // (코드상 이름은 구버전 "Step6Panel" — 파이프라인이 5~20번 구조로 재편되며 16·17번, 이후 14번으로 옮겨졌다.)
 //
+// 2026-09-09 구간 분할 추가:
+// 4) 코카콜라 유닛(13분19초 SRT)으로 실기 테스트했더니, 전체 구간을 한 번에 요청하자 제미나이가
+//    스토리 전체를 6개 장면·42초로 요약해버렸다(SRT 타임코드를 실제로 따라가지 않고 자기가 아는
+//    줄거리를 압축한 것) — 11번(대본)·13번(나레이션)처럼 구간을 나눠 이어받는 방식이 필요하다는
+//    사용자 판단으로, 시작~끝 구간을 직접 입력하면 그 구간만 처리하라는 문단이 프롬프트에 추가되게
+//    바꿨다. 비워두면 기존처럼 전체를 한 번에 요청한다(짧은 대본이면 그걸로 충분할 수 있음).
+//
 // 2026-09-09 수정 이력:
 // 1) 예전 프롬프트는 "13번에서 뽑은 나레이션을 들으며 챕터별/문단별 시작~끝 초를 직접 채워
 //    넣으세요"처럼 사람이 귀로 듣고 타임코드를 수기로 채우는 걸 전제했다. 지금은 13번에서
@@ -30,6 +37,14 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   const units = site.script_draft?.units || [];
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [ranges, setRanges] = useState<Record<string, { start: string; end: string }>>({});
+
+  function getRange(id: string) {
+    return ranges[id] || { start: '', end: '' };
+  }
+  function setRange(id: string, patch: Partial<{ start: string; end: string }>) {
+    setRanges((cur) => ({ ...cur, [id]: { ...getRange(id), ...patch } }));
+  }
 
   async function save(id: string, scenePrompts: string) {
     setSaving(true);
@@ -61,6 +76,14 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
           const scenes = u.scenePrompts ? parseSceneBlocks(u.scenePrompts) : [];
           const subtitleItems = normalizeLabeledItems(u.subtitleUrls);
           const subtitleUrl = subtitleItems[0]?.url || '';
+          const range = getRange(u.id);
+          const hasRange = !!(range.start.trim() && range.end.trim());
+          const rangeBlock = hasRange
+            ? `\n[이번 요청 범위 — 반드시 지킬 것] 이 SRT는 전체 대본 분량 중 이번 요청에서 처리할 구간이 따로 있다. 이번 요청에서는 ${range.start.trim()} ~ ${range.end.trim()} 구간만 처리한다. 이 구간을 요약하거나 압축하지 말고, 이 구간에 해당하는 SRT 줄을 전부 빠짐없이 6~7초 단위 장면으로 변환해라. ${range.start.trim()} 이전이나 ${range.end.trim()} 이후 내용은 이번 응답에 절대 포함하지 않는다 — 나머지 구간은 별도 요청으로 이어서 처리할 것이다.\n`
+            : '';
+          const scopeLine = hasRange
+            ? `지정된 구간(${range.start.trim()} ~ ${range.end.trim()}) 전체를 빠짐없이 장면으로 만들어줘.`
+            : '전체 대본 분량(콜드오픈부터 아웃트로까지)만큼 빠짐없이 장면을 다 만들어줘.';
           return (
             <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
               <button
@@ -86,8 +109,38 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
                     <p className="text-[10px] text-red-500 font-bold mb-2">아직 13번에 자막이 없습니다 — 먼저 13번에서 자막을 등록해주세요. (자막 링크가 아래 프롬프트에 자동으로 포함됩니다)</p>
                   )}
 
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <span className="text-[10px] text-neutral-400">구간(비우면 전체):</span>
+                    <input
+                      type="text"
+                      value={range.start}
+                      onChange={(e) => setRange(u.id, { start: e.target.value })}
+                      placeholder="0:00"
+                      className="w-16 text-[10px] border border-neutral-200 rounded px-1.5 py-0.5"
+                    />
+                    <span className="text-[10px] text-neutral-400">~</span>
+                    <input
+                      type="text"
+                      value={range.end}
+                      onChange={(e) => setRange(u.id, { end: e.target.value })}
+                      placeholder="3:26"
+                      className="w-16 text-[10px] border border-neutral-200 rounded px-1.5 py-0.5"
+                    />
+                    {hasRange && (
+                      <button
+                        onClick={() => setRange(u.id, { start: '', end: '' })}
+                        className="text-[10px] text-neutral-400 underline"
+                      >
+                        지우기
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-neutral-400 mb-2">
+                    대본이 길면(10분 이상) 한 번에 전체를 요청할 경우 제미나이가 스토리를 요약해버리는 문제가 있었습니다 — 3~4분 단위로 구간을 나눠 이어서 요청하는 걸 권장합니다.
+                  </p>
+
                   <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 mb-2">
-                    <span className="text-amber-700">🔍 제미나이 프롬프트 (대본 공유링크 + 13번 자막 링크 포함됨)</span>
+                    <span className="text-amber-700">🔍 제미나이 프롬프트 (대본 공유링크 + 13번 자막 링크 포함됨{hasRange ? `, 구간: ${range.start.trim()}~${range.end.trim()}` : ''})</span>
                     <CopyButton
                       text={`[역할] 너는 우리 채널 영상의 편집 감독(edit director)이다. 아래 두 링크(대본, 자막 타임코드)를 열어 내용을 확인하고, 이를 기반으로 초 단위 스토리보드와 각 장면의 이미지/전환 프롬프트를 설계한다.
 
@@ -96,8 +149,8 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
 
 [자막(SRT) 링크] ${subtitleUrl || '(아직 13번에 자막이 등록되지 않았습니다 — 먼저 13번에서 자막을 등록하세요)'}
 이 링크를 열어서 내용을 확인하고, 거기 담긴 타임코드를 아래 작업 지시의 기준으로 삼아라.
-
-[중요 — 타임코드 처리 원칙] 위 SRT는 실제 나레이션 음성을 정밀 전사한 것으로, 각 줄의 시작~끝 초는 이미 확정된 실측값이다. 이 시간 값을 새로 추측하거나 반올림하지 말고, 반드시 SRT의 타임코드를 그대로 기준 삼아 장면 경계를 정한다 — 여러 줄을 하나의 장면으로 묶을 땐 그 줄들의 시작 초~마지막 줄의 끝 초를 그대로 장면의 startSec/endSec으로 쓴다.
+${rangeBlock}
+[중요 — 타임코드 처리 원칙] 위 SRT는 실제 나레이션 음성을 정밀 전사한 것으로, 각 줄의 시작~끝 초는 이미 확정된 실측값이다. 이 시간 값을 새로 추측하거나 반올림하지 말고, 반드시 SRT의 타임코드를 그대로 기준 삼아 장면 경계를 정한다 — 여러 줄을 하나의 장면으로 묶을 땐 그 줄들의 시작 초~마지막 줄의 끝 초를 그대로 장면의 startSec/endSec으로 쓴다. 스토리 전체를 몇 개의 요약 장면으로 압축하지 않는다 — 처리 대상 구간에 포함된 모든 문장을 실제 길이 그대로 촘촘히(6~7초 단위로) 장면화한다.
 
 [작업 지시]
 1. SRT의 타임코드 줄들을 순서대로 묶어서, 하나의 장면이 대략 6~7초가 되도록 나눈다. 문장이 끊기는 자연스러운 호흡 지점(SRT 줄 경계)에서만 나누고, 문장 중간을 억지로 자르지 않는다.
@@ -125,7 +178,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   }
 ]
 
-전체 대본 분량(콜드오픈부터 아웃트로까지)만큼 빠짐없이 장면을 다 만들어줘. SRT에 없는 구간을 임의로 지어내지 마.`}
+${scopeLine} SRT에 없는 구간을 임의로 지어내지 마.`}
                     />
                   </div>
                   <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => save(u.id, text)} />
