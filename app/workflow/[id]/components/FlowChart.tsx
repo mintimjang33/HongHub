@@ -20,7 +20,6 @@ import {
   isScriptStep,
   isImageVideoStep,
   isNarrationStep,
-  isSubtitleStep,
 } from '../utils';
 import { ChannelPanel } from './step01-ChannelPanel';
 import { MaterialPanel } from './step02-MaterialPanel';
@@ -34,7 +33,7 @@ import { HookPanel } from './step09-HookPanel';
 import { PlanningDocPanel } from './step10-PlanningDocPanel';
 import { ScriptWritingPanel } from './step11-ScriptWritingPanel';
 import { CharacterPanel } from './step12-CharacterPanel';
-import { NarrationPanel, SubtitlePanel } from './step13-14-LabeledLinksPanel';
+import { NarrationSubtitlePanel } from './step13-14-LabeledLinksPanel';
 import { ImageVideoPanel } from './step16-17-ImageVideoPanel';
 
 export function FlowChart({
@@ -161,8 +160,7 @@ export function FlowChart({
           {isCharacterStep(active) && <CharacterPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <ScriptWritingPanel site={site} onRefresh={onRefreshSite} />}
           {isImageVideoStep(active) && <ImageVideoPanel site={site} onRefresh={onRefreshSite} />}
-          {isNarrationStep(active) && <NarrationPanel site={site} onRefresh={onRefreshSite} />}
-          {isSubtitleStep(active) && <SubtitlePanel site={site} onRefresh={onRefreshSite} />}
+          {isNarrationStep(active) && <NarrationSubtitlePanel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
