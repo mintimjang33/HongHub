@@ -7,6 +7,12 @@ export type AnalysisResult = {
   duration?: string;
   pace?: string;
   updated_at?: string;
+  // 2026-09-11 추가 — 13번 화풍 선택. IMAGE_STYLE_PRESETS(utils.ts)의 id 중 하나. 처음엔 콘텐츠
+  // 유닛별(ContentUnit.imageStyle)로 만들었다가, 사용자 지적("컨텐츠가 100개면 그때마다 고르는
+  // 화면을 넣는다는거야? 왜 그런 쓸데없는 짓을 하지??", "카테고리를 한번 선택하고 그 안의 상품을
+  // 고르면 되는것을") — 콘텐츠마다 따로 고르는 게 아니라 파이프라인(채널) 전체에서 한 번만 고르면
+  // 되는 구조로 되돌렸다. 비어있으면 기본값(1번, IMAGE_STYLE_PRESETS[0])을 쓴다.
+  imageStyle?: string;
 };
 // 5번은 소재 하나마다 별개의 완성 콘텐츠라서, 작업 중인 것 하나(소재→제목→대본 위저드)와
 // 별개로 완성된 것들을 units 배열에 콘텐츠 단위로 저장한다. 나중에 6~9번(영상/TTS/자막/렌더링)도
@@ -58,11 +64,6 @@ export type ContentUnit = {
   // 전체가 공유하는 workflow_content가 아니라 이 유닛(에피소드) 하나에 귀속시켜서, 소재가 바뀌어도
   // "이게 어느 콘텐츠 프롬프트인지" 헷갈리지 않게 한다.
   scenePrompts?: string;
-  // 2026-09-11 추가 — 13번 화풍 선택. IMAGE_STYLE_PRESETS(utils.ts)의 id 중 하나. 콘텐츠 유닛마다
-  // 다른 화풍을 쓸 수 있어야 해서(사용자 지시: "화풍을 1번으로 기본설정으로 해두고 컨텐츠마다
-  // 고를수 있게") 파이프라인 전체 공유값이 아니라 여기(유닛별)에 둔다. 비어있으면 기본값(1번,
-  // IMAGE_STYLE_PRESETS[0])을 쓴다. 캐릭터(스틱맨 정체성)는 화풍과 무관하게 항상 고정.
-  imageStyle?: string;
   // 2026-09-01 추가 — 8번(나레이션 TTS) 단계의 음성 파일/링크. 씬별(scenePrompts)과 달리 나레이션은
   // 콘텐츠 대본 전체에 대해 하나(또는 후보 여러 개) 나오는 거라 유닛에 바로 붙인다. 링크를 직접
   // 붙여넣거나, 파일을 업로드하면(uploadSceneMedia 재사용) 그 URL이 여기 같이 쌓인다.
@@ -176,10 +177,10 @@ export type LabeledItem = { label: string; url: string };
 export type LabeledField = 'narrationUrls' | 'subtitleUrls';
 
 // 2026-09-11 추가 — 13번 화풍 선택 프리셋. 사용자가 같은 씬(약사 스틱맨+무너지는 PHARMACY 네온사인)을
-// Flow에서 7개 화풍으로 직접 만들어 비교 확정한 뒤 추가됨. promptStyle은 4대 핵심 원칙 1번(비주얼
+// Flow에서 여러 화풍으로 직접 만들어 비교 확정한 뒤 추가됨. promptStyle은 4대 핵심 원칙 1번(비주얼
 // 톤앤매너) 문장을 통째로 교체하는 용도 — 캐릭터 정체성(스틱맨 등)은 화풍과 무관하게 항상 고정이라
 // 여기 포함하지 않는다. referenceImageUrl은 그 화풍으로 실제 생성해본 예시 이미지(Storage 영구 저장본).
-// 목록의 첫 번째(인덱스 0)가 기본값 — ContentUnit.imageStyle이 비어있을 때 이걸 쓴다.
+// 목록의 첫 번째(인덱스 0)가 기본값 — AnalysisResult.imageStyle이 비어있을 때 이걸 쓴다.
 export type ImageStylePreset = {
   id: string;
   label: string;
