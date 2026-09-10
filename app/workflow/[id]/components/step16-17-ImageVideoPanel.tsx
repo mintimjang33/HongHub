@@ -18,10 +18,15 @@ import { CopyButton, SceneEditorList } from './shared';
 // 비교 확정했다(화풍 지정 안함/2D 일러스트/연필 그림/수채화/한국형 웹툰/손그림/수묵화). 처음엔
 // ①·②가 거의 구분 안 됐는데(둘 다 디테일한 음영), ②를 "완전 플랫, 그림자/그라데이션 없음"으로
 // 정반대 방향으로 밀어서 분리했다. 7개 프리셋(프롬프트 문구+참고 이미지 URL)은 `IMAGE_STYLE_PRESETS`
-// (utils.ts)에 정의돼 있고, 선택된 화풍 id는 이 파이프라인(사이트) 전체가 공유하는
-// `analysis_result.imageStyle`에 저장한다(콘텐츠 유닛별이 아님 — "13단계에 저장" 사용자 지시).
-// 선택한 프리셋의 promptStyle이 아래 복사 버튼 프롬프트의 "비주얼 톤앤매너"(4대 핵심 원칙 1번)를
-// 통째로 교체한다 — 캐릭터 정체성(스틱맨 등, 4번 항목)은 화풍과 무관하게 항상 고정이라 안 바뀐다.
+// (utils.ts)에 정의돼 있다.
+//
+// 2026-09-11 저장 범위 수정 — 사이트 전체 공유값 → 콘텐츠 유닛별로 변경:
+// 처음엔 선택한 화풍을 `site.analysis_result.imageStyle`(파이프라인 전체 공유)에 저장했는데,
+// 사용자가 "화풍을 1번으로 기본설정으로 해두고 컨텐츠마다 고를수 있게 하면 되겠다"고 정정 — 코카콜라
+// 유닛과 카페인 유닛이 서로 다른 화풍을 쓸 수 있어야 한다. `ContentUnit.imageStyle`(types.ts)로
+// 옮기고, 이 패널도 사이트 최상단이 아니라 각 유닛 카드 안에 화풍 선택 UI를 넣도록 재작성했다.
+// 저장은 scenePrompts와 같은 방식(`/api/script-draft`의 unitPatch)을 그대로 재사용한다. 캐릭터
+// (스틱맨 정체성)는 화풍과 무관하게 항상 고정 — 화풍이 바뀌어도 안 바뀐다.
 //
 // 2026-09-11 "화풍 지정 안 함" 프리셋 수정 — 스토리 무관 조명 강제 버그:
 // 처음 버전은 이름과 달리 "dramatic lighting... glowing effects for dramatic emphasis"를 항상
@@ -30,6 +35,11 @@ import { CopyButton, SceneEditorList } from './shared';
 // 어두운 톤이 강제되는 구조였다. IMAGE_STYLE_PRESETS의 'default' 항목에서 조명/분위기가 장면
 // 내용을 그대로 따라가도록(밝은 장면=밝게, 어두운 장면만 어둡게) 수정하고, "매 장면에 극적 조명을
 // 강제하지 마라"는 문장을 명시 추가했다.
+//
+// 2026-09-11 화풍 2차 확장 (6종 추가, 13종 체제):
+// 사용자 요청으로 일본만화/디즈니풍/지브리풍/아메리칸 코믹북/레트로 픽셀아트/클레이(스톱모션) 6종을
+// 추가했다. 사용자가 Flow에서 직접 1:1 비율로 생성한 이미지를 레퍼런스로 썼다(IMAGE_STYLE_PRESETS
+// 참고).
 //
 // 2026-09-11 화풍 전면 교체 (플랫 벡터 → 디테일한 웹툰/코믹 일러스트) + 이 파일 자체가 실제로는
 // 안 고쳐져 있던 버그 수정:
@@ -122,10 +132,9 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   const fetchedSrtRef = useRef<Record<string, boolean>>({});
   const [pasteTexts, setPasteTexts] = useState<Record<string, string>>({});
   const [parseInfos, setParseInfos] = useState<Record<string, string>>({});
-  // 2026-09-11 추가 — 화풍 선택 상태. 파이프라인(사이트) 전체 공유값이라 site.analysis_result에서
-  // 직접 읽고, 로컬 state는 저장 중 낙관적 업데이트(클릭 즉시 반영)용으로만 쓴다.
-  const [savingStyle, setSavingStyle] = useState(false);
-  const selectedStyleId = site.analysis_result?.imageStyle || IMAGE_STYLE_PRESETS[0].id;
+  // 2026-09-11 추가 — 화풍 선택 저장 중 표시. 콘텐츠 유닛별로 저장하므로(아래 selectUnitStyle),
+  // 지금 저장 중인 유닛 id만 기록해서 그 유닛의 칩 버튼만 비활성화한다(다른 유닛은 계속 조작 가능).
+  const [savingStyleUnitId, setSavingStyleUnitId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!openUnitId) return;
@@ -157,19 +166,21 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
     }
   }
 
-  // 2026-09-11 추가 — 화풍 선택 저장. analysis_result는 PATCH 시 전체 교체라(부분 병합 아님),
-  // 기존 필드를 스프레드해서 imageStyle만 덮어써야 다른 분석 결과(channel/title 등)가 안 날아간다.
-  async function selectStyle(styleId: string) {
-    setSavingStyle(true);
+  // 2026-09-11 수정 — 화풍 선택은 콘텐츠 유닛별 값(ContentUnit.imageStyle)이라, scenePrompts와
+  // 똑같이 /api/script-draft의 unitPatch로 그 유닛 하나만 패치한다(사이트 analysis_result 전체
+  // 교체 방식이었던 것에서 변경 — 다른 유닛의 화풍이나 site.analysis_result의 다른 필드를 건드릴
+  // 위험이 없다).
+  async function selectUnitStyle(unitId: string, styleId: string) {
+    setSavingStyleUnitId(unitId);
     try {
-      await fetch(`/api/sites/${site.id}`, {
+      await fetch('/api/script-draft', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analysis_result: { ...site.analysis_result, imageStyle: styleId } }),
+        body: JSON.stringify({ siteId: site.id, unitPatch: { id: unitId, fields: { imageStyle: styleId } } }),
       });
       onRefresh();
     } finally {
-      setSavingStyle(false);
+      setSavingStyleUnitId(null);
     }
   }
 
@@ -208,36 +219,8 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
     );
   }
 
-  const selectedPreset = IMAGE_STYLE_PRESETS.find((p) => p.id === selectedStyleId) || IMAGE_STYLE_PRESETS[0];
-
   return (
     <div className="border-t border-black/5 pt-3">
-      {/* 2026-09-11 추가 — 화풍 선택 UI. 참고 이미지(같은 씬을 7개 화풍으로 실측한 것) 썸네일 +
-          라벨을 칩 버튼으로 보여주고, 선택된 것만 테두리 강조. 파이프라인 전체 공유값이라 콘텐츠
-          유닛 목록 위, 패널 최상단에 한 번만 둔다. */}
-      <div className="mb-3">
-        <div className="text-xs font-black text-neutral-500 mb-2">🎨 화풍 선택 (파이프라인 전체 공유)</div>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {IMAGE_STYLE_PRESETS.map((preset) => {
-            const active = preset.id === selectedStyleId;
-            return (
-              <button
-                key={preset.id}
-                onClick={() => selectStyle(preset.id)}
-                disabled={savingStyle}
-                className={`shrink-0 flex flex-col items-center gap-1 rounded-lg p-1.5 border-2 transition disabled:opacity-50 ${
-                  active ? 'border-black bg-neutral-50' : 'border-transparent hover:border-neutral-200'
-                }`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={preset.referenceImageUrl} alt={preset.label} className="w-16 h-16 object-cover rounded-md border border-neutral-200" />
-                <span className={`text-[10px] font-bold whitespace-nowrap ${active ? 'text-black' : 'text-neutral-400'}`}>{preset.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       <div className="text-xs font-black text-neutral-500 mb-2">🎬 콘텐츠별 이미지/영상 프롬프트</div>
       <div className="space-y-1.5">
         {units.map((u) => {
@@ -246,6 +229,11 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
           const srtText = srtTexts[u.id];
           const srtError = srtErrors[u.id];
           const srtReady = !!srtText;
+          // 2026-09-11 추가 — 이 유닛의 화풍(콘텐츠마다 다를 수 있음). 비어있으면 기본값(인덱스 0,
+          // "화풍 지정 안 함")을 쓴다 — 사용자 지시: "화풍을 1번으로 기본설정으로 해두고 컨텐츠마다
+          // 고를수 있게".
+          const unitStyleId = u.imageStyle || IMAGE_STYLE_PRESETS[0].id;
+          const unitPreset = IMAGE_STYLE_PRESETS.find((p) => p.id === unitStyleId) || IMAGE_STYLE_PRESETS[0];
           return (
             <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
               <button
@@ -267,6 +255,32 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
                 <div className="px-3 pb-3 pt-1 border-t border-neutral-50">
                   <p className="text-[10px] text-neutral-400 mb-1">소재: {u.material}</p>
 
+                  {/* 2026-09-11 추가 — 이 콘텐츠 유닛 전용 화풍 선택 UI. 사이트 전체가 아니라
+                      이 유닛(u.imageStyle)에만 저장된다. 참고 이미지(같은 씬을 13개 화풍으로 실측한
+                      것) 썸네일 + 라벨을 칩 버튼으로 보여주고, 선택된 것만 테두리 강조. */}
+                  <div className="mb-2">
+                    <div className="text-[10px] font-black text-neutral-500 mb-1">🎨 이 콘텐츠의 화풍 (기본값: {IMAGE_STYLE_PRESETS[0].label}, 캐릭터는 화풍과 무관하게 항상 스틱맨으로 고정)</div>
+                    <div className="flex gap-1.5 overflow-x-auto pb-1">
+                      {IMAGE_STYLE_PRESETS.map((preset) => {
+                        const active = preset.id === unitStyleId;
+                        return (
+                          <button
+                            key={preset.id}
+                            onClick={() => selectUnitStyle(u.id, preset.id)}
+                            disabled={savingStyleUnitId === u.id}
+                            className={`shrink-0 flex flex-col items-center gap-1 rounded-lg p-1.5 border-2 transition disabled:opacity-50 ${
+                              active ? 'border-black bg-neutral-50' : 'border-transparent hover:border-neutral-200'
+                            }`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={preset.referenceImageUrl} alt={preset.label} className="w-14 h-14 object-cover rounded-md border border-neutral-200" />
+                            <span className={`text-[9px] font-bold whitespace-nowrap ${active ? 'text-black' : 'text-neutral-400'}`}>{preset.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   {subtitleItems.length === 0 && (
                     <p className="text-[10px] text-red-500 font-bold mb-2">아직 12번에 자막이 없습니다 — 먼저 12번에서 자막을 등록해주세요.</p>
                   )}
@@ -278,7 +292,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
                   )}
 
                   <p className="text-[10px] text-neutral-400 mb-2">
-                    현재 화풍: <span className="font-bold text-neutral-600">{selectedPreset.label}</span> (위에서 바꿀 수 있음). 대본이 길면(10분 이상) 제미나이가 한 응답에 다 끝내려다 스토리를 요약해버릴 수 있습니다 — 아래 프롬프트는 한 구간만 만들고 멈추도록 지시해뒀습니다. 응답 끝에 "계속"이라고 답하면 이어서 다음 구간을 만듭니다(11번 대본 작성과 동일한 방식). 대본·자막 원문이 프롬프트 안에 이미 통째로 들어있으니 링크를 열 필요 없이 바로 붙여넣으면 됩니다. 제미나이 채팅에서 "계속"으로 끝까지 다 받은 뒤, 대화 전체(JSON 배열 여러 개 포함)를 그대로 복사해서 아래 붙여넣기 칸에 한 번에 넣고 등록하면 자동으로 합쳐서 저장됩니다. ⚠️ 등록 후에는 마지막 장면의 끝 시간이 실제 자막(SRT) 마지막 줄과 일치하는지 꼭 눈으로 확인하세요 — 중간에 완료로 착각하고 멈추면 뒷부분(클로징 멘트 등)이 통째로 비게 됩니다.
+                    현재 화풍: <span className="font-bold text-neutral-600">{unitPreset.label}</span> (위에서 바꿀 수 있음). 대본이 길면(10분 이상) 제미나이가 한 응답에 다 끝내려다 스토리를 요약해버릴 수 있습니다 — 아래 프롬프트는 한 구간만 만들고 멈추도록 지시해뒀습니다. 응답 끝에 "계속"이라고 답하면 이어서 다음 구간을 만듭니다(11번 대본 작성과 동일한 방식). 대본·자막 원문이 프롬프트 안에 이미 통째로 들어있으니 링크를 열 필요 없이 바로 붙여넣으면 됩니다. 제미나이 채팅에서 "계속"으로 끝까지 다 받은 뒤, 대화 전체(JSON 배열 여러 개 포함)를 그대로 복사해서 아래 붙여넣기 칸에 한 번에 넣고 등록하면 자동으로 합쳐서 저장됩니다. ⚠️ 등록 후에는 마지막 장면의 끝 시간이 실제 자막(SRT) 마지막 줄과 일치하는지 꼭 눈으로 확인하세요 — 중간에 완료로 착각하고 멈추면 뒷부분(클로징 멘트 등)이 통째로 비게 됩니다.
                   </p>
 
                   <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 mb-2">
@@ -301,7 +315,7 @@ SRT 마지막 줄까지 실제로 다 만든 진짜 마지막 응답에서는, �
 3. transitionPrompt에는 카메라 움직임(줌인/줌아웃/패닝/틸트), 정지 이미지 간 전환 방식, needsVideoClip이 true인 경우엔 그 장면에서 실제로 어떤 동작이 일어나는지(짧은 모션)까지 영어로 구체적으로 쓴다.
 
 [수정된 이미지 프롬프트(imagePrompt) 4대 핵심 원칙 — 반드시 지킬 것, 전부 영어로]
-1. 비주얼 톤앤매너 (2026-09-11 화풍 선택 기능 반영 — 현재 선택된 화풍: "${selectedPreset.label}"): "${selectedPreset.promptStyle}"로 통일한다. 모든 캐릭터는 예외 없이 스틱맨 몸(얇은 선 팔다리 + 단순한 동그란 머리) 비율로만 그린다 — 정상적인 인체 비율(어깨 넓은 몸통, 상세한 손가락·근육 등)로 그리지 않는다. 이 캐릭터 비율 규칙은 화풍과 무관하게 항상 고정이다.
+1. 비주얼 톤앤매너 (2026-09-11 화풍 선택 기능 반영 — 이 콘텐츠에 현재 선택된 화풍: "${unitPreset.label}"): "${unitPreset.promptStyle}"로 통일한다. 모든 캐릭터는 예외 없이 스틱맨 몸(얇은 선 팔다리 + 단순한 동그란 머리) 비율로만 그린다 — 정상적인 인체 비율(어깨 넓은 몸통, 상세한 손가락·근육 등)로 그리지 않는다. 이 캐릭터 비율 규칙은 화풍과 무관하게 항상 고정이다.
 2. 인물 필수 등장 및 '주어' 전진 배치 (핵심 수정!): 절대 사물이나 배경만 덩그러니 있는 정물화/풍경화 컷을 만들지 마라. 모든 컷에는 반드시 메인 화자(젠틀맨 루즈)나 해당 씬의 주인공(스틱맨 펨버턴, 스틱맨 캔들러, 군중 등)이 프레임 안에 크게 등장해야 한다. AI가 인물을 최우선으로 그리도록, 영어 프롬프트는 반드시 다음 순서로 작성한다: [비주얼 톤앤매너] -> [캐릭터 외형 묘사] -> [캐릭터의 구체적인 표정과 행동(동사)] -> [주변 사물 및 배경].
 3. 사물 비유와 캐릭터 리액션의 결합 + 의미 전달용 텍스트 라벨: 사물 단독 샷은 안 된다 — 반드시 캐릭터의 물리적 상호작용과 리액션이 결합된 구도로 짠다. 예: '무너지는 동전 탑'을 그릴 거라면, "동전 탑이 무너진다"가 아니라 "스틱맨 캔들러가 무너지는 동전 탑을 보며 머리를 쥐어뜯고 오열한다"처럼 반드시 캐릭터의 물리적 상호작용과 리액션이 결합된 구도로 짠다. 단, 의미가 헷갈릴 수 있는 사물·수치·비교 항목에는 짧은 한글 단어 라벨을 적극 붙인다 — 그래프의 축·눈금·항목명, 항아리/상자 등에 붙는 카테고리명, 금액 등. 다만 문장형 캡션이나 나레이션 자막 문장은 이미지 안에 넣지 않는다 — 그건 12번(나레이션·자막) 단계가 SRT로 만들고 15번(렌더링)에서 별도로 입힌다.
 4. 캐릭터 롤플레이 명확화 (화자와 배우의 분리, 화풍과 무관하게 항상 고정):
