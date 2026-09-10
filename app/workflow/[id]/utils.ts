@@ -1,4 +1,4 @@
-import type { Step, SceneBlock, LabeledItem } from './types';
+import type { Step, SceneBlock, LabeledItem, ImageStylePreset } from './types';
 
 export const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 
@@ -423,3 +423,106 @@ export function statusTone(status: string): { bg: string; border: string; text: 
   const label = trimmed.length > FALLBACK_LABEL_MAX ? `${trimmed.slice(0, FALLBACK_LABEL_MAX)}…` : trimmed;
   return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-600', label };
 }
+
+// 2026-09-11 추가 — 13번 화풍 선택 프리셋 13종. 콘텐츠 유닛마다 다른 화풍을 고를 수 있다
+// (ContentUnit.imageStyle, types.ts). 목록 첫 번째(인덱스 0)가 기본값 — imageStyle이 비어있을 때
+// 이걸 쓴다. 1~7번은 사용자가 같은 씬(약사 스틱맨+무너지는 PHARMACY 네온사인)을 Flow에서 직접
+// 생성해 비교 확정한 것. 1번(화풍 지정 안 함)은 스토리 내용과 무관하게 어두운 톤을 강제하던 버그를
+// 수정한 버전 — 조명/분위기가 장면 내용을 따라가야 한다는 문장을 명시했다(사용자 지적: "왜 배경이
+// 어두운 배경이야, 스토리에 따라 그림을 그려야지"). 2번(2D 일러스트)은 1번과 구분이 잘 안 되던 것을
+// 완전 플랫(그림자/그라데이션 없음)로 반대 방향으로 밀어서 분리했다. 8~13번은 사용자가 추가
+// 요청(일본만화/디즈니/지브리/아메리칸코믹/픽셀아트/클레이)으로 2차 확장, 사용자가 Flow에서 직접
+// 1:1 비율로 생성한 이미지를 레퍼런스로 썼다.
+export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
+  {
+    id: 'default',
+    label: '화풍 지정 안 함',
+    promptStyle:
+      "High-quality 2D digital illustration, bold webtoon/comic art style, clean thick black outlines, detailed cel shading, rich background details matching the scene's environment, full expressive color palette. The lighting and mood must follow what the scene actually depicts — bright and warm for calm or positive scenes, dark and dramatic only for scenes that are genuinely tense, scary, or negative. Do NOT force dramatic/dark lighting or glowing effects on every scene regardless of content — let the story decide the tone, scene by scene.",
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-1_default.jpg',
+  },
+  {
+    id: '2d_illust',
+    label: '2D 일러스트',
+    promptStyle:
+      'Clean flat 2D vector illustration, crisp bold outlines, completely flat cel colors with NO shading, NO gradients, NO dramatic lighting or glow effects — bright, evenly-lit graphic-design aesthetic, simple geometric shapes, poster-like flat color blocks, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-2_2d_illust.jpg',
+  },
+  {
+    id: 'pencil',
+    label: '연필 그림',
+    promptStyle:
+      'Hand-drawn pencil sketch illustration, visible graphite pencil strokes and cross-hatching for shading, monochrome grayscale tones, textured sketchbook paper background, no color, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-3_pencil.jpg',
+  },
+  {
+    id: 'watercolor',
+    label: '수채화',
+    promptStyle:
+      'Watercolor painting illustration, soft translucent color washes, visible paper texture and gentle color bleeding at edges, delicate hand-painted look, muted pastel color palette, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-4_watercolor.jpg',
+  },
+  {
+    id: 'korean_webtoon',
+    label: '한국형 웹툰',
+    promptStyle:
+      'Modern Korean webtoon illustration style, clean crisp digital linework, vivid flat-to-soft-gradient coloring, polished contemporary webtoon aesthetic typical of Korean comic platforms, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-5_korean_webtoon.jpg',
+  },
+  {
+    id: 'handdrawn',
+    label: '손그림',
+    promptStyle:
+      'Casual hand-drawn doodle illustration, loose imperfect ink linework, marker-style flat coloring, playful sketchbook doodle aesthetic, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-6_handdrawn.jpg',
+  },
+  {
+    id: 'ink_wash',
+    label: '수묵화',
+    promptStyle:
+      'Traditional East Asian ink wash painting (sumukhwa) style, monochrome black ink brush strokes with varying ink density, visible brush texture on traditional paper, minimal color, mostly black and white with subtle ink gray tones, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-7_ink_wash.jpg',
+  },
+  {
+    id: 'japanese_anime',
+    label: '일본만화',
+    promptStyle:
+      'Japanese anime illustration style, large expressive sparkling eyes with detailed highlights, sharp clean cel-shaded coloring, dynamic speed lines and screentone (halftone dot) shading for dramatic effect, glossy hair with defined light reflections, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-08_japanese_anime.jpg',
+  },
+  {
+    id: 'disney_pixar',
+    label: '디즈니풍',
+    promptStyle:
+      'Disney/Pixar-style 2D cartoon illustration, soft rounded shapes and exaggerated bouncy proportions, large round expressive eyes, smooth clean shading with warm rim lighting, vibrant saturated storybook color palette, polished family-animation look, no 3D render, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-09_disney_pixar.jpg',
+  },
+  {
+    id: 'ghibli',
+    label: '지브리풍',
+    promptStyle:
+      'Studio Ghibli-inspired illustration, soft painterly watercolor textures, gentle hand-painted brush strokes visible in the background, warm nostalgic natural lighting, muted earthy color palette with soft pastel accents, whimsical storybook atmosphere, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-10_ghibli.jpg',
+  },
+  {
+    id: 'american_comic',
+    label: '아메리칸 코믹북',
+    promptStyle:
+      'American superhero comic book illustration style, bold thick black ink outlines, dramatic high-contrast cel shading, visible halftone dot printing texture, punchy primary color palette (red, blue, yellow), dynamic action-comic linework, no 3D, no photorealism.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-11_american_comic.jpg',
+  },
+  {
+    id: 'retro_pixel',
+    label: '레트로 픽셀아트',
+    promptStyle:
+      'Retro 16-bit pixel art illustration, visible square pixel blocks, limited retro color palette, blocky simplified character shapes with no smooth curves, flat dithered shading reminiscent of classic video games, no 3D, no photorealism, no smooth vector lines.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-12_retro_pixel.jpg',
+  },
+  {
+    id: 'claymation',
+    label: '클레이/스톱모션',
+    promptStyle:
+      'Claymation stop-motion illustration style, soft matte clay-like textures with visible fingerprint and tool-mark imperfections, chunky rounded character forms, warm diffused studio lighting, slightly imperfect handmade look, muted craft-material color palette, no photorealism, no glossy 3D render.',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-13_claymation.jpg',
+  },
+];
