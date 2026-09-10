@@ -7,6 +7,9 @@ export type AnalysisResult = {
   duration?: string;
   pace?: string;
   updated_at?: string;
+  // 2026-09-11 추가 — 13번(씬 이미지 프롬프트) 화풍 선택. IMAGE_STYLE_PRESETS(utils.ts)의 id 중 하나.
+  // 파이프라인(사이트) 전체에 공유되는 설정 — 콘텐츠 유닛별이 아니다.
+  imageStyle?: string;
 };
 // 5번은 소재 하나마다 별개의 완성 콘텐츠라서, 작업 중인 것 하나(소재→제목→대본 위저드)와
 // 별개로 완성된 것들을 units 배열에 콘텐츠 단위로 저장한다. 나중에 6~9번(영상/TTS/자막/렌더링)도
@@ -169,3 +172,14 @@ export type CharacterDraft = { id: string; name: string; role: string; descripti
 
 export type LabeledItem = { label: string; url: string };
 export type LabeledField = 'narrationUrls' | 'subtitleUrls';
+
+// 2026-09-11 추가 — 13번 화풍 선택 프리셋. 사용자가 같은 씬(약사 스틱맨+무너지는 PHARMACY 네온사인)을
+// Flow에서 7개 화풍으로 직접 만들어 비교 확정한 뒤 추가됨. promptStyle은 4대 핵심 원칙 1번(비주얼
+// 톤앤매너) 문장을 통째로 교체하는 용도 — 캐릭터 정체성(스틱맨 등)은 화풍과 무관하게 항상 고정이라
+// 여기 포함하지 않는다. referenceImageUrl은 그 화풍으로 실제 생성해본 예시 이미지(Storage 영구 저장본).
+export type ImageStylePreset = {
+  id: string;
+  label: string;
+  promptStyle: string;
+  referenceImageUrl: string;
+};
