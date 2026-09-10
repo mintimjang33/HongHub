@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SceneBlock, Character, CharacterDraft } from '../types';
 import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById, nextCharacterId } from '../utils';
 
@@ -41,6 +41,86 @@ export function ImagePreviewModal({ src, onClose }: { src: string; onClose: () =
         </div>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src} alt="" className="w-full max-h-[80vh] object-contain" />
+      </div>
+    </div>
+  );
+}
+
+// 2026-09-10 추가 — 14번(씬 이미지) 표의 장면이미지 썸네일이 너무 작아서 클릭해도 크게 볼 수
+// 없었다(사용자 지적: "클릭해서 크게 볼수가 없어~~"). ImagePreviewModal(캐릭터 썸네일용)을
+// 그대로 쓰지 않고 별도로 만든 이유는, 장면은 캐릭터와 달리 여러 개를 순서대로 이어 보는
+// 용도가 필요하기 때문 — 이미지 아래에 장면 설명(제목/타임)을 같이 보여주고, 좌우 화살표
+// (또는 방향키)로 이전/다음 장면까지 모달을 안 닫고 바로 넘겨볼 수 있게 했다.
+export function SceneImageModal({
+  scenes,
+  index,
+  onClose,
+  onNavigate,
+}: {
+  scenes: SceneBlock[];
+  index: number;
+  onClose: () => void;
+  onNavigate: (idx: number) => void;
+}) {
+  const scene = scenes[index];
+  const hasPrev = index > 0;
+  const hasNext = index < scenes.length - 1;
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'ArrowRight' && index < scenes.length - 1) onNavigate(index + 1);
+      else if (e.key === 'ArrowLeft' && index > 0) onNavigate(index - 1);
+      else if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [index, scenes.length, onNavigate, onClose]);
+
+  if (!scene) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
+          <span className="text-white/50 text-[11px] font-mono px-1">
+            {scene.id} · {index + 1}/{scenes.length}
+          </span>
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
+            ✕ 닫기
+          </button>
+        </div>
+        <div className="relative flex items-center justify-center bg-black min-h-[45vh]">
+          {hasPrev && (
+            <button
+              type="button"
+              onClick={() => onNavigate(index - 1)}
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+              aria-label="이전 장면"
+            >
+              ‹
+            </button>
+          )}
+          {scene.sceneImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={scene.sceneImage} alt={scene.title || scene.id} className="max-w-full max-h-[70vh] object-contain" />
+          ) : (
+            <div className="text-neutral-500 text-xs py-24">이 장면엔 아직 이미지가 없습니다</div>
+          )}
+          {hasNext && (
+            <button
+              type="button"
+              onClick={() => onNavigate(index + 1)}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+              aria-label="다음 장면"
+            >
+              ›
+            </button>
+          )}
+        </div>
+        <div className="px-3 py-2 bg-neutral-900 space-y-0.5">
+          {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
+          <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
+        </div>
       </div>
     </div>
   );
@@ -270,6 +350,8 @@ export function SceneEditorList({
   const scenes = parseSceneBlocks(scenePrompts);
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 장면 추가 중
   const [draft, setDraft] = useState<SceneBlock>(EMPTY_SCENE_DRAFT);
+  // 2026-09-10 추가 — 장면이미지 썸네일을 클릭하면 이 인덱스로 SceneImageModal을 연다. null=닫힘.
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   function startEdit(idx: number) {
     setEditingIndex(idx);
@@ -360,7 +442,13 @@ export function SceneEditorList({
                     <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap">{s.time || '—'}</td>
                     <td className="px-2 py-1.5">
                       {s.sceneImage ? (
-                        <img src={s.sceneImage} alt={s.title} className="w-14 h-14 object-cover rounded-md border border-neutral-200" />
+                        <button type="button" onClick={() => setPreviewIndex(idx)} className="block" title="클릭하면 크게 보기 (장면별로 연달아 볼 수 있어요)">
+                          <img
+                            src={s.sceneImage}
+                            alt={s.title}
+                            className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                          />
+                        </button>
                       ) : (
                         <div className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight">
                           없음
@@ -431,6 +519,9 @@ export function SceneEditorList({
         >
           + 장면 추가
         </button>
+      )}
+      {previewIndex !== null && (
+        <SceneImageModal scenes={scenes} index={previewIndex} onClose={() => setPreviewIndex(null)} onNavigate={setPreviewIndex} />
       )}
     </div>
   );
