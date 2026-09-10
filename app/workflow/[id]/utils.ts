@@ -265,7 +265,11 @@ export function isSubtitleStep(step: Step): boolean {
 // 매칭했는데, 쪼개진 두 이름은 각각 하나씩만 가지고 있어 이 스토리보드 패널이 안 열리는 버그가
 // 생겼다 — "둘 중 하나"로 완화. scenePrompts 하나에 이미지 프롬프트와 영상/전환 프롬프트가 같이
 // 들어있으니 두 단계 다 같은 스토리보드 표를 열어도 자연스럽다.
+// 2026-09-11 수정 — 위 완화("영상"만 있어도 매칭)가 2번("채널별 소재(영상) 수집")까지 걸려버려서
+// MaterialPanel과 ImageVideoPanel이 2번에 같이 뜨는 버그가 생겼다(사용자 스크린샷으로 발견).
+// "수집"이 들어간 이름(2·3번)은 이 단계가 아니므로 명시적으로 제외한다.
 export function isImageVideoStep(step: Step): boolean {
+  if (/수집/.test(step.name)) return false;
   return /이미지/.test(step.name) || /영상/.test(step.name);
 }
 
