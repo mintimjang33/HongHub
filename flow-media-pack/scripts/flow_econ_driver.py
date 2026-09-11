@@ -39,6 +39,7 @@ flow-media-pack 은 저자가 만든 시점의 구 Flow UI(하단 "이미지/동
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -54,6 +55,26 @@ from cdp_harness import CDP  # noqa: E402
 
 def log(*a):
     print(*a, flush=True)
+
+
+# 2026-09-11 추가 — 사용자가 Flow 프로젝트 화면에서 직접 확인: 우리가 배치수를 1로 설정한
+# 적이 없는데도, Flow 자체의 대화형 에이전트가 프롬프트를 받고 "I'm going to generate two
+# images of..."처럼 스스로 여러 장을 만들겠다고 창작적으로 판단하는 경우가 있었다(사용자
+# 지적: "왜 지멋대로 막 이렇게 여러개를 만드는거야?"). capture_newest_images(n=1)이 그중
+# 최신 1장만 가져가서 씬-이미지 매칭 자체는 안 깨지지만, 생성 시간이 배로 걸리고 프로젝트
+# 갤러리에 안 쓰는 이미지가 계속 쌓인다. 제출하는 프롬프트 맨 앞에 "정확히 1장만 만들어라"는
+# 지시를 명시적으로 박아 넣어 이 창작적 이탈을 줄인다.
+def image_count_instruction(n: int) -> str:
+    """2026-09-11 추가 — 대시보드 패널에 체크박스(켜고 끄기)로 먼저 만들었다가, 사용자가
+    "드롭으로 사진생성수량 선택하게 만들라고"라고 재지시해서 드롭다운(1~4장, 기본 1장)으로
+    바꿨다. job.json의 image_count 값을 그대로 숫자로 박아 넣어 Flow 에이전트가 스스로
+    "이미지 두 장 만들어볼게요" 식으로 창작적으로 이탈하지 않게 한다."""
+    word = "ONE" if n == 1 else str(n)
+    plural = "" if n == 1 else "s"
+    return (
+        f"Generate exactly {word} single image{plural} for this prompt. Do not create additional "
+        f"variations, alternate angles, or extra candidate images beyond this exact count."
+    )
 
 
 # ── 2026-09-10 추가 — 생성 완료된 이미지를 Storage에 올리고, 그 씬의 scenePrompts
@@ -242,6 +263,10 @@ class EconFlow:
         self.shots = shots
         if self.shots:
             self.shots.mkdir(parents=True, exist_ok=True)
+        # 2026-09-11 추가 — 직전에 저장한 씬의 src와 비교해 "아직 안 바뀐 이미지를 또
+        # 캡처하는" 레이스 컨디션(S03/S04, S09/S12, S10/S11, S13/S14 실사고, 완전히
+        # 동일한 파일이 서로 다른 씬 번호로 저장됨)을 잡아내는 데 쓴다.
+        self.last_srcs: list[str] = []
 
     # ── 저수준 클릭 ──────────────────────────────────────────
     def click_xy(self, x, y):
@@ -507,8 +532,21 @@ class EconFlow:
         self.click_xy(d["x"], d["y"])
         time.sleep(0.6)
 
-    def submit(self):
-        pos = self.find_icon_button("arrow_forward")
+    def submit(self, timeout=300):
+        # 2026-09-11 실사고 수정 — 사용자 지적: "왜 퍼센트가 진행중인데 지 마음데로
+        # 타임아웃을 내고 멈춰버리는거야?". find_icon_button()의 기본 재시도 예산은 6초뿐이라,
+        # 직전 씬(또는 참조 캐릭터 첨부)의 생성이 화면에서 아직 안 끝나 arrow_forward 버튼이
+        # 일시적으로 안 보이는 것뿐인데도 6초 만에 바로 "못 찾았다"며 그 씬을 실패 처리하는
+        # 사고가 반복됐다(S09/S12/S16/S19/S23 전부 이 패턴 — 로딩 %가 여전히 올라가는 중에
+        # 다음 씬 제출이 실패로 기록됨). 버튼이 나타날 때까지 최대 5분(300초)까지 계속
+        # 재시도한다 — 정말 못 찾는 경우(UI 변경 등)만 최종적으로 실패 처리된다.
+        t0 = time.time()
+        pos = None
+        while time.time() - t0 < timeout:
+            pos = self.find_icon_button("arrow_forward")
+            if pos:
+                break
+            time.sleep(1.5)
         if not pos:
             self.shot("submit_fail")
             raise RuntimeError("★제출(arrow_forward) 아이콘을 못 찾았다 — 생성 중일 수도 있다")
@@ -553,27 +591,28 @@ class EconFlow:
         # 2026-09-09 수정 — 기본 240초가 실측 생성 시간(특히 부하가 있을 때)보다 짧아서
         # 실제로는 조금 뒤에 완성되는데도 타임아웃으로 오판하는 사례가 있었다(S05 실측:
         # 두 번의 240초 시도가 다 끝난 직후 화면엔 이미 완성돼 있었음). 480초로 늘림.
-        # 2026-09-10 수정 — media_count()(이미지 렌더 크기 기준)만 보면 사이드패널 유무 등
-        # 레이아웃 변화에 계속 흔들렸다. loading-percentage 엘리먼트가 다 사라졌는지를 우선
-        # 신호로 삼고, media_count 증가를 보조 확인으로 같이 쓴다 — 최소 한 번은 로딩 표시가
-        # 실제로 뜨는 걸 봐야(started=True) "처음부터 끝까지 로딩 표시가 아예 없었던" 상황과
-        # "이미 다 끝나서 로딩 표시가 사라진" 상황을 구분할 수 있다.
+        # 2026-09-11 재작성 — 사용자 지적: "무작위로 프롬프트를 밀어넣을게 아니라 0%로
+        # 시작되었는지 판단하고 100%로 완료되었는지 판단하고 이미지 등록 확인하고 그다음
+        # 진행해야지, 안그러면 나중에 시간이 더 걸린다". 예전엔 loading 표시를 한 번도
+        # 못 봐도 media_count()만 늘면 완료로 인정하는 예외가 있었는데, 그 틈에 "사실
+        # 아직 이전 씬 그림이거나 진행 중"인 걸 완료로 오판해서 S15/S17/S18이 전부 한 칸씩
+        # 밀린 씬으로 저장되는 사고로 이어졌다(실측 확인). 반드시 loading_count()>0(=0%
+        # 시작 확인)을 한 번 이상 실제로 관측해야만, 그게 다시 0으로 돌아온 시점(=100%
+        # 완료)을 성공으로 인정한다 — media_count 단독 증가는 더 이상 완료 신호로 안 쓴다.
         t0 = time.time()
         started = False
+        # 제출 직후 로딩 표시가 아주 짧게 떴다 사라질 수 있어서, 시작 확인을 놓치지 않도록
+        # 처음 8초는 1초 간격으로 더 촘촘히 본다.
+        fast_poll_until = t0 + 8
         while time.time() - t0 < timeout:
             lc = self.loading_count()
             if lc > 0:
                 started = True
             elif started:
                 return True
-            n = self.media_count()
-            if n > before and not started:
-                # loading 표시를 한 번도 못 봤어도(폴링 간격 사이에 순식간에 끝난 경우)
-                # 이미지 개수가 늘었으면 완료로 인정한다.
-                return True
             if on_tick:
                 on_tick(time.time() - t0)
-            time.sleep(4)
+            time.sleep(1 if time.time() < fast_poll_until else 4)
         self.shot((tag or "wait") + "_TIMEOUT")
         return False
 
@@ -606,12 +645,46 @@ class EconFlow:
         # 캐릭터의 포트레이트(<flow-character-tile> 안의 썸네일)가 저장되는 사고가 실측됨
         # (S14, 9224 — 회수된 파일이 장면이 아니라 그냥 캐릭터 얼굴이었음). 결과물 타일은
         # 항상 <flow-image-tile> 안에만 있으므로 캐릭터 타일 조상을 가진 건 후보에서 뺀다.
-        srcs = self.c.js(r"""(()=>{const imgs=[...document.querySelectorAll("img")]
-          .filter(i=>i.naturalWidth>400 && i.src.includes("flow-content.google")
-            && i.closest("flow-character-tile")==null);
-          const big = imgs.filter(i=>i.getBoundingClientRect().width>150);
-          return JSON.stringify(big.map(b=>b.src));})()""")
-        srcs = json.loads(srcs) if srcs else []
+        def read_srcs():
+            raw = self.c.js(r"""(()=>{const imgs=[...document.querySelectorAll("img")]
+              .filter(i=>i.naturalWidth>400 && i.src.includes("flow-content.google")
+                && i.closest("flow-character-tile")==null);
+              const big = imgs.filter(i=>i.getBoundingClientRect().width>150);
+              return JSON.stringify(big.map(b=>b.src));})()""")
+            return json.loads(raw) if raw else []
+
+        srcs = read_srcs()
+        # 2026-09-11 실사고 수정 — wait_done()이 "로딩 표시 사라짐"을 완료 신호로 보고
+        # 통과시킨 직후, 실제로는 새 썸네일의 src가 아직 DOM에 반영되기 전이라 그리드 맨
+        # 앞이 여전히 직전 씬의 이미지인 순간이 있다(레이스 컨디션). 그 상태로 그냥
+        # 캡처하면 서로 다른 씬 번호로 완전히 동일한 파일이 저장된다(S03/S04, S09/S12,
+        # S10/S11, S13/S14 전부 이 패턴으로 실측 확인됨 — md5 완전 일치). 직전에 저장한
+        # src와 겹치면 새 썸네일이 실제로 뜰 때까지 최대 20초 더 폴링한다.
+        if self.last_srcs and srcs[:n] == self.last_srcs:
+            for _ in range(10):
+                time.sleep(2)
+                srcs = read_srcs()
+                if srcs[:n] != self.last_srcs:
+                    break
+            else:
+                log(f"  ⚠ {tag} 20초를 더 기다려도 그리드 맨 앞 이미지가 직전 씬과 동일 — "
+                    f"그대로 저장하지만 중복일 수 있으니 나중에 확인 필요")
+        # 2026-09-11 추가 — 사용자 지적대로, "직전과 다르다"만으로는 부족했다(S15가
+        # S14의 진짜 결과물을, S17이 S15의 진짜 결과물을 가져간 연쇄 밀림 사고 — 매번
+        # src가 '직전과는' 달랐지만 실제로는 한 칸씩 밀린 오래된 결과물이었다). DOM이
+        # 완전히 안정될 때까지(연속 두 번 같은 값) 기다려서, 그리드가 막 갱신되는
+        # "과도기" 순간을 잡아채는 걸 막는다.
+        stable = read_srcs()[:n]
+        for _ in range(8):
+            time.sleep(1.5)
+            again = read_srcs()[:n]
+            if again == stable:
+                srcs = stable
+                break
+            stable = again
+        else:
+            log(f"  ⚠ {tag} 그리드가 12초 동안 계속 바뀌어서 안정화를 못 기다림 — 마지막 값으로 진행")
+            srcs = stable
         saved = []
         for i, src in enumerate(srcs[:n]):
             ext = ".png" if ".png" in src.split("?")[0].lower() else ".jpg"
@@ -620,6 +693,7 @@ class EconFlow:
             path = out_dir / f"{tag}_{i}{ext}"
             path.write_bytes(resp.content)
             saved.append(str(path))
+        self.last_srcs = srcs[:n]
         return saved
 
 
@@ -676,6 +750,8 @@ def main():
         # 기능을 씀 — 프로젝트 안에 미리 만들어둔 캐릭터를 애셋 검색(attach_reference, 캐릭터도
         # 같은 피커에서 검색됨을 실측 확인)으로 매 씬마다 첨부한다.
         character_name = job.get("character_name")
+        image_count = int(job.get("image_count", 1))
+        one_image_instruction = image_count_instruction(image_count)
         total = len(images)
         done_count = len(state["done"])
         # 2026-09-11 추가 — 사용자 지적: "그런 오류를 표시를 해줘야 다시 시작을 하던 할꺼 아니야".
@@ -710,7 +786,7 @@ def main():
                 ref_im = by_id.get(ref_id) if ref_id else (None if im.get("anchor") else default_anchor)
                 label = "앵커" if im.get("anchor") else (f"참조={ref_im['id']}" if ref_im else "참조없음")
                 log(f"[{im['id']}] {label}")
-                prompt = " ".join(x for x in (style, im["prompt"]) if x)
+                prompt = " ".join(x for x in (one_image_instruction, style, im["prompt"]) if x)
                 write_status(current=im["id"], phase="submitting", elapsed=0, done_count=done_count, total=total,
                              current_prompt=prompt)
                 # 2026-09-09 추가 — 첫 생성(새 프로젝트 직후 등)이 유독 느려 240초 타임아웃에
@@ -744,7 +820,11 @@ def main():
                         write_status(current=_id, phase="waiting", elapsed=round(_base + t))
 
                     if F.wait_done(before, timeout=480, tag=im["id"], on_tick=tick):
-                        saved = F.capture_newest_images(out_dir, im["id"], n=1)
+                        # 2026-09-11 수정 — 생성 장수 드롭다운(image_count)만큼 로컬엔 다 저장한다
+                        # (n=1 고정이면 2장 이상 선택했을 때 나머지가 그냥 버려짐). 다만 홍허브
+                        # scenePrompts 등록(- 장면이미지: 줄)은 필드가 URL 하나뿐이라 여전히
+                        # saved[0](가장 최근 1장)만 쓴다 — 여러 장 등록은 별도 기능이 필요하다.
+                        saved = F.capture_newest_images(out_dir, im["id"], n=image_count)
                         break
                     log(f"  … {im['id']} 아직 생성 중 (누적 대기 {(wait_round + 1) * 480}초, 재제출하지 않고 계속 기다림)")
                 if not saved:
@@ -752,6 +832,19 @@ def main():
                     log(f"  ✗ {im['id']} {timeout_msg}")
                     failures.append({"id": im["id"], "error": timeout_msg})
                     write_status(current=im["id"], phase="failed", error=timeout_msg, failures=list(failures))
+                    continue
+                # 2026-09-11 추가 — 사용자 지적: "이미지 등록 확인하고 그다음 진행해야지".
+                # capture_newest_images()의 DOM 안정화 대기로도 못 거른 경우를 대비한
+                # 마지막 안전망 — 방금 받은 파일이 바로 직전에 성공한 씬과 바이트 단위로
+                # 완전히 같으면(예: S03/S04, S13/S14 실사고 패턴) 절대 다음 씬으로 넘어가지
+                # 않고 이 씬을 실패로 기록한다 — 등록 안 됨 = pending 상태 그대로 남아
+                # 나중에 다시 시도할 수 있다.
+                new_hash = hashlib.md5(Path(saved[0]).read_bytes()).hexdigest()
+                if new_hash == state.get("_last_saved_hash"):
+                    dup_msg = "직전 씬과 완전히 동일한 이미지(중복 캡처 의심) — 등록하지 않고 건너뜀"
+                    log(f"  ✗ {im['id']} {dup_msg}")
+                    failures.append({"id": im["id"], "error": dup_msg})
+                    write_status(current=im["id"], phase="failed", error=dup_msg, failures=list(failures))
                     continue
                 # 2026-09-10 실사고 수정 — read_newest_title()이 제목을 읽으려고 상세보기 페이지로
                 # 들어갔다가 그리드로 못 돌아오는 사고가 있었다(뒤로가기 클릭 좌표가 상황에 따라
@@ -766,7 +859,25 @@ def main():
                         image_url = register_scene_image(job["site_id"], job["unit_id"], im["id"], Path(saved[0]))
                     except Exception as e:
                         log(f"  ⚠ {im['id']} 홍허브 자동 등록 실패(이미지는 로컬에 저장됨): {e}")
+                # 2026-09-11 추가 — 사용자 지적: "이미지 등록 확인하고 그다음 진행해야지".
+                # register_scene_image()가 예외 없이 URL을 돌려줘도, 업로드는 됐지만
+                # scenePrompts 블록을 못 찾아 등록이 반쪽으로 끝난 경우가 있다(register_scene_image
+                # 안의 "⚠ ... 등록 실패" 로그 참고). 실제로 그 URL이 받아지는지 직접 확인해서,
+                # 안 되면 "완료"로 기록하지 않고 이 씬만 실패 처리해 다음 배치에서 재시도되게 한다.
+                if image_url:
+                    try:
+                        chk = httpx.get(image_url, timeout=15)
+                        chk.raise_for_status()
+                        if not chk.content:
+                            raise RuntimeError("응답 본문이 비어있음")
+                    except Exception as e:
+                        verify_msg = f"이미지 등록 확인 실패(업로드된 URL을 못 받아옴): {e}"
+                        log(f"  ✗ {im['id']} {verify_msg}")
+                        failures.append({"id": im["id"], "error": verify_msg})
+                        write_status(current=im["id"], phase="failed", error=verify_msg, failures=list(failures))
+                        continue
                 state["done"][im["id"]] = {"kind": "image", "title": title, "file": saved[0] if saved else None, "url": image_url}
+                state["_last_saved_hash"] = new_hash
                 save()
                 done_count += 1
                 write_status(current=im["id"], phase="done", done_count=done_count, total=total,

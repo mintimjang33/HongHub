@@ -226,6 +226,82 @@ def set_scene_image_url(site_id: str, unit_id: str, scene_id: str, image_url: st
     return {"ok": True, "scene_id": scene_id, "image_url": image_url}
 
 
+# ── 2026-09-11 추가 — 이미지 삭제(프롬프트는 유지) ──────────────────────────────
+# 사용자 지적: "이미지랑 프롬프트가 안 맞는거 같아" — capture_newest_images()의 레이스
+# 컨디션으로 서로 다른 씬 번호에 완전히 동일한 파일이 저장되는 사고가 실측 확인됨
+# (S03/S04, S09/S12, S10/S11, S13/S14). 잘못 등록된 씬을 발견하면 프롬프트는 그대로
+# 두고 이미지만 지워서 재생성할 수 있어야 한다 — set_scene_image_url()과 반대로,
+# "- 장면이미지:" 줄을 그 씬 블록에서 제거만 한다(대체하지 않음).
+def delete_scene_image(site_id: str, unit_id: str, scene_id: str):
+    r = httpx.get(f"{SUPA_URL}/rest/v1/hub_sites", params={"id": f"eq.{site_id}", "select": "script_draft"},
+                  headers=supa_headers(), timeout=30)
+    r.raise_for_status()
+    rows = r.json()
+    if not rows:
+        return {"error": "사이트를 찾을 수 없습니다."}
+    script_draft = rows[0].get("script_draft") or {}
+    units = script_draft.get("units") or []
+    unit = next((u for u in units if u.get("id") == unit_id), None)
+    if not unit:
+        return {"error": "콘텐츠(유닛)를 찾을 수 없습니다."}
+    text = unit.get("scenePrompts") or ""
+    blocks = re.split(r"\n(?=### \S+)", text.strip()) if text.strip() else []
+    changed = False
+    new_blocks = []
+    for b in blocks:
+        if re.match(rf"### {re.escape(scene_id)}(\s|$)", b):
+            lines = b.split("\n")
+            filtered = [ln for ln in lines if not ln.startswith("- 장면이미지:")]
+            if len(filtered) != len(lines):
+                changed = True
+            new_blocks.append("\n".join(filtered))
+        else:
+            new_blocks.append(b)
+    if not changed:
+        return {"error": f"{scene_id} 씬엔 등록된 이미지가 없습니다."}
+    unit["scenePrompts"] = "\n\n".join(new_blocks)
+    patch = httpx.patch(f"{SUPA_URL}/rest/v1/hub_sites", params={"id": f"eq.{site_id}"},
+                        headers={**supa_headers(), "Content-Type": "application/json"},
+                        content=json.dumps({"script_draft": script_draft}).encode("utf-8"), timeout=30)
+    patch.raise_for_status()
+
+    # 이 씬을 생성했던 계정(포트)이 여러 개일 수 있으므로(9223~9226), 같은 unit_id를
+    # 쓰는 run_dir을 전부 훑어서 로컬 done 기록·저장 파일까지 같이 지운다 — 안 그러면
+    # "▶ 생성"을 눌러도 flow_econ_driver.py가 이미 done인 씬으로 보고 건너뛴다.
+    removed_files = []
+    for run_dir in RUN_DIR.glob(f"{unit_id}__*"):
+        state_path = run_dir / "_flow_state.json"
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                if scene_id in (state.get("done") or {}):
+                    del state["done"][scene_id]
+                    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
+            except Exception:
+                pass
+        img_dir = run_dir / "output" / "images"
+        if img_dir.exists():
+            for f in img_dir.glob(f"{scene_id}_*.*"):
+                try:
+                    f.unlink()
+                    removed_files.append(str(f))
+                except OSError:
+                    pass
+
+    # Supabase Storage에 올라간 원본도 지운다(있으면) — 실패해도 위의 핵심 작업(scenePrompts
+    # 수정, 로컬 상태 정리)은 이미 끝났으니 무시하고 넘어간다.
+    try:
+        for ext in ("jpg", "jpeg", "png"):
+            httpx.delete(
+                f"{SUPA_URL}/storage/v1/object/honghub-files/scene-images/{unit_id}/{scene_id}.{ext}",
+                headers=supa_headers(), timeout=15,
+            )
+    except Exception:
+        pass
+
+    return {"ok": True, "scene_id": scene_id, "removed_files": removed_files}
+
+
 # ── 실행 중인 러너 상태 — 2026-09-10 수정: 계정(포트)별로 여러 개 동시 실행 지원 ─────
 # 예전엔 프로세스 하나만 허용하는 단일 슬롯(_current)이었는데, 계정 3개(9223/9224/9225)로
 # 병렬 처리하려면 포트별로 각자 추적해야 한다. 포트를 키로 하는 dict로 바꿨다.
@@ -745,6 +821,7 @@ function renderScenes(scenes){
       ? `<div style="margin:6px 0"><img src="${imgUrl}" style="max-width:100%;border-radius:8px;border:1px solid #333;display:block;margin-bottom:4px">`
         + `<div style="display:flex;gap:6px;align-items:center">`
         + `<button onclick="navigator.clipboard.writeText('${imgUrl}')">🔗 링크 복사</button>`
+        + `<button onclick="deleteSceneImage('${sc.id}')" style="background:#733">🗑 이미지 삭제</button>`
         + `<span style="color:#6a6;font-size:11px">✓ 홍허브 저장완료</span></div>`
         + `<input type="text" readonly value="${imgUrl}" onclick="this.select()" style="width:100%;margin-top:4px;background:#111;color:#9ad;border:1px solid #333;border-radius:4px;padding:4px 6px;font-size:10px">`
         + `</div>`
@@ -864,6 +941,15 @@ async function retryFailed(port, ids){
   if(d.error) alert(d.error);
   document.getElementById('failBanner').style.display = 'none';
 }
+// 2026-09-11 추가 — 사용자 지적: "이 씬만 재시작이 아니라 확인을 클릭해서 내가 팝업을
+// 닫게 해주면 되는거야~ X박스를 해주거나". 재시작 없이 그냥 "읽었다"고 닫기만 하는 버튼 —
+// 같은 실패 목록(포트+씬 id 조합)이 유지되는 동안은 계속 숨겨두고, 새 실패가 생기면
+// (목록/사유가 달라지면) 다시 뜬다(위 fetchAndRender의 withFailures 필터 참고).
+let dismissedFailureSig = {};
+function dismissFailure(port, sig){
+  dismissedFailureSig[port] = sig;
+  document.getElementById('failBanner').style.display = 'none';
+}
 async function startOne(sceneId){
   const siteId = document.getElementById('siteSel').value;
   const unitId = document.getElementById('unitSel').value;
@@ -889,6 +975,23 @@ async function setSceneImageUrl(sceneId){
   const d = await r.json();
   if(d.error){ alert(d.error); return; }
   imageUrlById[sceneId] = url;
+  await onUnitChange();
+}
+// 2026-09-11 추가 — 사용자 지적: "이미지랑 프롬프트가 안 맞는거 같아" (S03/S04, S09/S12,
+// S10/S11, S13/S14 실사고 — 완전히 동일한 파일이 서로 다른 씬 번호로 등록됨). 잘못 등록된
+// 씬을 발견했을 때 프롬프트는 그대로 두고 이미지만 지워서 재생성할 수 있어야 한다는 요청으로
+// 추가. 홍허브 scenePrompts의 "- 장면이미지:" 줄과, 이 씬을 생성했던 모든 계정(포트)의 로컬
+// 상태(_flow_state.json done 기록)·저장된 파일까지 한 번에 지운다.
+async function deleteSceneImage(sceneId){
+  const siteId = document.getElementById('siteSel').value;
+  const unitId = document.getElementById('unitSel').value;
+  if(!siteId || !unitId){ alert('워크플로우와 콘텐츠를 먼저 선택하세요.'); return; }
+  if(!confirm(sceneId + ' 이미지를 삭제할까요? (프롬프트는 그대로 남고, 이미지만 지워져서 다시 생성할 수 있게 됩니다)')) return;
+  const r = await fetch('/api/delete_scene_image', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({site_id: siteId, unit_id: unitId, scene_id: sceneId})});
+  const d = await r.json();
+  if(d.error){ alert(d.error); return; }
+  delete imageUrlById[sceneId];
   await onUnitChange();
 }
 async function stopRun(){
@@ -924,14 +1027,25 @@ async function fetchAndRender(){
     workers.forEach(w => notifyIfFinished(w.port, w.phase));
     // 2026-09-11 추가 — 실패 배너: 어느 포트가 뭘 왜 실패했는지 사유까지 그대로 보여주고,
     // 바로 그 자리에서 재시작 버튼을 눌러 이어갈 수 있게 한다(위 retryFailed 참고).
+    // 2026-09-11 추가(2) — 사용자 지적: "이 씬만 재시작이 아니라 확인을 클릭해서 내가
+    // 팝업을 닫게 해주면 되는거야~" / "X박스를 해주거나". 재시작 없이 그냥 읽었다는
+    // 확인만 하고 닫을 수 있는 ✕ 버튼을 추가한다 — 같은 실패 목록(포트+씬 id 조합)이면
+    // 계속 숨겨두고, 새로운 실패가 생기면(목록이 달라지면) 다시 뜬다.
     const failBanner = document.getElementById('failBanner');
-    const withFailures = workers.filter(w => (w.failures || []).length);
+    const withFailures = workers.filter(w => {
+      if(!(w.failures || []).length) return false;
+      const sig = w.failures.map(f => f.id).slice().sort().join(',');
+      return dismissedFailureSig[w.port] !== sig;
+    });
     if(withFailures.length){
       failBanner.style.display = 'block';
       failBanner.innerHTML = withFailures.map(w => {
         const ids = (w.failures || []).map(f => f.id);
+        const sig = ids.slice().sort().join(',');
         const lines = (w.failures || []).map(f => `${f.id}: ${f.error}`).join('<br>');
-        return `<div style="margin-bottom:6px"><b style="color:#f88">⚠ ${w.port} 계정 — ${ids.length}개 씬 실패</b><br>`
+        return `<div style="margin-bottom:6px;position:relative;padding-right:20px">`
+          + `<button onclick="dismissFailure(${w.port}, '${sig}')" title="닫기" style="position:absolute;right:0;top:0;background:transparent;border:none;color:#daa;font-size:14px;font-weight:700;cursor:pointer;padding:2px 6px">✕</button>`
+          + `<b style="color:#f88">⚠ ${w.port} 계정 — ${ids.length}개 씬 실패</b><br>`
           + `<div style="color:#daa;margin:4px 0">${lines}</div>`
           + `<button onclick='retryFailed(${w.port}, ${JSON.stringify(ids)})' style="background:#733;font-weight:700">🔁 이 ${ids.length}개 씬만 재시작</button></div>`;
       }).join('');
@@ -1114,6 +1228,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/set_scene_image":
             result = set_scene_image_url(data.get("site_id", ""), data.get("unit_id", ""),
                                           data.get("scene_id", ""), data.get("image_url", ""))
+            self._json(result, 400 if result.get("error") else 200)
+        elif self.path == "/api/delete_scene_image":
+            result = delete_scene_image(data.get("site_id", ""), data.get("unit_id", ""),
+                                         data.get("scene_id", ""))
             self._json(result, 400 if result.get("error") else 200)
         elif self.path == "/api/stop":
             self._json(stop_run(int(data.get("port", 9223))))
