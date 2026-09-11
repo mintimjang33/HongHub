@@ -413,9 +413,9 @@ export function statusTone(status: string): { bg: string; border: string; text: 
 // 안 함'은 스토리 내용과 무관하게 어두운 톤을 강제하던 버그를 수정한 버전 — 조명/분위기가 장면
 // 내용을 따라가야 한다는 문장을 명시했다(사용자 지적: "왜 배경이 어두운 배경이야, 스토리에 따라
 // 그림을 그려야지"). '2D 일러스트'는 그것과 구분이 잘 안 되던 것을 완전 플랫(그림자/그라데이션
-// 없음)로 반대 방향으로 밀어서 분리했다. '심슨 스타일'은 국적 수식어 없이 화풍만 묘사한다(사용자
-// 실측 — "한국형" 등 국적 표현을 넣으면 이미지에 한글 텍스트가 끼어드는 부작용 발견). '수채화'는
-// 사용자 요청으로 제거했다.
+// 없음)로 반대 방향으로 밀어서 분리했다. '수채화'는 사용자 요청으로 제거했다. '심슨 스타일'도
+// 추가했다가 제거함 — Flow가 상표/저작권 캐릭터명("Simpsons")이 들어간 프롬프트를 거부해서
+// 생성 자체가 안 됐다(사용자 실측: "심슨스타일은 거부하나봐").
 export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
   {
     id: 'default',
@@ -437,16 +437,6 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
     promptStyle:
       'Hand-drawn pencil sketch illustration, visible graphite pencil strokes and cross-hatching for shading, monochrome grayscale tones, textured sketchbook paper background, no color, no 3D, no photorealism.',
     referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-3_pencil.jpg',
-  },
-  {
-    id: 'simpsons',
-    label: '심슨 스타일',
-    // 2026-09-11 추가 — 사용자가 "화풍에 심슨 같은 느낌 하나 추가하자"고 요청. 처음엔 "한국형
-    // 심슨"으로 검토했으나, 국적 수식어("한국형" 등)를 프롬프트에 넣으면 이미지에 한글 텍스트가
-    // 자꾸 끼어드는 부작용이 있어서(사용자 실측) 국적 표현 없이 순수 화풍 묘사만 남겼다.
-    promptStyle:
-      'Simpsons-style 2D TV cartoon illustration, thick bold black outlines, flat bright cel-shaded coloring, large round simple eyes, exaggerated overbite mouth shapes, simple flat cartoon proportions, bright saturated flat color palette, no gradients, no 3D, no photorealism.',
-    referenceImageUrl: '',
   },
   {
     id: 'korean_webtoon',
@@ -536,12 +526,17 @@ export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
     id: 'bean_mascot',
     label: '빈 마스코트',
     description: `둥근 몸통형(bean/blob) 마스코트: 머리와 몸통이 하나로 이어진 부드러운 타원형, 팔다리는 몸통에 붙은 짧고 뭉툭한 형태(손가락·관절 없음). 점 두 개 눈 외 다른 얼굴 특징 없음. 옷·장신구 없이 몸 표면 색으로만 구분한다. 감정 상태를 몸 전체의 기울기·통통 튀는 자세로 과장해서 표현한다. ${FEMALE_MARKER_RULE}`,
-    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/7177da2b-702c-4fec-9314-1c49cf20c444.jpg',
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/63386467-175c-4419-bd98-a86001a02638.jpg',
   },
   {
     id: 'bread_mascot',
     label: '식빵맨',
     description: `식빵 마스코트: 노릇노릇한 식빵 한 조각 모양(위쪽은 둥근 크러스트, 아래쪽은 평평한 단면)이 몸통이자 머리. 점 두 개 눈 외 다른 얼굴 특징 없음. 식빵 몸통에 얇은 선 팔다리가 바로 붙어있다(손가락·관절 없음, 정상적인 인체 비율 아님). 옷·장신구 없음. 감정 상태를 과장된 팔다리 동작으로 표현한다. ${FEMALE_MARKER_RULE}`,
-    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/4c5fe7cc-5ca3-41e3-bdb8-b7540423edce.jpg',
+    // ⚠️ 2026-09-11 — referenceImageUrl을 3번 시도했으나 매번 업로드 도중 데이터가 깨져서(위쪽
+    // 일부만 정상, 나머지 회색/노이즈) 실패했다 — base64를 직접 옮겨적는 이 업로드 경로 자체의
+    // 신뢰성 문제로 판단, 재시도 대신 빈 값으로 되돌림(UI가 🖼️ 플레이스홀더를 보여줌, 선택
+    // 기능·프롬프트 반영은 이미지와 무관하게 정상 동작). 사용자가 Supabase 대시보드에서 직접
+    // 올리는 게 안전하다.
+    referenceImageUrl: '',
   },
 ];
