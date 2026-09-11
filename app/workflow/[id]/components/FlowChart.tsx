@@ -16,7 +16,6 @@ import {
   isStrategyStep,
   isHookStep,
   isPlanningDocStep,
-  isCharacterStep,
   isScriptStep,
   isImageVideoStep,
   isNarrationStep,
@@ -32,7 +31,6 @@ import { StrategyPanel } from './step08-StrategyPanel';
 import { HookPanel } from './step09-HookPanel';
 import { PlanningDocPanel } from './step10-PlanningDocPanel';
 import { ScriptWritingPanel } from './step11-ScriptWritingPanel';
-import { CharacterPanel } from './step12-CharacterPanel';
 import { NarrationSubtitlePanel } from './step13-14-LabeledLinksPanel';
 import { ImageVideoPanel } from './step16-17-ImageVideoPanel';
 
@@ -157,7 +155,6 @@ export function FlowChart({
           {isStrategyStep(active) && <StrategyPanel site={site} onRefresh={onRefreshSite} />}
           {isHookStep(active) && <HookPanel site={site} onRefresh={onRefreshSite} />}
           {isPlanningDocStep(active) && <PlanningDocPanel site={site} onRefresh={onRefreshSite} />}
-          {isCharacterStep(active) && <CharacterPanel site={site} onRefresh={onRefreshSite} />}
           {isScriptStep(active) && <ScriptWritingPanel site={site} onRefresh={onRefreshSite} />}
           {isImageVideoStep(active) && <ImageVideoPanel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationSubtitlePanel site={site} onRefresh={onRefreshSite} />}
