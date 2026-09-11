@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Site } from '../types';
 import type { SceneBlock } from '../types';
-import { parseSceneBlocks, serializeSceneBlocks, normalizeLabeledItems, IMAGE_STYLE_PRESETS } from '../utils';
-import { CopyButton, SceneEditorList } from './shared';
+import { parseSceneBlocks, serializeSceneBlocks, normalizeLabeledItems, IMAGE_STYLE_PRESETS, CHARACTER_STYLE_PRESETS } from '../utils';
+import { CopyButton, SceneEditorList, PresetPickerModal } from './shared';
 
 // 13번(구 16-17번, 씬별 이미지 프롬프트 작성·생성) 단계 패널 — 완성된 콘텐츠 목록에서 이름을
 // 클릭하면 펼쳐지면서 그 콘텐츠의 장면별 CLEAN/INFO/영상 프롬프트가 타임라인 순서로 나온다.
@@ -132,6 +132,15 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   const [savingStyle, setSavingStyle] = useState(false);
   const selectedStyleId = site.analysis_result?.imageStyle || IMAGE_STYLE_PRESETS[0].id;
   const selectedPreset = IMAGE_STYLE_PRESETS.find((p) => p.id === selectedStyleId) || IMAGE_STYLE_PRESETS[0];
+  // 2026-09-11 추가 — 캐릭터 선택 상태. 화풍과 같은 저장 방식(analysis_result, 파이프라인 전체 공유)
+  // 이지만 별도 필드(characterStyle)에 저장한다 — "어떻게 그릴지"(화풍)와 "누구를 그릴지"(캐릭터)는
+  // 서로 다른 축이라 사용자가 각각 독립적으로 고를 수 있어야 한다.
+  const [savingCharacter, setSavingCharacter] = useState(false);
+  const selectedCharacterId = site.analysis_result?.characterStyle || CHARACTER_STYLE_PRESETS[0].id;
+  const selectedCharacterPreset = CHARACTER_STYLE_PRESETS.find((p) => p.id === selectedCharacterId) || CHARACTER_STYLE_PRESETS[0];
+  // 2026-09-11 추가 — 화풍/캐릭터 칩을 눌러도 바로 선택되지 않고, 이 모달로 원본 크기를 먼저
+  // 보여준 뒤 "이걸로 선택"을 눌러야 확정된다(사용자 지시 — 한 줄 썸네일이 작아서 잘 안 보였음).
+  const [previewPreset, setPreviewPreset] = useState<{ kind: 'style' | 'character'; id: string } | null>(null);
 
   useEffect(() => {
     if (!openUnitId) return;
@@ -180,6 +189,22 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
     }
   }
 
+  // 2026-09-11 추가 — 캐릭터 선택 저장. selectStyle과 완전히 같은 패턴(analysis_result는 PATCH 시
+  // 전체 교체라 기존 값을 스프레드해서 characterStyle만 덮어써야 함).
+  async function selectCharacter(characterId: string) {
+    setSavingCharacter(true);
+    try {
+      await fetch(`/api/sites/${site.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ analysis_result: { ...site.analysis_result, characterStyle: characterId } }),
+      });
+      onRefresh();
+    } finally {
+      setSavingCharacter(false);
+    }
+  }
+
   function registerParsed(unitId: string) {
     const raw = pasteTexts[unitId] || '';
     const rawScenes = extractSceneArrays(raw);
@@ -217,9 +242,44 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
 
   return (
     <div className="border-t border-black/5 pt-3">
+      {/* 2026-09-11 추가 — 캐릭터 선택 UI(파이프라인 전체 공유, 화풍 선택 위). "누구를 그릴지"를
+          먼저 고르고 "어떻게 그릴지"(화풍)를 그다음 고르는 순서로 배치했다. 화풍과 마찬가지로
+          한 줄 작은 칩으로 두고, 클릭하면 PresetPickerModal로 크게 보여준 뒤 확정한다(아래 화풍
+          선택과 동일한 이유 — 썸네일이 작아서 클릭 즉시 반영하면 뭘 골랐는지 잘 안 보였다). */}
+      <div className="mb-3">
+        <div className="text-xs font-black text-neutral-500 mb-2">
+          🧑 캐릭터 선택 (파이프라인 전체 공유, 기본값: {CHARACTER_STYLE_PRESETS[0].label})
+        </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {CHARACTER_STYLE_PRESETS.map((preset) => {
+            const active = preset.id === selectedCharacterId;
+            return (
+              <button
+                key={preset.id}
+                onClick={() => setPreviewPreset({ kind: 'character', id: preset.id })}
+                disabled={savingCharacter}
+                className={`shrink-0 flex flex-col items-center gap-1 rounded-lg p-1.5 border-2 transition disabled:opacity-50 ${
+                  active ? 'border-black bg-neutral-50' : 'border-transparent hover:border-neutral-200'
+                }`}
+              >
+                {preset.referenceImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={preset.referenceImageUrl} alt={preset.label} className="w-16 h-16 object-cover rounded-md border border-neutral-200" />
+                ) : (
+                  <div className="w-16 h-16 rounded-md border border-neutral-200 bg-neutral-50 flex items-center justify-center text-xl">🖼️</div>
+                )}
+                <span className={`text-[10px] font-bold whitespace-nowrap ${active ? 'text-black' : 'text-neutral-400'}`}>{preset.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* 2026-09-11 추가 — 화풍 선택 UI(파이프라인 전체 공유, 콘텐츠 목록 위에 한 번만). 참고
-          이미지(같은 씬을 13개 화풍으로 실측한 것) 썸네일 + 라벨을 칩 버튼으로 보여주고, 선택된
-          것만 테두리 강조. */}
+          이미지(같은 씬을 여러 화풍으로 실측한 것) 썸네일 + 라벨을 칩 버튼으로 보여주고, 선택된
+          것만 테두리 강조. 클릭하면 바로 선택되지 않고 PresetPickerModal로 원본 크기를 먼저 보여준
+          뒤 "이걸로 선택"을 눌러야 확정된다(2026-09-11 수정 — 한 줄에 작은 썸네일만 있으니 뭘
+          고르는지 잘 안 보인다는 지적, 두 줄로 늘리는 대신 이 모달 방식으로 확정). */}
       <div className="mb-3">
         <div className="text-xs font-black text-neutral-500 mb-2">🎨 화풍 선택 (파이프라인 전체 공유, 기본값: {IMAGE_STYLE_PRESETS[0].label})</div>
         <div className="flex gap-2 overflow-x-auto pb-1">
@@ -228,20 +288,46 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
             return (
               <button
                 key={preset.id}
-                onClick={() => selectStyle(preset.id)}
+                onClick={() => setPreviewPreset({ kind: 'style', id: preset.id })}
                 disabled={savingStyle}
                 className={`shrink-0 flex flex-col items-center gap-1 rounded-lg p-1.5 border-2 transition disabled:opacity-50 ${
                   active ? 'border-black bg-neutral-50' : 'border-transparent hover:border-neutral-200'
                 }`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={preset.referenceImageUrl} alt={preset.label} className="w-16 h-16 object-cover rounded-md border border-neutral-200" />
+                {preset.referenceImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={preset.referenceImageUrl} alt={preset.label} className="w-16 h-16 object-cover rounded-md border border-neutral-200" />
+                ) : (
+                  <div className="w-16 h-16 rounded-md border border-neutral-200 bg-neutral-50 flex items-center justify-center text-xl">🖼️</div>
+                )}
                 <span className={`text-[10px] font-bold whitespace-nowrap ${active ? 'text-black' : 'text-neutral-400'}`}>{preset.label}</span>
               </button>
             );
           })}
         </div>
       </div>
+
+      {previewPreset &&
+        (() => {
+          const preset =
+            previewPreset.kind === 'style'
+              ? IMAGE_STYLE_PRESETS.find((p) => p.id === previewPreset.id)
+              : CHARACTER_STYLE_PRESETS.find((p) => p.id === previewPreset.id);
+          if (!preset) return null;
+          return (
+            <PresetPickerModal
+              label={preset.label}
+              imageUrl={preset.referenceImageUrl}
+              description={previewPreset.kind === 'style' ? undefined : (preset as (typeof CHARACTER_STYLE_PRESETS)[number]).description}
+              onCancel={() => setPreviewPreset(null)}
+              onConfirm={() => {
+                if (previewPreset.kind === 'style') selectStyle(preset.id);
+                else selectCharacter(preset.id);
+                setPreviewPreset(null);
+              }}
+            />
+          );
+        })()}
 
       <div className="text-xs font-black text-neutral-500 mb-2">🎬 콘텐츠별 이미지/영상 프롬프트</div>
       <div className="space-y-1.5">
@@ -306,12 +392,11 @@ SRT 마지막 줄까지 실제로 다 만든 진짜 마지막 응답에서는, �
 3. transitionPrompt에는 카메라 움직임(줌인/줌아웃/패닝/틸트), 정지 이미지 간 전환 방식, needsVideoClip이 true인 경우엔 그 장면에서 실제로 어떤 동작이 일어나는지(짧은 모션)까지 영어로 구체적으로 쓴다.
 
 [수정된 이미지 프롬프트(imagePrompt) 4대 핵심 원칙 — 반드시 지킬 것, 전부 영어로]
-1. 비주얼 톤앤매너 (2026-09-11 화풍 선택 기능 반영 — 현재 선택된 화풍: "${selectedPreset.label}"): "${selectedPreset.promptStyle}"로 통일한다. 모든 캐릭터는 예외 없이 스틱맨 몸(얇은 선 팔다리 + 단순한 동그란 머리) 비율로만 그린다 — 정상적인 인체 비율(어깨 넓은 몸통, 상세한 손가락·근육 등)로 그리지 않는다. 이 캐릭터 비율 규칙은 화풍과 무관하게 항상 고정이다.
-2. 인물 필수 등장 및 '주어' 전진 배치 (핵심 수정!): 절대 사물이나 배경만 덩그러니 있는 정물화/풍경화 컷을 만들지 마라. 모든 컷에는 반드시 메인 화자(젠틀맨 루즈)나 해당 씬의 주인공(스틱맨 펨버턴, 스틱맨 캔들러, 군중 등)이 프레임 안에 크게 등장해야 한다. AI가 인물을 최우선으로 그리도록, 영어 프롬프트는 반드시 다음 순서로 작성한다: [비주얼 톤앤매너] -> [캐릭터 외형 묘사] -> [캐릭터의 구체적인 표정과 행동(동사)] -> [주변 사물 및 배경].
-3. 사물 비유와 캐릭터 리액션의 결합 + 의미 전달용 텍스트 라벨: 사물 단독 샷은 안 된다 — 반드시 캐릭터의 물리적 상호작용과 리액션이 결합된 구도로 짠다. 예: '무너지는 동전 탑'을 그릴 거라면, "동전 탑이 무너진다"가 아니라 "스틱맨 캔들러가 무너지는 동전 탑을 보며 머리를 쥐어뜯고 오열한다"처럼 반드시 캐릭터의 물리적 상호작용과 리액션이 결합된 구도로 짠다. 단, 의미가 헷갈릴 수 있는 사물·수치·비교 항목에는 짧은 한글 단어 라벨을 적극 붙인다 — 그래프의 축·눈금·항목명, 항아리/상자 등에 붙는 카테고리명, 금액 등. 다만 문장형 캡션이나 나레이션 자막 문장은 이미지 안에 넣지 않는다 — 그건 12번(나레이션·자막) 단계가 SRT로 만들고 15번(렌더링)에서 별도로 입힌다.
-4. 캐릭터 롤플레이 명확화 (화자와 배우의 분리, 화풍과 무관하게 항상 고정):
-- 젠틀맨 루즈 (메인 화자/관찰자): "A minimalist vector stickman character with a round white face and simple dot eyes. Styled as 'Gentleman Rouge' wearing a black top hat, a gold-rimmed monocle, a neat curled black mustache, a black tailcoat, and a black cape with gold lining." 씬에 직접 개입하지 않을 때도, 화면 구석에서 상황을 비웃으며 지켜보거나, 시청자에게 사물을 손가락으로 가리키며 설명하는 앵글로 적극 배치한다.
-- 스틱맨 배우들 (상황극 주인공): 하얀 동그라미 얼굴, 점눈 스틱맨 베이스에 역할 소품만 입힌다. 감정 상태(절망, 탐욕, 환희 등)를 극단적으로 과장해서 표현한다.
+1. 비주얼 톤앤매너 (2026-09-11 화풍 선택 기능 반영 — 현재 선택된 화풍: "${selectedPreset.label}"): "${selectedPreset.promptStyle}"로 통일한다. 모든 캐릭터의 몸 형태는 아래 4번(캐릭터 롤플레이)에서 정의한 정체성을 그대로 따른다 — 정상적인 인체 비율(어깨 넓은 몸통, 상세한 손가락·근육 등)로 그리지 않는다. 이 캐릭터 형태 규칙은 화풍과 무관하게 항상 고정이다.
+2. 인물 필수 등장 및 '주어' 전진 배치 (핵심 수정!): 절대 사물이나 배경만 덩그러니 있는 정물화/풍경화 컷을 만들지 마라. 모든 컷에는 반드시 메인 화자나 해당 씬의 주인공이 프레임 안에 크게 등장해야 한다. AI가 인물을 최우선으로 그리도록, 영어 프롬프트는 반드시 다음 순서로 작성한다: [비주얼 톤앤매너] -> [캐릭터 외형 묘사] -> [캐릭터의 구체적인 표정과 행동(동사)] -> [주변 사물 및 배경].
+3. 사물 비유와 캐릭터 리액션의 결합 + 의미 전달용 텍스트 라벨: 사물 단독 샷은 안 된다 — 반드시 캐릭터의 물리적 상호작용과 리액션이 결합된 구도로 짠다. 예: '무너지는 동전 탑'을 그릴 거라면, "동전 탑이 무너진다"가 아니라 "주인공 캐릭터가 무너지는 동전 탑을 보며 머리를 쥐어뜯고 오열한다"처럼 반드시 캐릭터의 물리적 상호작용과 리액션이 결합된 구도로 짠다. 단, 의미가 헷갈릴 수 있는 사물·수치·비교 항목에는 짧은 한글 단어 라벨을 적극 붙인다 — 그래프의 축·눈금·항목명, 항아리/상자 등에 붙는 카테고리명, 금액 등. 다만 문장형 캡션이나 나레이션 자막 문장은 이미지 안에 넣지 않는다 — 그건 12번(나레이션·자막) 단계가 SRT로 만들고 15번(렌더링)에서 별도로 입힌다.
+4. 캐릭터 롤플레이 명확화 (2026-09-11 캐릭터 선택 기능 반영 — 현재 선택된 캐릭터: "${selectedCharacterPreset.label}", 화풍과 무관하게 항상 고정):
+${selectedCharacterPreset.description}
 
 [전환 프롬프트(transitionPrompt) 작성 규칙]
 정지 이미지 기반의 카메라 움직임(줌인/아웃, 패닝, 컷 전환)을 영어로 구체적으로 묘사한다. 대본에 [영상화] 표시가 있거나 훅이 강한 지점에만 needsVideoClip: true를 주고 짧은 모션을 적는다(전체의 15% 이내).
