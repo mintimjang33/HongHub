@@ -1,10 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { SceneBlock, Character, CharacterDraft } from '../types';
-import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById, nextCharacterId } from '../utils';
-
-const EMPTY_CHARACTER_DRAFT: CharacterDraft = { id: '', name: '', role: '', description: '', imageUrl: '' };
+import type { SceneBlock } from '../types';
+import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById } from '../utils';
 
 // 영상을 새 탭으로 안 열고 페이지 안에서 바로 확인할 수 있게 하는 작은 모달.
 // 확인 → 닫기 → 다음 확인 → 닫기 흐름이 되게, 오버레이 클릭이나 ✕로 바로 닫힌다.
@@ -41,6 +39,51 @@ export function ImagePreviewModal({ src, onClose }: { src: string; onClose: () =
         </div>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={src} alt="" className="w-full max-h-[80vh] object-contain" />
+      </div>
+    </div>
+  );
+}
+
+// 2026-09-11 추가 — 13번 화풍/캐릭터 선택 칩용 미리보기+선택 모달. 처음엔 칩을 누르면 바로
+// 선택되게 만들었는데, 썸네일이 작아서(화풍 13개 한 줄) 실제로 뭘 고르는지 잘 안 보인다는
+// 지적("이미지가 너무 잘 안보임")을 받았다. 두 줄로 늘리는 안도 검토했으나, 사용자가 최종적으로
+// "한 줄 그대로 두고, 클릭하면 모달로 크게 보여준 다음 선택/취소 하게 하자"고 확정 — 목록 레이아웃은
+// 그대로(한 줄, 작은 칩) 두고, 클릭 시에만 이 모달로 원본 크기를 보여준 뒤 확정하게 한다.
+// 이미지가 아직 없는 프리셋(referenceImageUrl 빈 문자열)은 깨진 이미지 대신 이모지 플레이스홀더를 보여준다.
+export function PresetPickerModal({
+  label,
+  imageUrl,
+  description,
+  onConfirm,
+  onCancel,
+}: {
+  label: string;
+  imageUrl?: string;
+  description?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onCancel}>
+      <div className="bg-white rounded-xl overflow-hidden w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+        {imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imageUrl} alt={label} className="w-full max-h-[60vh] object-contain bg-neutral-100" />
+        ) : (
+          <div className="w-full h-64 bg-neutral-50 flex items-center justify-center text-4xl">🖼️</div>
+        )}
+        <div className="p-4">
+          <p className="text-sm font-black mb-1">{label}</p>
+          {description && <p className="text-[11px] text-neutral-500 leading-relaxed mb-3 line-clamp-4">{description}</p>}
+          <div className="flex justify-end gap-1.5">
+            <button onClick={onCancel} className="text-[11px] font-bold text-neutral-400 hover:text-black px-3 py-1.5">
+              취소
+            </button>
+            <button onClick={onConfirm} className="text-[11px] font-black px-4 py-1.5 rounded-lg bg-black text-white">
+              이걸로 선택
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -523,218 +566,6 @@ export function SceneEditorList({
       {previewIndex !== null && (
         <SceneImageModal scenes={scenes} index={previewIndex} onClose={() => setPreviewIndex(null)} onNavigate={setPreviewIndex} />
       )}
-    </div>
-  );
-}
-
-// 캐릭터 하나를 추가/수정하는 폼 — SceneDraftForm과 같은 패턴(이미지는 uploadSceneMedia로 영구 저장).
-export function CharacterDraftForm({
-  draft,
-  setDraft,
-  onCancel,
-  onSave,
-  saving,
-}: {
-  draft: CharacterDraft;
-  setDraft: (d: CharacterDraft) => void;
-  onCancel: () => void;
-  onSave: () => void | Promise<void>;
-  saving: boolean;
-}) {
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState('');
-
-  async function handleFile(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    setUploading(true);
-    setUploadError('');
-    try {
-      const url = await uploadSceneMedia(files[0]);
-      setDraft({ ...draft, imageUrl: url });
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  return (
-    <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 space-y-1.5">
-      <div className="flex gap-1.5">
-        <input
-          value={draft.name}
-          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          placeholder="이름 (예: 젠틀맨 루즈)"
-          className="flex-1 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
-        />
-        <input
-          value={draft.role}
-          onChange={(e) => setDraft({ ...draft, role: e.target.value })}
-          placeholder="역할 (예: 메인 화자 / 출연 캐릭터 / 실존 인물)"
-          className="flex-1 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
-        />
-      </div>
-      <textarea
-        value={draft.description}
-        onChange={(e) => setDraft({ ...draft, description: e.target.value })}
-        rows={4}
-        placeholder="외형/특징 설명 — Flow 프롬프트에 그대로 옮겨 쓸 수 있게 구체적으로"
-        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed"
-      />
-      <div className="border-t border-neutral-200 pt-1.5">
-        {draft.imageUrl && (
-          <div className="mb-1.5 flex items-center gap-1.5">
-            <img src={draft.imageUrl} alt={draft.name} className="w-16 h-16 object-cover rounded-lg border border-neutral-200" />
-            <button onClick={() => setDraft({ ...draft, imageUrl: '' })} className="text-[10px] font-black text-neutral-400 hover:text-red-500">
-              ✕ 이미지 제거
-            </button>
-          </div>
-        )}
-        {/* 2026-09-08 추가 — 지금까지 파일 업로드(uploadSceneMedia)만 있어서, Flow에서 이미지를
-            만든 뒤 로컬로 다운로드→업로드하는 왕복이 필요했다. Flow가 실제 이미지 파일 URL을
-            바로 주는 경우(다운로드 없이 "이미지 주소 복사" 등)엔 그 URL을 여기 바로 붙여넣게
-            해서 왕복을 없앤다(사용자 지시: "이미지 URL을 직접 붙여넣는 입력칸 추가"). Flow의
-            "공유" 페이지 링크(labs.google/fx/tools/flow/shared/...)는 HTML 페이지라 <img> src로
-            안 먹히니, 실제 이미지 파일 주소를 넣어야 한다는 걸 placeholder에 짧게 안내한다. */}
-        <input
-          type="text"
-          value={draft.imageUrl}
-          onChange={(e) => setDraft({ ...draft, imageUrl: e.target.value })}
-          placeholder="이미지 URL 붙여넣기 (실제 이미지 파일 주소 — Flow 공유 페이지 링크는 안 됨)"
-          className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] mb-1.5"
-        />
-        <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
-          {uploading ? '업로드 중...' : draft.imageUrl ? '이미지 교체(파일 업로드)' : '+ 캐릭터 시트 이미지 업로드'}
-          <input
-            type="file"
-            accept="image/*"
-            disabled={uploading}
-            onChange={(e) => {
-              handleFile(e.target.files);
-              e.target.value = '';
-            }}
-            className="hidden"
-          />
-        </label>
-        {uploadError && <p className="text-[10px] text-red-500 font-bold mt-1">{uploadError}</p>}
-      </div>
-      <div className="flex justify-end gap-1.5">
-        <button onClick={onCancel} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
-          취소
-        </button>
-        <button
-          onClick={onSave}
-          disabled={saving || !draft.name.trim()}
-          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-        >
-          {saving ? '저장 중...' : '저장'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// 12번(채널 캐릭터 시스템 설계) 단계 패널 — 만화책의 "등장인물 소개" 페이지처럼, 이 채널에서
-// 반복해서 쓰는 캐릭터(호스트 젠틀맨 루즈, 출연 캐릭터 등)를 등록/수정/삭제한다. 특정 콘텐츠가
-// 아니라 채널 전체 자산이라 site.script_draft.characters(최상위)에 저장하고, 13번(이미지/영상
-// 생성)에서 프롬프트를 짤 때 여기 설명을 그대로 참고한다.
-// CharacterPanel(채널 공용)과 유닛별 캐릭터 목록이 완전히 같은 목록+추가/수정/삭제 UI를 쓰기 때문에
-// (2026-09-07, 유닛별 분리 리팩터링 때) 공통 렌더링만 여기로 뽑았다. 저장 방식(어느 API body 필드로
-// 보낼지)은 부모가 onSave로 넘겨준다 — 이 컴포넌트는 무엇을 저장하는지 모른다.
-export function CharacterListEditor({
-  characters,
-  onSave,
-  saving,
-  emptyText,
-  numbered,
-}: {
-  characters: Character[];
-  onSave: (next: Character[]) => void | Promise<void>;
-  saving: boolean;
-  emptyText: string;
-  // 2026-09-07 추가 — 메인 캐릭터(진행자) 목록 전용. 지금은 1명뿐이지만, 사용자가 "앞으로 여러
-  // 진행자를 만들어서 컨셉에 따라 골라 쓰면 좋겠다"고 해서 순번(1번/2번…)을 카드 위에 표시해둔다.
-  numbered?: boolean;
-}) {
-  const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 캐릭터 추가 중
-  const [draft, setDraft] = useState<CharacterDraft>(EMPTY_CHARACTER_DRAFT);
-  // 2026-09-07 추가 — 캐릭터 썸네일이 너무 작아서 클릭하면 ImagePreviewModal(기존 컴포넌트 재사용)로
-  // 크게 볼 수 있게 함(사용자 지적: "클릭하면 보이지도 않고").
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
-
-  function startEdit(idx: number) {
-    setEditingIndex(idx);
-    setDraft({ ...characters[idx], imageUrl: characters[idx].imageUrl || '' });
-  }
-  function startAdd() {
-    setEditingIndex(-1);
-    setDraft({ ...EMPTY_CHARACTER_DRAFT, id: nextCharacterId() });
-  }
-  function cancel() {
-    setEditingIndex(null);
-    setDraft(EMPTY_CHARACTER_DRAFT);
-  }
-  async function saveDraft() {
-    const next = editingIndex === -1 ? [...characters, draft] : characters.map((c, i) => (i === editingIndex ? draft : c));
-    await onSave(next);
-    setEditingIndex(null);
-    setDraft(EMPTY_CHARACTER_DRAFT);
-  }
-  async function removeCharacter(idx: number) {
-    if (!confirm(`"${characters[idx].name}" 캐릭터를 삭제할까요?`)) return;
-    await onSave(characters.filter((_, i) => i !== idx));
-  }
-
-  return (
-    <div className="space-y-1.5">
-      {characters.length === 0 && editingIndex === null && <p className="text-[11px] text-neutral-300">{emptyText}</p>}
-      {characters.map((c, idx) =>
-        editingIndex === idx ? (
-          <CharacterDraftForm key={c.id || idx} draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
-        ) : (
-          <div key={c.id || idx}>
-            {numbered && <p className="text-[10px] font-black text-neutral-400 mb-0.5 ml-0.5">{idx + 1}번</p>}
-            <div className="flex items-start gap-2 bg-white border border-neutral-100 rounded-lg p-2">
-              {c.imageUrl ? (
-                <button type="button" onClick={() => setPreviewSrc(c.imageUrl!)} className="shrink-0">
-                  <img src={c.imageUrl} alt={c.name} className="w-14 h-14 object-cover rounded-lg border border-neutral-200 hover:opacity-80" />
-                </button>
-              ) : (
-                <div className="w-14 h-14 rounded-lg bg-neutral-50 border border-neutral-200 shrink-0 flex items-center justify-center text-neutral-300 text-[10px] text-center leading-tight">
-                  이미지
-                  <br />
-                  없음
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                {/* 2026-09-08 수정 — 이름+역할을 한 줄에 나란히 두면(이름은 truncate, 역할은
-                    shrink-0) 역할 텍스트가 길 때(예: 소재별 배역 설명) 이름이 거의 안 보이게
-                    잘렸다(사용자 지적: "이름이 가려서 안보이자나"). 이름/역할/설명을 각자 줄에
-                    풀네임으로 세로로 쌓는 걸로 바꿔서 셋 다 안 잘리고 다 보이게 했다. */}
-                <p className="text-sm font-bold leading-snug">{c.name}</p>
-                {c.role && <p className="text-[10px] font-bold text-neutral-400 mt-0.5 leading-snug">{c.role}</p>}
-                {c.description && <p className="text-[11px] text-neutral-500 leading-relaxed mt-1 line-clamp-2">{c.description}</p>}
-              </div>
-              <div className="shrink-0 flex items-center gap-1.5">
-                <button onClick={() => startEdit(idx)} className="text-[11px] font-bold text-blue-600 hover:underline">
-                  수정
-                </button>
-                <button onClick={() => removeCharacter(idx)} className="text-[11px] font-bold text-neutral-400 hover:text-red-500">
-                  삭제
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      )}
-      {editingIndex === -1 ? (
-        <CharacterDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
-      ) : (
-        <button onClick={startAdd} className="text-[11px] font-bold text-blue-600 hover:underline">
-          + 캐릭터 추가
-        </button>
-      )}
-      {previewSrc && <ImagePreviewModal src={previewSrc} onClose={() => setPreviewSrc(null)} />}
     </div>
   );
 }
