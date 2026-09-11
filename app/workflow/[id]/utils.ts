@@ -509,11 +509,11 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
 // 캐릭터 선택이 화면에 안 보인다 — 스틱맨이 선택되어 있는 게 보여야 한다"고 지적해서, 화풍과
 // 동일한 프리셋+선택 UI 패턴으로 뽑아냈다. 목록 첫 번째(인덱스 0)가 기본값 — AnalysisResult.
 // characterStyle이 비어있을 때 이걸 쓴다. referenceImageUrl은 사용자가 Flow에서 프롬프트로 직접
-// 생성해 전달한 실제 참고 이미지(Storage 영구 저장본). 모든 프리셋에 "여성 캐릭터는 머리에 리본만
-// 추가" 규칙을 공통으로 적용한다(사용자 지시 — 성별 구분을 위해 복장을 새로 설계하지 않고 리본
-// 하나로 최소한으로 처리).
+// 생성해 전달한 실제 참고 이미지(Storage 영구 저장본). 모든 프리셋에 "여성 캐릭터는 머리에 분홍색
+// 리본만 추가" 규칙을 공통으로 적용한다(사용자 지시 — 성별 구분을 위해 복장을 새로 설계하지 않고
+// 리본 하나로 최소한으로 처리). 'bean_mascot'은 사용자가 "포동이"로 이름 지어줬다.
 const FEMALE_MARKER_RULE =
-  '이 캐릭터의 여성 버전이 필요한 장면에서는 외형을 그대로 두고 머리 위에 리본 하나만 추가해서 성별을 구분한다(그 외 디자인은 동일).';
+  '이 캐릭터의 여성 버전이 필요한 장면에서는 외형을 그대로 두고 머리 위에 분홍색 리본 하나만 추가해서 성별을 구분한다(그 외 디자인은 동일).';
 
 export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
   {
@@ -524,7 +524,7 @@ export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
   },
   {
     id: 'bean_mascot',
-    label: '빈 마스코트',
+    label: '포동이',
     description: `둥근 몸통형(bean/blob) 마스코트: 머리와 몸통이 하나로 이어진 부드러운 타원형, 팔다리는 몸통에 붙은 짧고 뭉툭한 형태(손가락·관절 없음). 점 두 개 눈 외 다른 얼굴 특징 없음. 옷·장신구 없이 몸 표면 색으로만 구분한다. 감정 상태를 몸 전체의 기울기·통통 튀는 자세로 과장해서 표현한다. ${FEMALE_MARKER_RULE}`,
     referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/63386467-175c-4419-bd98-a86001a02638.jpg',
   },
