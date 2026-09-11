@@ -13,6 +13,13 @@ export type AnalysisResult = {
   // 고르면 되는것을") — 콘텐츠마다 따로 고르는 게 아니라 파이프라인(채널) 전체에서 한 번만 고르면
   // 되는 구조로 되돌렸다. 비어있으면 기본값(1번, IMAGE_STYLE_PRESETS[0])을 쓴다.
   imageStyle?: string;
+  // 2026-09-11 추가 — 13번 캐릭터 선택. CHARACTER_STYLE_PRESETS(utils.ts)의 id 중 하나. 화풍
+  // (imageStyle)과 같은 저장 방식(파이프라인 전체 공유)이지만 별개 축이다 — 화풍은 "어떻게 그릴지",
+  // 캐릭터는 "누구를 그릴지"(몸 비율/정체성)를 정한다. 사용자가 "13단계에 캐릭터 선택이 화면에
+  // 안 보인다 — 스틱맨이 선택되어 있는 게 보여야 한다"고 명시적으로 요구해서 화풍과 동일한
+  // 프리셋+선택 UI 구조로 만들었다(스틱맨/빈 마스코트/식빵맨 3종). 비어있으면 기본값
+  // (CHARACTER_STYLE_PRESETS[0], 스틱맨)을 쓴다.
+  characterStyle?: string;
 };
 // 5번은 소재 하나마다 별개의 완성 콘텐츠라서, 작업 중인 것 하나(소재→제목→대본 위저드)와
 // 별개로 완성된 것들을 units 배열에 콘텐츠 단위로 저장한다. 나중에 6~9번(영상/TTS/자막/렌더링)도
@@ -74,23 +81,6 @@ export type ContentUnit = {
   subtitleUrls?: { label: string; url: string }[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
-  // 2026-09-07 추가 — 12번(채널 캐릭터 시스템) 단계 중 "이 콘텐츠 하나에서만 쓰는" 캐릭터(소재를
-  // 의인화한 배역, 그 배역의 의상 변형 등). 채널 전체를 관통하는 진행자만 ScriptDraft 최상위
-  // characters에 남기고, 나머지(예: 코카콜라 병 캐릭터)는 사용자 지적으로 여기로 옮김 — "1번
-  // 콘텐츠 아래에 등록돼야 한다"는 게 원칙(다른 유닛에 재사용하려면 그 유닛에 따로 등록할 것).
-  characters?: Character[];
-};
-// 12번(채널 캐릭터 시스템 설계) 단계 전용 — 등장인물 소개(만화책 캐릭터 시트 개념) 목록.
-// 채널 전체를 관통하는 진행자 등은 ContentUnit이 아니라 ScriptDraft 최상위(channel-wide)에 두고,
-// 특정 콘텐츠 하나에서만 쓰는 배역(소재 의인화 등)은 그 ContentUnit.characters(unit-scoped)에 둔다
-// (2026-09-07, 사용자 지적으로 분리 — 처음엔 전부 최상위에 뒀다가 "1번 콘텐츠 아래에 있어야 한다"는
-// 지적을 받고 채널 공용/유닛 전용으로 나눔).
-export type Character = {
-  id: string;
-  name: string;
-  role: string;
-  description: string;
-  imageUrl?: string;
 };
 export type ScriptDraft = {
   category?: UnitCategory;
@@ -106,7 +96,6 @@ export type ScriptDraft = {
   sources?: string[];
   factCheck?: string;
   units?: ContentUnit[];
-  characters?: Character[];
   updated_at?: string;
 };
 export type Site = {
@@ -171,8 +160,6 @@ export type SceneBlock = {
   media: string[];
 };
 
-export type CharacterDraft = { id: string; name: string; role: string; description: string; imageUrl: string };
-
 export type LabeledItem = { label: string; url: string };
 export type LabeledField = 'narrationUrls' | 'subtitleUrls';
 
@@ -186,4 +173,14 @@ export type ImageStylePreset = {
   label: string;
   promptStyle: string;
   referenceImageUrl: string;
+};
+
+// 2026-09-11 추가 — 13번 캐릭터 선택 프리셋(화풍과 별개 축, utils.ts CHARACTER_STYLE_PRESETS 참고).
+// description은 프롬프트의 "캐릭터 롤플레이" 항목(젠틀맨 루즈/스틱맨 배우 정의)을 통째로 교체하는
+// 용도. referenceImageUrl은 비어있을 수 있다(참고 이미지가 아직 없는 캐릭터).
+export type CharacterStylePreset = {
+  id: string;
+  label: string;
+  description: string;
+  referenceImageUrl?: string;
 };
