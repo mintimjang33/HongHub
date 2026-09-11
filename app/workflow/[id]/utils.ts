@@ -513,12 +513,19 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
 // 리본만 추가" 규칙을 공통으로 적용한다(사용자 지시 — 성별 구분을 위해 복장을 새로 설계하지 않고
 // 리본 하나로 최소한으로 처리). 'bean_mascot'은 사용자가 "포동이"로 이름 지어줬다.
 //
-// 2026-09-11 (2차) 수정 — 'stickman' 설명을 최신 디자인으로 갱신. 옛 설명("점 두 개 눈", "손가락
-// 묘사 없음")이 코카콜라 유닛 81개 씬에 그대로 박혀 있었는데, 실제로 사용자가 Flow에서 직접
-// 테스트해 확정한 디자인은 대머리+눈동자/눈썹 있는 표정 있는 눈+손가락 보이는 흰 손+신발 모양
-// 발이었다(별도로 Flow 캐릭터 'Gentleman Rouge'/'스틱맨'으로도 등록해 일관성 유지). 이 설명이
-// 13번 패널의 "🔍 제미나이 프롬프트" 복사 버튼에 그대로 embed되므로, 여기를 안 고치면 다음 콘텐츠
-// (카페인 등)를 새로 만들 때마다 똑같이 옛 디자인으로 돌아간다 — 반드시 여기서 고칠 것.
+// 2026-09-11 (2차) 수정 — 'stickman' 설명을 최신 디자인으로 갱신(대머리+표정 있는 눈+손가락 보이는
+// 흰 손+신발 발). 이 설명은 13번 패널의 "🔍 제미나이 프롬프트" 복사 버튼에 embed되므로, 여기를
+// 안 고치면 다음 콘텐츠(카페인 등)를 새로 만들 때마다 옛 디자인으로 돌아간다.
+//
+// 2026-09-11 (3차) 수정 — A/B 실측 테스트 결과 반영. Flow에 'Gentleman Rouge'/'스틱맨' 캐릭터를
+// 실제로 등록한 뒤, 같은 씬을 (A) 레퍼런스 첨부+외형 전체 재설명, (B) 레퍼런스 첨부+이름만+행동
+// 으로 각각 생성해 비교한 결과 두 결과물이 사실상 동일했다 — 외형 재설명이 불필요하다는 게
+// 확인됨. 구글 공식 도움말(support.google.com/flow/answer/16729550, 16353334)도 "Describe how
+// your character should be used as a reference"(예: "@CaptainZoro walking through a futuristic
+// city" — 행동만, 외형 없음)와 "Your text prompt should complement, not contradict, your visual
+// inputs"를 명시하고 있어 같은 결론이었다. 그래서 (2차)의 긴 외형 문단을 걷어내고, 이름/역할
+// 태그 + "레퍼런스 사용" 지시만 남겼다 — 실제 Flow 생성 시 레퍼런스가 첨부되면 외형은 그걸로
+// 충분하고, 혹시 레퍼런스 첨부에 실패해도 최소 식별 문구(대머리/둥근 얼굴 한 줄)는 남겨뒀다.
 const FEMALE_MARKER_RULE =
   '이 캐릭터의 여성 버전이 필요한 장면에서는 외형을 그대로 두고 머리 위에 분홍색 리본 하나만 추가해서 성별을 구분한다(그 외 디자인은 동일).';
 
@@ -526,10 +533,10 @@ export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
   {
     id: 'stickman',
     label: '스틱맨',
-    description: `기본 스틱맨: 대머리(머리카락 없음)에 하얀 동그란 얼굴, 눈동자·눈썹이 있어 표정(놀람/걱정/분노 등)을 지을 수 있는 큰 눈, 소리치거나 반응할 때 크게 벌어지는 간단한 입. 팔다리는 얇은 검은 선(정상적인 인체 비율이 아님, 근육 묘사 없음)이고, 손은 검게 뭉치지 않고 흰색으로 손바닥·손가락이 구분되게 그리며, 발은 단순한 신발 모양이다. 옷·장신구 없이 몸 자체가 캐릭터다. 진행자(젠틀맨 루즈)로 쓸 때만 톱햇·금테 외알렌즈·검은 연미복+금빛 안감 망토를 이 스틱맨 베이스 위에 입힌다: "A minimalist stickman character with a completely bald, smooth round white head and face (no hair), large expressive eyes with visible pupils and eyebrows, a simple expressive mouth, thin black-outlined limbs, and white hands with a visible palm and individual fingers (not solid black). Styled as 'Gentleman Rouge' wearing a black top hat, a gold-rimmed monocle, a neat curled black mustache, a black tailcoat, and a black cape with gold lining." 그 외 상황극 주인공(스틱맨 배우)은 복장 없이 역할 소품만 최소한으로 입히고, 감정 상태(절망, 탐욕, 환희 등)를 극단적으로 과장해서 표현한다: "A minimalist stickman character with a completely bald, smooth round white head and face (no hair), large expressive eyes with visible pupils and eyebrows, a simple expressive mouth, thin black-outlined limbs, white hands with a visible palm and individual fingers (not solid black), and simple round-toed shoe-shaped feet (no normal human body proportions, no muscles)." ${FEMALE_MARKER_RULE}`,
+    description: `이 채널의 스틱맨 캐릭터는 Flow 프로젝트에 이미 캐릭터로 등록돼 있다('Gentleman Rouge', '스틱맨' 두 개). 장면에 이 캐릭터가 등장하면 반드시 등록된 캐릭터를 참조(레퍼런스)로 첨부하고, 텍스트로 외형을 다시 설명하지 않는다 — 레퍼런스 이미지가 얼굴·손·몸 비율을 그대로 유지해준다(구글 Flow 공식 가이드: 텍스트 프롬프트는 레퍼런스와 상충하지 않고 보완해야 한다). 대신 이름/역할과 그 장면에서 하는 행동·표정만 쓴다. 진행자(젠틀맨 루즈): "Gentleman Rouge" 이름과 톱햇·외알렌즈·연미복 정체성만 짧게 언급하고 나머지는 행동으로: 예) "Gentleman Rouge walks confidently out of the shadows, touching his monocle with a sly smirk." 상황극 주인공(스틱맨 배우): "the stickman actor" 언급 후 역할 소품·행동·감정만: 예) "the stickman actor (pharmacist John Pemberton) holds up a medicine bottle with a startled expression." 혹시 레퍼런스 첨부가 안 되는 상황을 대비한 최소 식별 문구만 유지: "a minimalist stickman character with a bald round white face and expressive eyes". ${FEMALE_MARKER_RULE}`,
     // 2026-09-11 — 사용자가 배경 얼룩 없는 더 깨끗한 레퍼런스 시트로 교체(체크섬 검증 완료).
     // ⚠️ 이 URL은 아직 옛 디자인(점 두 개 눈) 이미지다 — 새 디자인 레퍼런스 이미지를 Storage에
-    // 올린 뒤 이 필드도 같이 교체할 것(description 텍스트만 먼저 갱신한 상태).
+    // 올린 뒤 이 필드도 같이 교체할 것.
     referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/d22236a5-cbb3-4c59-a4a6-c316c2354df7.jpg',
   },
   {
