@@ -1,4 +1,4 @@
-import type { Step, SceneBlock, LabeledItem, ImageStylePreset } from './types';
+import type { Step, SceneBlock, LabeledItem, ImageStylePreset, CharacterStylePreset } from './types';
 
 export const CHANNEL_TAG_RE = /^\[파이프라인:([^\]]+)\]\s*/;
 
@@ -240,11 +240,6 @@ export function isScriptStep(step: Step): boolean {
   return /대본\s*작성/.test(step.name);
 }
 
-// 12번(채널 캐릭터 시스템 설계) — 2026-09-06 신설. "캐릭터"라는 단어가 들어있으면 매칭한다.
-export function isCharacterStep(step: Step): boolean {
-  return /캐릭터/.test(step.name);
-}
-
 // 13번(나레이션)
 export function isNarrationStep(step: Step): boolean {
   return /나레이션|TTS/i.test(step.name);
@@ -296,7 +291,6 @@ export function stepLink(step: Step): { href: string; label: string } | null {
     isStrategyStep(step) ||
     isHookStep(step) ||
     isPlanningDocStep(step) ||
-    isCharacterStep(step) ||
     isNarrationStep(step) ||
     isSubtitleStep(step) ||
     isImageVideoStep(step)
@@ -304,17 +298,6 @@ export function stepLink(step: Step): { href: string; label: string } | null {
     return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
   return null;
-}
-
-// 2026-09-08 수정 — 예전엔 "지금 화면이 들고 있는 characters 배열에서 최댓값+1"로 id를 계산했는데
-// (`C${max+1}`), 저장→onRefresh(재조회)가 비동기라 그 사이 짧은 시간차가 있고, 그 안에 "+ 캐릭터
-// 추가"를 다시 누르면 아직 방금 추가한 캐릭터가 반영 안 된 오래된 배열 기준으로 계산돼서 같은
-// id가 또 나왔다(실사고: 캐릭터를 연달아 추가하다 C01/C04가 두 번씩 나옴, 사용자 지적: "왜
-// id부여가 오류가 났는지 알아??"). 로컬 배열 상태에 의존하는 한 이 경쟁 상태는 근본적으로
-// 못 피한다 — 그래서 배열을 아예 안 보고, 유닛 id(finalizeUnit)·배역 추천 파서(parseCharacterPastes)
-// 등 이 코드베이스 다른 곳과 같은 방식(타임스탬프+랜덤)으로 항상 고유한 id를 만들도록 바꿨다.
-export function nextCharacterId(): string {
-  return `C${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 }
 
 // 제미나이가 여러 후보를 "후보1: ... \n\n후보2: ..." (9번 훅 프롬프트) 또는 "A) ... \nB) ..."
@@ -424,15 +407,15 @@ export function statusTone(status: string): { bg: string; border: string; text: 
   return { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-600', label };
 }
 
-// 2026-09-11 추가 — 13번 화풍 선택 프리셋 13종. 콘텐츠 유닛마다 다른 화풍을 고를 수 있다
-// (ContentUnit.imageStyle, types.ts). 목록 첫 번째(인덱스 0)가 기본값 — imageStyle이 비어있을 때
-// 이걸 쓴다. 1~7번은 사용자가 같은 씬(약사 스틱맨+무너지는 PHARMACY 네온사인)을 Flow에서 직접
-// 생성해 비교 확정한 것. 1번(화풍 지정 안 함)은 스토리 내용과 무관하게 어두운 톤을 강제하던 버그를
-// 수정한 버전 — 조명/분위기가 장면 내용을 따라가야 한다는 문장을 명시했다(사용자 지적: "왜 배경이
-// 어두운 배경이야, 스토리에 따라 그림을 그려야지"). 2번(2D 일러스트)은 1번과 구분이 잘 안 되던 것을
-// 완전 플랫(그림자/그라데이션 없음)로 반대 방향으로 밀어서 분리했다. 8~13번은 사용자가 추가
-// 요청(일본만화/디즈니/지브리/아메리칸코믹/픽셀아트/클레이)으로 2차 확장, 사용자가 Flow에서 직접
-// 1:1 비율로 생성한 이미지를 레퍼런스로 썼다.
+// 2026-09-11 추가 — 13번 화풍 선택 프리셋. 파이프라인 전체 공유값(AnalysisResult.imageStyle)으로
+// 저장한다. 목록 첫 번째(인덱스 0)가 기본값 — imageStyle이 비어있을 때 이걸 쓴다. 대부분은 사용자가
+// 같은 씬(약사 스틱맨+무너지는 PHARMACY 네온사인)을 Flow에서 직접 생성해 비교 확정한 것. '화풍 지정
+// 안 함'은 스토리 내용과 무관하게 어두운 톤을 강제하던 버그를 수정한 버전 — 조명/분위기가 장면
+// 내용을 따라가야 한다는 문장을 명시했다(사용자 지적: "왜 배경이 어두운 배경이야, 스토리에 따라
+// 그림을 그려야지"). '2D 일러스트'는 그것과 구분이 잘 안 되던 것을 완전 플랫(그림자/그라데이션
+// 없음)로 반대 방향으로 밀어서 분리했다. '심슨 스타일'은 국적 수식어 없이 화풍만 묘사한다(사용자
+// 실측 — "한국형" 등 국적 표현을 넣으면 이미지에 한글 텍스트가 끼어드는 부작용 발견). '수채화'는
+// 사용자 요청으로 제거했다.
 export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
   {
     id: 'default',
@@ -456,11 +439,14 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
     referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-3_pencil.jpg',
   },
   {
-    id: 'watercolor',
-    label: '수채화',
+    id: 'simpsons',
+    label: '심슨 스타일',
+    // 2026-09-11 추가 — 사용자가 "화풍에 심슨 같은 느낌 하나 추가하자"고 요청. 처음엔 "한국형
+    // 심슨"으로 검토했으나, 국적 수식어("한국형" 등)를 프롬프트에 넣으면 이미지에 한글 텍스트가
+    // 자꾸 끼어드는 부작용이 있어서(사용자 실측) 국적 표현 없이 순수 화풍 묘사만 남겼다.
     promptStyle:
-      'Watercolor painting illustration, soft translucent color washes, visible paper texture and gentle color bleeding at edges, delicate hand-painted look, muted pastel color palette, no 3D, no photorealism.',
-    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-4_watercolor.jpg',
+      'Simpsons-style 2D TV cartoon illustration, thick bold black outlines, flat bright cel-shaded coloring, large round simple eyes, exaggerated overbite mouth shapes, simple flat cartoon proportions, bright saturated flat color palette, no gradients, no 3D, no photorealism.',
+    referenceImageUrl: '',
   },
   {
     id: 'korean_webtoon',
@@ -524,5 +510,38 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
     promptStyle:
       'Claymation stop-motion illustration style, soft matte clay-like textures with visible fingerprint and tool-mark imperfections, chunky rounded character forms, warm diffused studio lighting, slightly imperfect handmade look, muted craft-material color palette, no photorealism, no glossy 3D render.',
     referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/style-refs/econ-pharmacy-13_claymation.jpg',
+  },
+];
+
+// 2026-09-11 추가 — 13번 캐릭터 선택 프리셋. 화풍(IMAGE_STYLE_PRESETS)과 별개 축 — "어떻게 그릴지"가
+// 아니라 "누구를 그릴지"(캐릭터 몸 비율·정체성)를 정한다. 원래 이 정체성(젠틀맨 루즈 등 스틱맨
+// 캐릭터 롤플레이 텍스트)은 13번 프롬프트에 항상 고정 하드코딩돼 있었는데, 사용자가 "13단계에
+// 캐릭터 선택이 화면에 안 보인다 — 스틱맨이 선택되어 있는 게 보여야 한다"고 지적해서, 화풍과
+// 동일한 프리셋+선택 UI 패턴으로 뽑아냈다. 목록 첫 번째(인덱스 0)가 기본값 — AnalysisResult.
+// characterStyle이 비어있을 때 이걸 쓴다. referenceImageUrl은 사용자가 Flow에서 프롬프트로 직접
+// 생성해 전달한 실제 참고 이미지(Storage 영구 저장본). 모든 프리셋에 "여성 캐릭터는 머리에 리본만
+// 추가" 규칙을 공통으로 적용한다(사용자 지시 — 성별 구분을 위해 복장을 새로 설계하지 않고 리본
+// 하나로 최소한으로 처리).
+const FEMALE_MARKER_RULE =
+  '이 캐릭터의 여성 버전이 필요한 장면에서는 외형을 그대로 두고 머리 위에 리본 하나만 추가해서 성별을 구분한다(그 외 디자인은 동일).';
+
+export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
+  {
+    id: 'stickman',
+    label: '스틱맨',
+    description: `기본 스틱맨: 하얀 동그란 얼굴에 점 두 개 눈, 다른 얼굴 특징 없음. 팔다리는 얇은 선(정상적인 인체 비율이 아님, 손가락·관절·근육 묘사 없음). 옷·장신구 없이 몸 자체가 캐릭터다. 진행자(젠틀맨 루즈)로 쓸 때만 톱햇·금테 외알렌즈·검은 연미복+금빛 안감 망토를 이 스틱맨 베이스 위에 입힌다: "A minimalist vector stickman character with a round white face and simple dot eyes. Styled as 'Gentleman Rouge' wearing a black top hat, a gold-rimmed monocle, a neat curled black mustache, a black tailcoat, and a black cape with gold lining." 그 외 상황극 주인공(스틱맨 배우)은 복장 없이 역할 소품만 최소한으로 입히고, 감정 상태(절망, 탐욕, 환희 등)를 극단적으로 과장해서 표현한다. ${FEMALE_MARKER_RULE}`,
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/7dd4599c-8a36-43e2-814e-351867acd917.jpg',
+  },
+  {
+    id: 'bean_mascot',
+    label: '빈 마스코트',
+    description: `둥근 몸통형(bean/blob) 마스코트: 머리와 몸통이 하나로 이어진 부드러운 타원형, 팔다리는 몸통에 붙은 짧고 뭉툭한 형태(손가락·관절 없음). 점 두 개 눈 외 다른 얼굴 특징 없음. 옷·장신구 없이 몸 표면 색으로만 구분한다. 감정 상태를 몸 전체의 기울기·통통 튀는 자세로 과장해서 표현한다. ${FEMALE_MARKER_RULE}`,
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/7177da2b-702c-4fec-9314-1c49cf20c444.jpg',
+  },
+  {
+    id: 'bread_mascot',
+    label: '식빵맨',
+    description: `식빵 마스코트: 노릇노릇한 식빵 한 조각 모양(위쪽은 둥근 크러스트, 아래쪽은 평평한 단면)이 몸통이자 머리. 점 두 개 눈 외 다른 얼굴 특징 없음. 식빵 몸통에 얇은 선 팔다리가 바로 붙어있다(손가락·관절 없음, 정상적인 인체 비율 아님). 옷·장신구 없음. 감정 상태를 과장된 팔다리 동작으로 표현한다. ${FEMALE_MARKER_RULE}`,
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/4c5fe7cc-5ca3-41e3-bdb8-b7540423edce.jpg',
   },
 ];
