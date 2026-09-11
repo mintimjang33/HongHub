@@ -341,6 +341,13 @@ def start_run(site_id: str, unit_id: str, scene_ids: list[str] | None = None,
             stdout=open(log_path, "w", encoding="utf-8"), stderr=subprocess.STDOUT,
         )
         _runs[port] = {"proc": proc, "run_dir": run_dir}
+        # 2026-09-11 추가 — 드라이버 프로세스는 대시보드가 재시작돼도 안 죽고 계속 돈다(별도
+        # 프로세스라서). 근데 worker_status()가 메모리 속 _runs만 보던 시절엔, 대시보드를
+        # 재시작하는 순간(오늘 로딩 버그 수정 중 여러 번 재시작함) 실제로는 S25까지 계속
+        # 진행 중인데도 화면엔 "실행 중인 계정 없음"으로 나오는 사고가 있었다(사용자 지적:
+        # "상단에 현재 작업중인게 몇번인지도 안나오고~"). PID를 파일로 남겨서, 재시작 후에도
+        # worker_status()가 실제 살아있는 프로세스를 다시 찾아낼 수 있게 한다.
+        (run_dir / "driver.pid").write_text(str(proc.pid), encoding="utf-8")
         # 2026-09-10 추가 — 드라이버가 시작하자마자 죽으면(예: Flow 크롬에 탭이 없어서 CDP
         # 연결 실패) 사용자 화면엔 "생성 눌러도 아무 반응 없음"으로만 보였다. 잠깐 기다렸다가
         # 바로 죽었으면 run.log 마지막 줄을 에러로 돌려줘서 최소한 원인은 바로 보이게 한다.
@@ -360,19 +367,65 @@ def stop_run(port: int):
         return {"error": f"포트 {port}엔 실행 중인 작업이 없습니다."}
 
 
+def _pid_alive(pid: int) -> bool:
+    """2026-09-11 추가 — driver.pid로 남긴 PID가 아직 살아있는 프로세스인지 확인한다
+    (Windows, 외부 의존성 없이 ctypes로). 확인 자체가 실패하면(권한 등) 죽었다고 섣불리
+    판단해서 화면에서 사라지는 것보다는, 살아있다고 보수적으로 간주하는 쪽이 안전하다."""
+    if pid <= 0:
+        return False
+    try:
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    except Exception:
+        return True
+
+
 def worker_status():
     """2026-09-10 재설계 — 계정(포트) 여러 개를 동시에 돌리게 되면서, 씬 목록(done/pending)은
     더 이상 어느 한 프로세스의 로컬 상태만 보고 판단할 수 없다(다른 포트가 다른 씬을 끝낼
     수도 있으므로). 씬 목록은 /api/scenes(DB 직접 조회)가 계속 맡고, 여기서는 포트별
-    "지금 뭘 하고 있는지"만 돌려준다 — 프론트가 이 둘을 합쳐서 보여준다."""
+    "지금 뭘 하고 있는지"만 돌려준다 — 프론트가 이 둘을 합쳐서 보여준다.
+    2026-09-11 실사고 수정 — 드라이버 프로세스는 대시보드가 재시작돼도 계속 살아있는데(별도
+    프로세스), 여기가 메모리 속 _runs만 보고 있어서 대시보드를 재시작하면(오늘 로딩 버그
+    수정 중 여러 번 재시작함) 실제로는 계속 진행 중인데도 "실행 중인 계정 없음"으로 보이는
+    사고가 있었다(사용자 지적: "상단에 현재 작업중인게 몇번인지도 안나오고~", "현재
+    작업중인 번호가 펼쳐져서 프롬프트 확인하게 해달랬는데 그렇게 동작을 안 하네"). _runs에
+    없는 run_dir도 RUN_DIR를 스캔해서 driver.pid가 실제로 살아있으면 워커 목록에 포함시킨다."""
     with _lock:
-        ports = list(_runs.keys())
+        tracked = dict(_runs)
     workers = []
-    for port in ports:
-        run_dir = _runs[port]["run_dir"]
+    seen_dirs = set()
+    for port, run in tracked.items():
+        run_dir = run["run_dir"]
+        seen_dirs.add(run_dir)
         status = json.loads((run_dir / "status.json").read_text(encoding="utf-8")) if (run_dir / "status.json").exists() else {}
         status["port"] = port
         workers.append(status)
+    if RUN_DIR.exists():
+        for d in RUN_DIR.iterdir():
+            if not d.is_dir() or d in seen_dirs:
+                continue
+            m = re.search(r"__(\d+)$", d.name)
+            if not m:
+                continue
+            pid_path = d / "driver.pid"
+            status_path = d / "status.json"
+            if not pid_path.exists() or not status_path.exists():
+                continue
+            try:
+                pid = int(pid_path.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                continue
+            if not _pid_alive(pid):
+                continue
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            status["port"] = int(m.group(1))
+            workers.append(status)
     return {"workers": workers}
 
 
