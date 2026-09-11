@@ -532,11 +532,10 @@ export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
     id: 'bread_mascot',
     label: '식빵맨',
     description: `식빵 마스코트: 노릇노릇한 식빵 한 조각 모양(위쪽은 둥근 크러스트, 아래쪽은 평평한 단면)이 몸통이자 머리. 점 두 개 눈 외 다른 얼굴 특징 없음. 식빵 몸통에 얇은 선 팔다리가 바로 붙어있다(손가락·관절 없음, 정상적인 인체 비율 아님). 옷·장신구 없음. 감정 상태를 과장된 팔다리 동작으로 표현한다. ${FEMALE_MARKER_RULE}`,
-    // ⚠️ 2026-09-11 — referenceImageUrl을 3번 시도했으나 매번 업로드 도중 데이터가 깨져서(위쪽
-    // 일부만 정상, 나머지 회색/노이즈) 실패했다 — base64를 직접 옮겨적는 이 업로드 경로 자체의
-    // 신뢰성 문제로 판단, 재시도 대신 빈 값으로 되돌림(UI가 🖼️ 플레이스홀더를 보여줌, 선택
-    // 기능·프롬프트 반영은 이미지와 무관하게 정상 동작). 사용자가 Supabase 대시보드에서 직접
-    // 올리는 게 안전하다.
-    referenceImageUrl: '',
+    // ⚠️ 2026-09-11 — referenceImageUrl 업로드가 4번 연속 데이터 손상(위쪽 일부만 정상, 나머지
+    // 회색/노이즈)으로 실패했었다. 5번째 시도에서 업로드 직후 다운로드해 MD5 체크섬을 로컬
+    // 원본과 직접 대조하는 방식으로 검증한 뒤에야 성공을 확인했다 — 스크린샷 육안 확인만으로는
+    // 깨진 걸 놓칠 수 있으니, 이 경로로 이미지를 다시 올릴 일이 생기면 반드시 체크섬까지 대조할 것.
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/d8590920-5a90-4b4e-bf45-c0450d2bc307.jpg',
   },
 ];
