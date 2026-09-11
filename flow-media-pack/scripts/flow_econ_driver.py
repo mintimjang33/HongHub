@@ -678,6 +678,13 @@ def main():
         character_name = job.get("character_name")
         total = len(images)
         done_count = len(state["done"])
+        # 2026-09-11 추가 — 사용자 지적: "그런 오류를 표시를 해줘야 다시 시작을 하던 할꺼 아니야".
+        # 예전엔 phase="failed"만 기록해서 다음 씬이 시작되는 순간 곧바로 덮어써졌고(화면엔
+        # "실행 중인 계정 없음"으로만 보임), 실패 사유(에러 메시지)도 아예 기록되지 않아서
+        # run.log 파일을 직접 열어보지 않는 한 뭐가 왜 실패했는지 알 길이 없었다. 이번 실행에서
+        # 쌓인 실패를 전부 이 리스트에 누적해서 write_status(failures=...)로 계속 실어 보낸다 —
+        # 대시보드(status_dashboard.py)가 이걸 읽어 배너로 보여주고 재시작 버튼을 제공한다.
+        failures: list[dict] = []
         write_status(
             total=total, done_count=done_count, phase="idle",
             workflow=job.get("workflow", ""),
@@ -685,6 +692,7 @@ def main():
             content_title=job.get("content_title", ""),
             step_no=job.get("step_no"),
             step_name=job.get("step_name", ""),
+            failures=failures,
         )
         for im in images:
             if stop_requested(here):
@@ -740,8 +748,10 @@ def main():
                         break
                     log(f"  … {im['id']} 아직 생성 중 (누적 대기 {(wait_round + 1) * 480}초, 재제출하지 않고 계속 기다림)")
                 if not saved:
-                    log(f"  ✗ {im['id']} 최종 타임아웃 (총 {3 * 480}초 대기)")
-                    write_status(current=im["id"], phase="failed")
+                    timeout_msg = f"최종 타임아웃 (총 {3 * 480}초 대기)"
+                    log(f"  ✗ {im['id']} {timeout_msg}")
+                    failures.append({"id": im["id"], "error": timeout_msg})
+                    write_status(current=im["id"], phase="failed", error=timeout_msg, failures=list(failures))
                     continue
                 # 2026-09-10 실사고 수정 — read_newest_title()이 제목을 읽으려고 상세보기 페이지로
                 # 들어갔다가 그리드로 못 돌아오는 사고가 있었다(뒤로가기 클릭 좌표가 상황에 따라
@@ -771,7 +781,8 @@ def main():
                 # (9224 S18, 9225 S19 실사고). 한 씬 실패는 그 씬만 건너뛰고(등록 안 됨 =
                 # 나중에 다시 배정 가능한 pending 상태 그대로) 다음 씬으로 계속 진행한다.
                 log(f"  ✗ {im['id']} 자동화 오류로 이 씬만 건너뜀(다음 배치에서 재시도 가능): {e}")
-                write_status(current=im["id"], phase="failed")
+                failures.append({"id": im["id"], "error": str(e)})
+                write_status(current=im["id"], phase="failed", error=str(e), failures=list(failures))
                 cleanup_debris(here)
                 # 실패 시점에 열려있던 팝업(애셋 피커 등)이 다음 씬 시도를 계속 방해하지
                 # 않도록 Esc로 정리한다 — 실패 없이 진행 중일 땐 어차피 영향 없음.
@@ -782,7 +793,7 @@ def main():
                     pass
                 continue
         else:
-            write_status(phase="all_done")
+            write_status(phase="all_done", failures=list(failures))
             cleanup_debris(here)
 
     if stage in ("clips", "all"):
