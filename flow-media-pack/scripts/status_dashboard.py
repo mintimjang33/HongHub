@@ -333,7 +333,7 @@ def start_run(site_id: str, unit_id: str, scene_ids: list[str] | None = None,
         scene_text = unit.get("scenePrompts") or ""
         scenes = parse_scene_prompts(scene_text)
         if not scenes:
-            return {"error": "이 콘텐츠엔 등록된 씬 프롬프트가 없습니다(14번 단계 먼저 필요)."}
+            return {"error": "이 콘텐츠엔 등록된 씬 프롬프트가 없습니다(13번 단계 먼저 필요)."}
         # 2026-09-10 수정 — "이 씬만 생성"을 눌렀을 때 job["images"]를 그 씬 하나로 줄여버려서
         # 화면 목록(전체 108개)까지 그거 하나로 보이는 사고가 있었다("다른 건 다 사라졌다"는
         # 지적). images는 항상 전체 씬을 담고, 실제로 이번에 처리할 대상만 active_ids로 따로
@@ -342,6 +342,18 @@ def start_run(site_id: str, unit_id: str, scene_ids: list[str] | None = None,
         if not active_ids:
             return {"error": "선택된 씬이 없습니다."}
 
+        # 2026-09-11 추가했다가 즉시 롤백 — 사용자 지적: "4번 같은 경우 3번이미지에서
+        # 변경을 해야하는거 아닌가"에 대한 대응으로, 같은 "Setting: ..." 문장을 쓰는 씬은
+        # 이전에 완료된 씬을 attach_reference로 자동 참조 첨부하는 기능을 넣었었다. 그런데
+        # attach_reference(title)이 검색하는 title은 Flow에 실제로 등록된 애셋 이름이 아니라
+        # 그냥 내부 씬 id 문자열("S26")이라(2026-09-10에 read_newest_title()을 없애면서
+        # 실제 제목을 더 이상 안 읽어옴), Flow 애셋 피커에서 그 문자열을 찾지 못해 매번
+        # "★검색 결과 행을 못 찾았다"로 씬 자체가 실패하는 사고가 실측됨(S25). 실제 Flow
+        # 애셋 제목을 안전하게 다시 읽어오는 방법을 마련하기 전까지는 ref를 아예 안 붙인다
+        # — 배경 일관성은 지금처럼 프롬프트의 "Setting:" 문장을 그대로 복사해 쓰는 텍스트
+        # 방식에만 의존한다(완벽하진 않지만 최소한 생성 자체는 안 막힌다).
+        images_payload = [{"id": s["id"], "prompt": s["prompt"]} for s in scenes]
+
         # 2026-09-10 추가 — 포트별로 로컬 상태 파일(_flow_state.json/status.json/job.json)을
         # 따로 둔다 — 같은 파일을 여러 프로세스가 동시에 쓰면 로컬에서도 경쟁이 생긴다.
         run_dir = RUN_DIR / f"{unit_id}__{port}"
@@ -349,12 +361,12 @@ def start_run(site_id: str, unit_id: str, scene_ids: list[str] | None = None,
         job = {
             "style": "",
             "ratio": ratio,
-            "images": [{"id": s["id"], "prompt": s["prompt"]} for s in scenes],
+            "images": images_payload,
             "active_ids": sorted(active_ids),
             "workflow": site_name_cache.get(site_id, ""),
             "content_no": None,
             "content_title": unit.get("title", ""),
-            "step_no": 14,
+            "step_no": 13,
             "step_name": "씬(스토리보드) 분할 · 이미지 프롬프트 작성 · 생성",
             # 2026-09-10 추가 — 생성 완료 시 flow_econ_driver.py가 Storage 업로드 +
             # scenePrompts의 sceneImage 자동 등록까지 하려면 이 두 id가 필요하다.
@@ -945,9 +957,14 @@ async function retryFailed(port, ids){
 // 닫게 해주면 되는거야~ X박스를 해주거나". 재시작 없이 그냥 "읽었다"고 닫기만 하는 버튼 —
 // 같은 실패 목록(포트+씬 id 조합)이 유지되는 동안은 계속 숨겨두고, 새 실패가 생기면
 // (목록/사유가 달라지면) 다시 뜬다(위 fetchAndRender의 withFailures 필터 참고).
+// 2026-09-11 (2차) 수정 — 사용자 지적: "X누르고 새로고침을 하면 또 나타나는데?". 그냥
+// JS 변수(let)에만 담아뒀더니 페이지를 새로고침하는 순간 초기화돼서 dismiss가 없었던
+// 것처럼 다시 떴다 — localStorage에 저장해서 새로고침·패널 껐다 켬을 버텨내게 한다.
 let dismissedFailureSig = {};
+try { dismissedFailureSig = JSON.parse(localStorage.getItem('dismissedFailureSig') || '{}'); } catch(e) {}
 function dismissFailure(port, sig){
   dismissedFailureSig[port] = sig;
+  try { localStorage.setItem('dismissedFailureSig', JSON.stringify(dismissedFailureSig)); } catch(e) {}
   document.getElementById('failBanner').style.display = 'none';
 }
 async function startOne(sceneId){
@@ -1017,11 +1034,21 @@ async function fetchAndRender(){
     // 2026-09-10 재설계 — 포트(계정) 여러 개가 동시에 돌 수 있어서, 한 줄이 아니라
     // 활성 워커별로 한 줄씩("9223: S05 waiting 20초") 보여준다.
     const wdiv = document.getElementById('workers');
+    // 2026-09-11 (2차) 수정 — 사용자 요청: "시작을 그냥 플로우에서 보여주는 %를 그대로
+    // 보여줘". 자체 경과시간 타이머(elapsed) 대신 Flow 화면이 실제로 표시하는 퍼센트
+    // (gen_percent)를 그대로 보여준다 — 로딩 표시가 아직 안 떴으면(gen_started===false)
+    // "시작 대기"로 표시해 한눈에 구분되게 한다(로그를 따로 열어볼 필요 없음).
     wdiv.innerHTML = workers.map(w => {
       const running = w.phase === 'submitting' || w.phase === 'waiting';
+      let badge = '';
+      if (running) {
+        if (w.gen_percent) badge = `<span class="badge waiting" style="font-size:10px">${w.gen_percent}</span>`;
+        else if (w.gen_started === false) badge = `<span class="badge waiting" style="font-size:10px;background:#733">시작 대기 ${w.elapsed||0}초</span>`;
+        else badge = `<span class="badge waiting" style="font-size:10px">제출 중</span>`;
+      }
       return `<div class="row"><span style="color:#888;font-size:11px">${w.port}</span>`
         + `<b>${running ? w.current : '-'}</b>`
-        + (running ? `<span class="badge waiting" style="font-size:10px">${w.elapsed||0}초</span>` : '')
+        + badge
         + `</div>`;
     }).join('') || '<div class="row" style="color:#666;font-size:11px">실행 중인 계정 없음</div>';
     workers.forEach(w => notifyIfFinished(w.port, w.phase));

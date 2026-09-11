@@ -587,6 +587,23 @@ class EconFlow:
             "document.querySelectorAll('.loading-percentage').length"
         ) or 0)
 
+    def loading_percent_text(self):
+        """2026-09-11 추가 — 사용자 지적: "시작을 그냥 플로우에서 보여주는 %를 그대로
+        보여줘". 예전엔 대시보드가 "경과 X초"라는 자체 타이머만 보여줘서, 실제로 Flow가
+        진행 중인지(예: 37%) 멈춰있는지(예: 계속 0%) 구분이 안 됐다 — Flow 화면의
+        '.loading-percentage' 엘리먼트가 실제로 표시하는 텍스트(예: "42%")를 그대로 읽어
+        상태에 실어 보낸다. 여러 장을 동시에 만드는 중이면 엘리먼트가 여러 개일 수 있어
+        가장 낮은(=가장 최근 시작한) 값을 대표로 쓴다."""
+        raw = self.c.js(
+            "JSON.stringify([...document.querySelectorAll('.loading-percentage')]"
+            ".map(e=>e.textContent.trim()))"
+        )
+        try:
+            texts = json.loads(raw) if raw else []
+        except Exception:
+            texts = []
+        return texts[0] if texts else None
+
     def wait_done(self, before: int, timeout=480, tag="", on_tick=None):
         # 2026-09-09 수정 — 기본 240초가 실측 생성 시간(특히 부하가 있을 때)보다 짧아서
         # 실제로는 조금 뒤에 완성되는데도 타임아웃으로 오판하는 사례가 있었다(S05 실측:
@@ -599,6 +616,11 @@ class EconFlow:
         # 밀린 씬으로 저장되는 사고로 이어졌다(실측 확인). 반드시 loading_count()>0(=0%
         # 시작 확인)을 한 번 이상 실제로 관측해야만, 그게 다시 0으로 돌아온 시점(=100%
         # 완료)을 성공으로 인정한다 — media_count 단독 증가는 더 이상 완료 신호로 안 쓴다.
+        # 2026-09-11 (2차) 수정 — 사용자 지적: "로그는 또 로그를 확인을 해야하잖아 — 왜
+        # 일을 두 번 하니", "그냥 플로우에서 보여주는 %를 그대로 보여줘". 로그 파일에
+        # 경고를 남기는 대신, Flow 화면이 실제로 표시하는 퍼센트 텍스트(loading_percent_text)를
+        # 매 폴링마다 그대로 on_tick에 실어 보낸다 — 호출부가 이미 보고 있는 대시보드 화면에
+        # 바로 반영하므로 별도로 로그를 열어 확인할 필요가 없다.
         t0 = time.time()
         started = False
         # 제출 직후 로딩 표시가 아주 짧게 떴다 사라질 수 있어서, 시작 확인을 놓치지 않도록
@@ -606,12 +628,14 @@ class EconFlow:
         fast_poll_until = t0 + 8
         while time.time() - t0 < timeout:
             lc = self.loading_count()
+            pct = self.loading_percent_text() if lc > 0 else None
+            elapsed = time.time() - t0
             if lc > 0:
                 started = True
             elif started:
                 return True
             if on_tick:
-                on_tick(time.time() - t0)
+                on_tick(elapsed, started, pct)
             time.sleep(1 if time.time() < fast_poll_until else 4)
         self.shot((tag or "wait") + "_TIMEOUT")
         return False
@@ -812,12 +836,18 @@ def main():
                 F.type_text(prompt)
                 before = F.media_count()
                 F.submit()
-                write_status(current=im["id"], phase="waiting", elapsed=0)
+                write_status(current=im["id"], phase="waiting", elapsed=0, gen_percent=None)
                 for wait_round in range(3):
                     base_elapsed = wait_round * 480
 
-                    def tick(t, _base=base_elapsed, _id=im["id"]):
-                        write_status(current=_id, phase="waiting", elapsed=round(_base + t))
+                    # 2026-09-11 (2차) 수정 — 사용자 요청: "그냥 플로우에서 보여주는 %를
+                    # 그대로 보여줘". Flow 화면의 실제 퍼센트 텍스트(gen_percent)를 그대로
+                    # 상태에 실어서, 대시보드가 자체 타이머 대신 이 값을 바로 보여줄 수 있게
+                    # 한다 — started=False(아직 로딩 표시 자체가 안 뜬 상태)면 gen_percent도
+                    # None이라 "시작 대기" 상태임이 화면에서 바로 구분된다.
+                    def tick(t, started, pct, _base=base_elapsed, _id=im["id"]):
+                        write_status(current=_id, phase="waiting", elapsed=round(_base + t),
+                                     gen_percent=pct, gen_started=started)
 
                     if F.wait_done(before, timeout=480, tag=im["id"], on_tick=tick):
                         # 2026-09-11 수정 — 생성 장수 드롭다운(image_count)만큼 로컬엔 다 저장한다
