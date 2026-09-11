@@ -526,6 +526,11 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
 // inputs"를 명시하고 있어 같은 결론이었다. 그래서 (2차)의 긴 외형 문단을 걷어내고, 이름/역할
 // 태그 + "레퍼런스 사용" 지시만 남겼다 — 실제 Flow 생성 시 레퍼런스가 첨부되면 외형은 그걸로
 // 충분하고, 혹시 레퍼런스 첨부에 실패해도 최소 식별 문구(대머리/둥근 얼굴 한 줄)는 남겨뒀다.
+//
+// 2026-09-11 (4차) 수정 — 사용자 지적: "여러명일때는 머리카락 복장들로 구분하면되고". 스틱맨
+// 배우들은 전부 같은 베이스(레퍼런스 하나)를 공유하므로, 한 씬에 여러 명이 동시에 등장하면(변호사
+// 둘, 임원 여럿 등) 아무 구분 지시 없인 서로 똑같이 나올 위험이 있다 — 옷차림(정장/앞치마/드레스
+// 등)이나 머리카락 유무 같은 시각적 차이를 텍스트로 명시해서 서로 구분하라는 지침을 추가했다.
 const FEMALE_MARKER_RULE =
   '이 캐릭터의 여성 버전이 필요한 장면에서는 외형을 그대로 두고 머리 위에 분홍색 리본 하나만 추가해서 성별을 구분한다(그 외 디자인은 동일).';
 
@@ -533,7 +538,7 @@ export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
   {
     id: 'stickman',
     label: '스틱맨',
-    description: `이 채널의 스틱맨 캐릭터는 Flow 프로젝트에 이미 캐릭터로 등록돼 있다('Gentleman Rouge', '스틱맨' 두 개). 장면에 이 캐릭터가 등장하면 반드시 등록된 캐릭터를 참조(레퍼런스)로 첨부하고, 텍스트로 외형을 다시 설명하지 않는다 — 레퍼런스 이미지가 얼굴·손·몸 비율을 그대로 유지해준다(구글 Flow 공식 가이드: 텍스트 프롬프트는 레퍼런스와 상충하지 않고 보완해야 한다). 대신 이름/역할과 그 장면에서 하는 행동·표정만 쓴다. 진행자(젠틀맨 루즈): "Gentleman Rouge" 이름과 톱햇·외알렌즈·연미복 정체성만 짧게 언급하고 나머지는 행동으로: 예) "Gentleman Rouge walks confidently out of the shadows, touching his monocle with a sly smirk." 상황극 주인공(스틱맨 배우): "the stickman actor" 언급 후 역할 소품·행동·감정만: 예) "the stickman actor (pharmacist John Pemberton) holds up a medicine bottle with a startled expression." 혹시 레퍼런스 첨부가 안 되는 상황을 대비한 최소 식별 문구만 유지: "a minimalist stickman character with a bald round white face and expressive eyes". ${FEMALE_MARKER_RULE}`,
+    description: `이 채널의 스틱맨 캐릭터는 Flow 프로젝트에 이미 캐릭터로 등록돼 있다('Gentleman Rouge', '스틱맨' 두 개). 장면에 이 캐릭터가 등장하면 반드시 등록된 캐릭터를 참조(레퍼런스)로 첨부하고, 텍스트로 외형을 다시 설명하지 않는다 — 레퍼런스 이미지가 얼굴·손·몸 비율을 그대로 유지해준다(구글 Flow 공식 가이드: 텍스트 프롬프트는 레퍼런스와 상충하지 않고 보완해야 한다). 대신 이름/역할과 그 장면에서 하는 행동·표정만 쓴다. 진행자(젠틀맨 루즈): "Gentleman Rouge" 이름과 톱햇·외알렌즈·연미복 정체성만 짧게 언급하고 나머지는 행동으로: 예) "Gentleman Rouge walks confidently out of the shadows, touching his monocle with a sly smirk." 상황극 주인공(스틱맨 배우): "the stickman actor" 언급 후 역할 소품·행동·감정만: 예) "the stickman actor (pharmacist John Pemberton) holds up a medicine bottle with a startled expression." 한 씬에 스틱맨 배우가 여러 명 동시에 등장하면(변호사 두 명, 임원 여럿 등) 전부 같은 베이스를 공유하므로 서로 구분이 안 될 수 있다 — 각자 다른 옷차림(정장/앞치마/드레스 등)이나 머리카락 유무 같은 시각적 차이를 명시해서 구분되게 쓴다: 예) "one stickman actor wearing a brown apron and another wearing a black suit with slicked-back hair, both holding briefcase props." 혹시 레퍼런스 첨부가 안 되는 상황을 대비한 최소 식별 문구만 유지: "a minimalist stickman character with a bald round white face and expressive eyes". ${FEMALE_MARKER_RULE}`,
     // 2026-09-11 — 사용자가 배경 얼룩 없는 더 깨끗한 레퍼런스 시트로 교체(체크섬 검증 완료).
     // ⚠️ 이 URL은 아직 옛 디자인(점 두 개 눈) 이미지다 — 새 디자인 레퍼런스 이미지를 Storage에
     // 올린 뒤 이 필드도 같이 교체할 것.
