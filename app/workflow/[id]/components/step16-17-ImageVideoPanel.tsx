@@ -127,16 +127,22 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   const fetchedSrtRef = useRef<Record<string, boolean>>({});
   const [pasteTexts, setPasteTexts] = useState<Record<string, string>>({});
   const [parseInfos, setParseInfos] = useState<Record<string, string>>({});
-  // 2026-09-11 추가 — 화풍 선택 상태(파이프라인 전체 공유). site.analysis_result에서 직접 읽고,
-  // 로컬 state는 저장 중 표시(버튼 비활성화)용으로만 쓴다.
+  // 2026-09-11 추가 — 화풍 선택 상태(파이프라인 전체 공유). site.analysis_result가 원본이지만,
+  // "이걸로 선택" 직후 서버 저장(PATCH)과 onRefresh(전체 사이트 목록 재조회)가 끝날 때까지
+  // 칩 강조 표시가 안 바뀌어서 "반응이 느리다"는 지적을 받았다(2026-09-11) — optimisticStyleId에
+  // 클릭 즉시 값을 반영해서 화면은 바로 바뀌고, 실제 저장은 뒤에서 진행되게 한다. site prop이
+  // 갱신되면(onRefresh 완료) 그 값이 곧 optimistic 값과 같아지므로 별도 리셋 로직은 필요 없다.
   const [savingStyle, setSavingStyle] = useState(false);
-  const selectedStyleId = site.analysis_result?.imageStyle || IMAGE_STYLE_PRESETS[0].id;
+  const [optimisticStyleId, setOptimisticStyleId] = useState<string | null>(null);
+  const selectedStyleId = optimisticStyleId || site.analysis_result?.imageStyle || IMAGE_STYLE_PRESETS[0].id;
   const selectedPreset = IMAGE_STYLE_PRESETS.find((p) => p.id === selectedStyleId) || IMAGE_STYLE_PRESETS[0];
   // 2026-09-11 추가 — 캐릭터 선택 상태. 화풍과 같은 저장 방식(analysis_result, 파이프라인 전체 공유)
   // 이지만 별도 필드(characterStyle)에 저장한다 — "어떻게 그릴지"(화풍)와 "누구를 그릴지"(캐릭터)는
-  // 서로 다른 축이라 사용자가 각각 독립적으로 고를 수 있어야 한다.
+  // 서로 다른 축이라 사용자가 각각 독립적으로 고를 수 있어야 한다. 화풍과 동일한 이유로 낙관적
+  // 업데이트(optimisticCharacterId)를 둔다.
   const [savingCharacter, setSavingCharacter] = useState(false);
-  const selectedCharacterId = site.analysis_result?.characterStyle || CHARACTER_STYLE_PRESETS[0].id;
+  const [optimisticCharacterId, setOptimisticCharacterId] = useState<string | null>(null);
+  const selectedCharacterId = optimisticCharacterId || site.analysis_result?.characterStyle || CHARACTER_STYLE_PRESETS[0].id;
   const selectedCharacterPreset = CHARACTER_STYLE_PRESETS.find((p) => p.id === selectedCharacterId) || CHARACTER_STYLE_PRESETS[0];
   // 2026-09-11 추가 — 화풍/캐릭터 칩을 눌러도 바로 선택되지 않고, 이 모달로 원본 크기를 먼저
   // 보여준 뒤 "이걸로 선택"을 눌러야 확정된다(사용자 지시 — 한 줄 썸네일이 작아서 잘 안 보였음).
@@ -176,6 +182,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   // 교체라(부분 병합 아님), 기존 필드를 스프레드해서 imageStyle만 덮어써야 다른 분석 결과
   // (channel/title 등)가 안 날아간다.
   async function selectStyle(styleId: string) {
+    setOptimisticStyleId(styleId);
     setSavingStyle(true);
     try {
       await fetch(`/api/sites/${site.id}`, {
@@ -192,6 +199,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   // 2026-09-11 추가 — 캐릭터 선택 저장. selectStyle과 완전히 같은 패턴(analysis_result는 PATCH 시
   // 전체 교체라 기존 값을 스프레드해서 characterStyle만 덮어써야 함).
   async function selectCharacter(characterId: string) {
+    setOptimisticCharacterId(characterId);
     setSavingCharacter(true);
     try {
       await fetch(`/api/sites/${site.id}`, {
@@ -369,7 +377,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
                   )}
 
                   <p className="text-[10px] text-neutral-400 mb-2">
-                    현재 화풍: <span className="font-bold text-neutral-600">{selectedPreset.label}</span> (위에서 바꿀 수 있음). 대본이 길면(10분 이상) 제미나이가 한 응답에 다 끝내려다 스토리를 요약해버릴 수 있습니다 — 아래 프롬프트는 한 구간만 만들고 멈추도록 지시해뒀습니다. 응답 끝에 "계속"이라고 답하면 이어서 다음 구간을 만듭니다(11번 대본 작성과 동일한 방식). 대본·자막 원문이 프롬프트 안에 이미 통째로 들어있으니 링크를 열 필요 없이 바로 붙여넣으면 됩니다. 제미나이 채팅에서 "계속"으로 끝까지 다 받은 뒤, 대화 전체(JSON 배열 여러 개 포함)를 그대로 복사해서 아래 붙여넣기 칸에 한 번에 넣고 등록하면 자동으로 합쳐서 저장됩니다. ⚠️ 등록 후에는 마지막 장면의 끝 시간이 실제 자막(SRT) 마지막 줄과 일치하는지 꼭 눈으로 확인하세요 — 중간에 완료로 착각하고 멈추면 뒷부분(클로징 멘트 등)이 통째로 비게 됩니다.
+                    현재 캐릭터: <span className="font-bold text-neutral-600">{selectedCharacterPreset.label}</span> · 현재 화풍: <span className="font-bold text-neutral-600">{selectedPreset.label}</span> (위에서 바꿀 수 있음). 대본이 길면(10분 이상) 제미나이가 한 응답에 다 끝내려다 스토리를 요약해버릴 수 있습니다 — 아래 프롬프트는 한 구간만 만들고 멈추도록 지시해뒀습니다. 응답 끝에 "계속"이라고 답하면 이어서 다음 구간을 만듭니다(11번 대본 작성과 동일한 방식). 대본·자막 원문이 프롬프트 안에 이미 통째로 들어있으니 링크를 열 필요 없이 바로 붙여넣으면 됩니다. 제미나이 채팅에서 "계속"으로 끝까지 다 받은 뒤, 대화 전체(JSON 배열 여러 개 포함)를 그대로 복사해서 아래 붙여넣기 칸에 한 번에 넣고 등록하면 자동으로 합쳐서 저장됩니다. ⚠️ 등록 후에는 마지막 장면의 끝 시간이 실제 자막(SRT) 마지막 줄과 일치하는지 꼭 눈으로 확인하세요 — 중간에 완료로 착각하고 멈추면 뒷부분(클로징 멘트 등)이 통째로 비게 됩니다.
                   </p>
 
                   <div className="inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 mb-2">
