@@ -299,6 +299,7 @@ HTML = """<!doctype html>
   <hr style="border-color:#333">
   <div class="row"><span>선택됨:</span><b id="selectedCount">0개</b> <span id="lastSync" style="color:#666;font-size:10px;margin-left:auto"></span></div>
   <div id="workers" style="width:100%"></div>
+  <div id="failBanner" style="display:none;background:#3a1414;border:1px solid #a33;border-radius:6px;padding:8px;margin:6px 0;font-size:11px"></div>
   <div id="scenes"></div>
 <script>
 async function loadSites(){
@@ -562,6 +563,24 @@ async function startRun(){
   const d = await r.json();
   if(d.error) alert(d.error);
 }
+// 2026-09-11 추가 — 사용자 지적: "그런 오류를 표시를 해줘야 다시 시작을 하던 할꺈 아니야" /
+// "패널에 띄어주고 다시 어떻게 하라고 해줘야 하자나 그래야 확인을 누르고 다시 진행을 하지".
+// 실패는 phase="failed"로만 기록되고 다음 씬이 시작되면 바로 덮어써져서, 배치가 다 끝나도
+// 뭐가 왜 실패했는지 화면에서 전혀 안 보였다(run.log 파일을 직접 열어야만 알 수 있었음).
+// 드라이버(flow_econ_driver.py)가 이제 실패를 failures 배열에 누적해서 상태 파일에 실어
+// 보내주므로, 여기서는 그걸 배너로 보여주고 "재시작" 버튼 하나로 실패한 씬만 다시 큐에
+// 넣을 수 있게 한다 — 사람이 원인 읽고 → 확인 누르고 → 그대로 이어서 진행하는 흐름.
+async function retryFailed(port, ids){
+  const siteId = document.getElementById('siteSel').value;
+  const unitId = document.getElementById('unitSel').value;
+  if(!siteId || !unitId){ alert('워크플로우와 콘텐츠를 먼저 선택하세요.'); return; }
+  document.getElementById('portSel').value = String(port);
+  const r = await fetch('/api/start', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({site_id: siteId, unit_id: unitId, scene_ids: ids, ...runOptions(), port})});
+  const d = await r.json();
+  if(d.error) alert(d.error);
+  document.getElementById('failBanner').style.display = 'none';
+}
 async function startOne(sceneId){
   const siteId = document.getElementById('siteSel').value;
   const unitId = document.getElementById('unitSel').value;
@@ -594,6 +613,22 @@ async function fetchAndRender(){
         + `</div>`;
     }).join('') || '<div class="row" style="color:#666;font-size:11px">실행 중인 계정 없음</div>';
     workers.forEach(w => notifyIfFinished(w.port, w.phase));
+    // 2026-09-11 추가 — 실패 배너: 어느 포트가 뭘 왜 실패했는지 사유까지 그대로 보여주고,
+    // 바로 그 자리에서 재시작 버튼을 눌러 이어갈 수 있게 한다(위 retryFailed 참고).
+    const failBanner = document.getElementById('failBanner');
+    const withFailures = workers.filter(w => (w.failures || []).length);
+    if(withFailures.length){
+      failBanner.style.display = 'block';
+      failBanner.innerHTML = withFailures.map(w => {
+        const ids = (w.failures || []).map(f => f.id);
+        const lines = (w.failures || []).map(f => `${f.id}: ${f.error}`).join('<br>');
+        return `<div style="margin-bottom:6px"><b style="color:#f88">⚠ ${w.port} 계정 — ${ids.length}개 씬 실패</b><br>`
+          + `<div style="color:#daa;margin:4px 0">${lines}</div>`
+          + `<button onclick='retryFailed(${w.port}, ${JSON.stringify(ids)})' style="background:#733;font-weight:700">🔁 이 ${ids.length}개 씬만 재시작</button></div>`;
+      }).join('');
+    } else {
+      failBanner.style.display = 'none';
+    }
     // 2026-09-10 추가 — "지금 진행 중인 것만 프롬프트를 펼치고, 완료되면 접고, 다음
     // 진행 중인 걸로 넘어가면서 순차적으로 펼쳐지고 접히게" — 여러 워커가 각자 다른 씬을
     // 처리 중이면 그 씬들을 전부(동시에) 펼친다.
