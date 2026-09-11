@@ -520,7 +520,8 @@ export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
     id: 'stickman',
     label: '스틱맨',
     description: `기본 스틱맨: 하얀 동그란 얼굴에 점 두 개 눈, 다른 얼굴 특징 없음. 팔다리는 얇은 선(정상적인 인체 비율이 아님, 손가락·관절·근육 묘사 없음). 옷·장신구 없이 몸 자체가 캐릭터다. 진행자(젠틀맨 루즈)로 쓸 때만 톱햇·금테 외알렌즈·검은 연미복+금빛 안감 망토를 이 스틱맨 베이스 위에 입힌다: "A minimalist vector stickman character with a round white face and simple dot eyes. Styled as 'Gentleman Rouge' wearing a black top hat, a gold-rimmed monocle, a neat curled black mustache, a black tailcoat, and a black cape with gold lining." 그 외 상황극 주인공(스틱맨 배우)은 복장 없이 역할 소품만 최소한으로 입히고, 감정 상태(절망, 탐욕, 환희 등)를 극단적으로 과장해서 표현한다. ${FEMALE_MARKER_RULE}`,
-    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/7dd4599c-8a36-43e2-814e-351867acd917.jpg',
+    // 2026-09-11 — 사용자가 배경 얼룩 없는 더 깨끗한 레퍼런스 시트로 교체(체크섬 검증 완료).
+    referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/d22236a5-cbb3-4c59-a4a6-c316c2354df7.jpg',
   },
   {
     id: 'bean_mascot',
