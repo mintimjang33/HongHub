@@ -623,26 +623,30 @@ class EconFlow:
         넌 계속 입력을 했던거야" — 스샷으로 확인해보니 "@" 딱 한 글자만 쳐도 오버레이가 바로
         뜬다(이름의 첫 글자까지 칠 필요조차 없었다). "@"+첫 글자를 타이핑하던 것도 과했던
         것 — 이제 "@" 하나만 실제 타이핑해서 오버레이를 띄운다.
-        2026-09-12 (3차, 핵심) — 디버그 스샷(dbg_mention_before/after)으로 실측 확인: "@"만
+        2026-09-12 (3차) — 디버그 스샷(dbg_mention_before/after)으로 실측 확인: "@"만
         치면 기본으로 "전체"(모든 미디어) 탭이 열리는데, 거기서 이름을 클릭하면 미리보기로
         선택만 되고 컴포저엔 "@"만 남은 채 첨부는 안 된다 — "프롬프트에 추가"를 한 번 더
         눌러야 끝난다. 반면 사용자가 직접 확인: "캐릭터에선 그냥 이름만 선택하면 되" — "캐릭터"
         탭으로 미리 좁혀두면 이름 클릭 한 번으로 바로 첨부까지 끝난다(버튼 불필요). 그래서
-        "캐릭터" 탭을 먼저 클릭해 좁히는 단계를 다시 넣는다 — 예전에 검색창 정리 단계를
-        없애면서 실수로 같이 지워버렸던 부분(사용자 지적: "왜 넌 자꾸 전체로 가???")."""
+        "캐릭터" 탭을 먼저 클릭해 좁히는 단계를 다시 넣었다.
+        2026-09-12 (5차, 근본 원인 — 최종) — 사용자 지적: "스틱맨 장면에서 루즈를 선택하자나".
+        라이브 CDP로 실제 오버레이 스크린샷을 클릭 전/후로 직접 비교해 확정: (3차)에서 말한
+        "캐릭터 탭"은 애초에 존재하지 않았다 — 실제 UI는 "전체 ▾" 드롭다운 하나뿐이고,
+        "캐릭터"/"이미지"는 각 목록 항목 이름 아래 붙는 작은 종류 라벨일 뿐이다. 그래서 그동안
+        "캐릭터" 텍스트를 찾아 클릭해오던 단계는, 실제로는 목록의 첫 번째 캐릭터 행(이 계정
+        프로젝트 순서상 "젠틀맨루즈")에 붙은 라벨을 클릭해 그 항목을 그대로 선택/첨부해버리고
+        있었다 — 이게 "스틱맨을 찾으려다 젠틀맨루즈가 붙는" 사고의 진짜 원인이었다. "전체"
+        목록에 이름이 원래 그대로 노출돼 있어 좁히는 단계 자체가 불필요했으므로, 이 잘못된
+        탭-클릭 단계를 완전히 제거하고 이름을 곧장 찾도록 최종 수정했다."""
         # 2026-09-12 실사고 수정 — 캐릭터 이름이 전부 한글(스틱맨/젠틀맨루즈)이라, ASCII만
         # 남기던 이전 방식([^A-Za-z0-9])은 둘 다 밑줄 하나("_")로 뭉개져서 디버그 스샷 파일명이
         # "dbg_step1__.png"로 완전히 겹쳤다 — 어느 캐릭터를 찾으려던 시도였는지 스샷만으로는
         # 구분이 안 됐다(사용자 지적: "지금 캐릭터를 루즈만 찾고 있어 확인해봐"에 대응하려다
         # 발견). 윈도우 파일명에 실제로 못 쓰는 문자만 걸러내고 한글은 그대로 남긴다.
         tag = re.sub(r'[<>:"/\\|?*\s]+', '_', title)[:20]
-        # 2026-09-12 (4차) 실사고 수정 — 사용자 지적: "스틱맨 장면에서 루즈를 선택하자나".
-        # 라이브 CDP로 컴포저 DOM을 직접 읽어 확인한 결과, class="mention-chip-invalid"인
-        # 깨진 멘션 칩("젠틀맨루즈")이 스틱맨 씬 컴포저에 그대로 남아있었다. 세션이 길어지고
-        # 프로젝트에 이미지가 쌓여 Flow가 무거워지면, "@"를 쳐도 정상 피커 대신 예전에 쓰던
-        # 캐시된 멘션이 그대로 꽂히고 정상 오버레이가 아예 안 뜨는 현상으로 보인다(사용자
-        # 관찰과 일치: "처음에는 스틱맨 잘 찾았는데" 세션 후반부터 이 오류 발생). 다음 씬으로
-        # 오염되지 않게, 매 시도 전에 남은 깨진 칩부터 먼저 지운다.
+        # 2026-09-12 (4차) 추가 — 세션이 길어지거나 이전 시도의 잔여물로 깨진(invalid) 멘션
+        # 칩이 남아있을 수 있으니, 매 시도 전에 먼저 지운다(안전망 — 5차 근본 원인 수정 후에도
+        # 유지할 가치가 있는 방어 로직).
         self.c.js(r"""(()=>{const H=innerHeight;
           const e=[...document.querySelectorAll("[contenteditable=true],textarea")]
             .filter(x=>x.offsetParent && x.getBoundingClientRect().top>H*0.6)[0];
@@ -651,30 +655,16 @@ class EconFlow:
           return "OK";})()""")
         self.type_text("@")
         time.sleep(1.0)
-        # 오버레이(피커) 자체가 실제로 떴는지부터 확인한다 — 안 뜬 채로 "캐릭터" 탭이나
-        # 이름을 찾으러 가면, 방금 꽂힌 캐시된 엉뚱한 멘션이나 화면의 다른 요소를 잘못
-        # 집을 위험이 있다. 없으면 여기서 바로 명확한 원인으로 실패 처리한다.
+        # 오버레이(피커) 자체가 실제로 떴는지부터 확인한다 — 안 뜨면 여기서 바로 명확한
+        # 원인으로 실패 처리한다(엉뚱한 걸 잘못 찾으러 가지 않게).
         overlay_r = self._poll_js(r"""(()=>{
           const overlay = document.querySelector('.cdk-overlay-container, [role="dialog"], [role="listbox"]');
           return overlay ? "OK" : "NF";})()""", tries=8, delay=0.3)
         if overlay_r != "OK":
             self.shot(f"mention_no_overlay_{tag}")
             raise RuntimeError(f"★'@' 입력해도 캐릭터 피커가 안 열렸다(오버레이 없음, 세션 부하로 캐시된 멘션이 꽂혔을 수 있음)")
-        # "캐릭터" 탭을 눌러 좁힌다 — 전체 탭에 남아있으면 이전에 생성된 씬 이미지들의
-        # 자동 캡션(예: "Gentleman Rouge pointing...")과 뒤섞여 있어도, 좁혀두면 등록된
-        # 캐릭터 2개만 남아 이름 클릭 한 번으로 바로 첨부된다.
-        tab_r = self._poll_js(r"""(()=>{
-          const overlay = document.querySelector('.cdk-overlay-container, [role="dialog"]');
-          const root = overlay || document;
-          const all=[...root.querySelectorAll("*")]
-          .filter(e=>e.offsetParent && e.children.length===0 && (e.textContent||"").trim()==="캐릭터");
-          if(!all.length) return "NF"; const r=all[0].getBoundingClientRect();
-          return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});})()""",
-                              tries=8, delay=0.3)
-        if tab_r and tab_r != "NF":
-            td = json.loads(tab_r)
-            self.click_xy(td["x"], td["y"])
-            time.sleep(0.6)
+        # 2026-09-12 (5차) — "캐릭터" 탭 클릭 단계는 근본 원인이었으므로 완전히 제거함(위
+        # docstring 참고). "전체" 목록에 이름이 그대로 노출되므로 곧장 이름을 찾는다.
         self.shot(f"dbg_step1_{tag}")
         r = self._poll_js(r"""(()=>{
           const overlay = document.querySelector('.cdk-overlay-container, [role="dialog"], [role="listbox"]');
@@ -693,8 +683,7 @@ class EconFlow:
         time.sleep(0.5)
         self.shot(f"dbg_mention_after_{tag}")
         # paste_text()의 "하고 나서 반드시 확인" 원칙과 동일하게, 클릭한 뒤 실제로
-        # 그 이름의 유효한(invalid 아닌) 칩이 컴포저에 붙었는지 검증한다 — 위에서 확인한
-        # "엉뚱한 캐릭터가 붙는" 사고를 여기서 최종적으로 잡아낸다. 다르거나 깨졌으면
+        # 그 이름의 유효한(invalid 아닌) 칩이 컴포저에 붙었는지 검증한다. 다르거나 깨졌으면
         # 그 칩을 바로 지워서 다음 씬으로 오염되지 않게 하고 이 씬만 실패 처리한다.
         verify = self._poll_js(r"""(()=>{const H=innerHeight;
           const e=[...document.querySelectorAll("[contenteditable=true],textarea")]
