@@ -42,17 +42,32 @@ class CDP:
             raise RuntimeError("★연결 가능한 탭이 없습니다 — Chrome 창에 페이지가 하나는 떠 있어야 합니다.")
         target = next((t for t in pages if any(p in t.get("url", "") for p in prefer)), pages[0])
         self.target = target
-        self.ws = ws_connect(target["webSocketDebuggerUrl"], max_size=None)
+        self.ws = ws_connect(target["webSocketDebuggerUrl"], max_size=None, open_timeout=15)
         self._id = 0
         self.send("Page.enable")
         self.send("Runtime.enable")
+
+    # 2026-09-12 실사고 수정 — 9223 계정이 S52에서 90분 넘게 "waiting"인 채로 멈춰있었는데,
+    # 실제로는 죽은 게 아니라 이 recv()가 타임아웃 없이 응답을 무한정 기다리고 있었다(Chrome
+    # 탭이 멈추거나 CDP 프레임이 유실되면 이 소켓 읽기가 영원히 안 풀림) — 대시보드를 재시작해도
+    # 이 프로세스 자체는 그 자리에서 계속 살아있었던 이유이기도 하다. RECV_TIMEOUT을 넘기면
+    # 예외를 던져서, flow_econ_driver.py의 바깥 try/except가 "이 씬만 건너뛰고 다음으로"
+    # 처리하도록 만든다 — 조용히 영원히 멈추는 대신 눈에 보이는 실패로 바꾼 것.
+    RECV_TIMEOUT = 60
 
     def send(self, method: str, **params):
         self._id += 1
         mid = self._id
         self.ws.send(json.dumps({"id": mid, "method": method, "params": params}))
         while True:
-            msg = json.loads(self.ws.recv())
+            try:
+                raw = self.ws.recv(timeout=self.RECV_TIMEOUT)
+            except TimeoutError as e:
+                raise RuntimeError(
+                    f"CDP {method} 응답 없음({self.RECV_TIMEOUT}초 초과) — Chrome 탭이 멈췄거나 "
+                    f"연결이 끊겼을 수 있습니다."
+                ) from e
+            msg = json.loads(raw)
             if msg.get("id") == mid:
                 if "error" in msg:
                     raise RuntimeError(f"CDP {method} 실패: {msg['error']}")

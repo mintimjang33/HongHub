@@ -172,13 +172,13 @@ def register_scene_image(site_id: str, unit_id: str, scene_id: str, local_path: 
         rows = r.json()
         if not rows:
             log(f"  ⚠ Storage 업로드는 됐지만 site({site_id})를 못 찾아 scenePrompts 등록 실패")
-            return public_url
+            return None
         script_draft = rows[0].get("script_draft") or {}
         units = script_draft.get("units") or []
         unit = next((u for u in units if u.get("id") == unit_id), None)
         if not unit:
             log(f"  ⚠ Storage 업로드는 됐지만 unit({unit_id})을 못 찾아 scenePrompts 등록 실패")
-            return public_url
+            return None
 
         text = unit.get("scenePrompts") or ""
         blocks = re.split(r"\n(?=### \S+)", text.strip()) if text.strip() else []
@@ -199,7 +199,7 @@ def register_scene_image(site_id: str, unit_id: str, scene_id: str, local_path: 
                 new_blocks.append(b)
         if not changed:
             log(f"  ⚠ Storage 업로드는 됐지만 scenePrompts 안에서 {scene_id} 블록을 못 찾음")
-            return public_url
+            return None
 
         unit["scenePrompts"] = "\n\n".join(new_blocks)
         patch = httpx.patch(
@@ -647,30 +647,26 @@ class EconFlow:
         넌 계속 입력을 했던거야" — 스샷으로 확인해보니 "@" 딱 한 글자만 쳐도 오버레이가 바로
         뜬다(이름의 첫 글자까지 칠 필요조차 없었다). "@"+첫 글자를 타이핑하던 것도 과했던
         것 — 이제 "@" 하나만 실제 타이핑해서 오버레이를 띄운다.
-        2026-09-12 (3차) — 디버그 스샷(dbg_mention_before/after)으로 실측 확인: "@"만
+        2026-09-12 (3차, 핵심) — 디버그 스샷(dbg_mention_before/after)으로 실측 확인: "@"만
         치면 기본으로 "전체"(모든 미디어) 탭이 열리는데, 거기서 이름을 클릭하면 미리보기로
         선택만 되고 컴포저엔 "@"만 남은 채 첨부는 안 된다 — "프롬프트에 추가"를 한 번 더
         눌러야 끝난다. 반면 사용자가 직접 확인: "캐릭터에선 그냥 이름만 선택하면 되" — "캐릭터"
         탭으로 미리 좁혀두면 이름 클릭 한 번으로 바로 첨부까지 끝난다(버튼 불필요). 그래서
-        "캐릭터" 탭을 먼저 클릭해 좁히는 단계를 다시 넣었다.
-        2026-09-12 (5차, 근본 원인 — 최종) — 사용자 지적: "스틱맨 장면에서 루즈를 선택하자나".
-        라이브 CDP로 실제 오버레이 스크린샷을 클릭 전/후로 직접 비교해 확정: (3차)에서 말한
-        "캐릭터 탭"은 애초에 존재하지 않았다 — 실제 UI는 "전체 ▾" 드롭다운 하나뿐이고,
-        "캐릭터"/"이미지"는 각 목록 항목 이름 아래 붙는 작은 종류 라벨일 뿐이다. 그래서 그동안
-        "캐릭터" 텍스트를 찾아 클릭해오던 단계는, 실제로는 목록의 첫 번째 캐릭터 행(이 계정
-        프로젝트 순서상 "젠틀맨루즈")에 붙은 라벨을 클릭해 그 항목을 그대로 선택/첨부해버리고
-        있었다 — 이게 "스틱맨을 찾으려다 젠틀맨루즈가 붙는" 사고의 진짜 원인이었다. "전체"
-        목록에 이름이 원래 그대로 노출돼 있어 좁히는 단계 자체가 불필요했으므로, 이 잘못된
-        탭-클릭 단계를 완전히 제거하고 이름을 곧장 찾도록 최종 수정했다."""
+        "캐릭터" 탭을 먼저 클릭해 좁히는 단계를 다시 넣는다 — 예전에 검색창 정리 단계를
+        없애면서 실수로 같이 지워버렸던 부분(사용자 지적: "왜 넌 자꾸 전체로 가???")."""
         # 2026-09-12 실사고 수정 — 캐릭터 이름이 전부 한글(스틱맨/젠틀맨루즈)이라, ASCII만
         # 남기던 이전 방식([^A-Za-z0-9])은 둘 다 밑줄 하나("_")로 뭉개져서 디버그 스샷 파일명이
         # "dbg_step1__.png"로 완전히 겹쳤다 — 어느 캐릭터를 찾으려던 시도였는지 스샷만으로는
         # 구분이 안 됐다(사용자 지적: "지금 캐릭터를 루즈만 찾고 있어 확인해봐"에 대응하려다
         # 발견). 윈도우 파일명에 실제로 못 쓰는 문자만 걸러내고 한글은 그대로 남긴다.
         tag = re.sub(r'[<>:"/\\|?*\s]+', '_', title)[:20]
-        # 2026-09-12 (4차) 추가 — 세션이 길어지거나 이전 시도의 잔여물로 깨진(invalid) 멘션
-        # 칩이 남아있을 수 있으니, 매 시도 전에 먼저 지운다(안전망 — 5차 근본 원인 수정 후에도
-        # 유지할 가치가 있는 방어 로직).
+        # 2026-09-12 (4차) 실사고 수정 — 사용자 지적: "스틱맨 장면에서 루즈를 선택하자나".
+        # 라이브 CDP로 컴포저 DOM을 직접 읽어 확인한 결과, class="mention-chip-invalid"인
+        # 깨진 멘션 칩("젠틀맨루즈")이 스틱맨 씬 컴포저에 그대로 남아있었다. 세션이 길어지고
+        # 프로젝트에 이미지가 쌓여 Flow가 무거워지면, "@"를 쳐도 정상 피커 대신 예전에 쓰던
+        # 캐시된 멘션이 그대로 꽂히고 정상 오버레이가 아예 안 뜨는 현상으로 보인다(사용자
+        # 관찰과 일치: "처음에는 스틱맨 잘 찾았는데" 세션 후반부터 이 오류 발생). 다음 씬으로
+        # 오염되지 않게, 매 시도 전에 남은 깨진 칩부터 먼저 지운다.
         self.c.js(r"""(()=>{const H=innerHeight;
           const e=[...document.querySelectorAll("[contenteditable=true],textarea")]
             .filter(x=>x.offsetParent && x.getBoundingClientRect().top>H*0.6)[0];
@@ -679,16 +675,24 @@ class EconFlow:
           return "OK";})()""")
         self.type_text("@")
         time.sleep(1.0)
-        # 오버레이(피커) 자체가 실제로 떴는지부터 확인한다 — 안 뜨면 여기서 바로 명확한
-        # 원인으로 실패 처리한다(엉뚱한 걸 잘못 찾으러 가지 않게).
+        # 오버레이(피커) 자체가 실제로 떴는지부터 확인한다 — 안 뜬 채로 "캐릭터" 탭이나
+        # 이름을 찾으러 가면, 방금 꽂힌 캐시된 엉뚱한 멘션이나 화면의 다른 요소를 잘못
+        # 집을 위험이 있다. 없으면 여기서 바로 명확한 원인으로 실패 처리한다.
         overlay_r = self._poll_js(r"""(()=>{
           const overlay = document.querySelector('.cdk-overlay-container, [role="dialog"], [role="listbox"]');
           return overlay ? "OK" : "NF";})()""", tries=8, delay=0.3)
         if overlay_r != "OK":
             self.shot(f"mention_no_overlay_{tag}")
             raise RuntimeError(f"★'@' 입력해도 캐릭터 피커가 안 열렸다(오버레이 없음, 세션 부하로 캐시된 멘션이 꽂혔을 수 있음)")
-        # 2026-09-12 (5차) — "캐릭터" 탭 클릭 단계는 근본 원인이었으므로 완전히 제거함(위
-        # docstring 참고). "전체" 목록에 이름이 그대로 노출되므로 곧장 이름을 찾는다.
+        # 2026-09-12 (5차, 근본 원인) — 실사고로 확인: "캐릭터"는 눌러서 목록을 좁히는 탭이
+        # 아니라, "전체" 목록에서 각 항목(이미지/캐릭터) 이름 아래 붙는 작은 종류 라벨일
+        # 뿐이었다(스크린샷으로 직접 확인 — "전체 ▾" 드롭다운 하나만 있고 탭 버튼 자체가
+        # 없음). 그래서 지금까지 "캐릭터" 텍스트를 찾아 클릭하던 이 단계는, 실제로는 목록의
+        # 첫 번째 캐릭터 행(이 프로젝트에선 "젠틀맨루즈")에 붙은 라벨을 클릭해서 그 항목을
+        # 그대로 선택/첨부해버리고 있었다 — "스틱맨을 찾으려다 젠틀맨루즈가 붙는" 사고의
+        # 진짜 원인이었다(라이브 CDP로 클릭 전/후 스크린샷을 직접 비교해 확정). "전체" 목록에
+        # 이름이 그대로 노출돼 있어 좁히는 탭 자체가 필요 없었으므로, 이 잘못된 클릭 단계를
+        # 통째로 없애고 이름을 바로 찾는다.
         self.shot(f"dbg_step1_{tag}")
         r = self._poll_js(r"""(()=>{
           const overlay = document.querySelector('.cdk-overlay-container, [role="dialog"], [role="listbox"]');
@@ -707,7 +711,8 @@ class EconFlow:
         time.sleep(0.5)
         self.shot(f"dbg_mention_after_{tag}")
         # paste_text()의 "하고 나서 반드시 확인" 원칙과 동일하게, 클릭한 뒤 실제로
-        # 그 이름의 유효한(invalid 아닌) 칩이 컴포저에 붙었는지 검증한다. 다르거나 깨졌으면
+        # 그 이름의 유효한(invalid 아닌) 칩이 컴포저에 붙었는지 검증한다 — 위에서 확인한
+        # "엉뚱한 캐릭터가 붙는" 사고를 여기서 최종적으로 잡아낸다. 다르거나 깨졌으면
         # 그 칩을 바로 지워서 다음 씬으로 오염되지 않게 하고 이 씬만 실패 처리한다.
         verify = self._poll_js(r"""(()=>{const H=innerHeight;
           const e=[...document.querySelectorAll("[contenteditable=true],textarea")]
@@ -1142,18 +1147,40 @@ def main():
                 # scenePrompts 블록을 못 찾아 등록이 반쪽으로 끝난 경우가 있다(register_scene_image
                 # 안의 "⚠ ... 등록 실패" 로그 참고). 실제로 그 URL이 받아지는지 직접 확인해서,
                 # 안 되면 "완료"로 기록하지 않고 이 씬만 실패 처리해 다음 배치에서 재시도되게 한다.
-                if image_url:
+                # 2026-09-12 (S74 실사고) 수정 — register_scene_image()가 site/unit/블록을 못 찾은
+                # 반쪽 실패 상황에서도 이전엔 public_url을 그대로 돌려줬다(호출부가 "업로드는
+                #됐으니 일단 성공"으로 오해) — 업로드는 됐는데 scenePrompts엔 등록이 안 된 채로
+                # image_url이 truthy라 곧장 여기 통과했고, 결국 done으로 기록돼버려서 다음부터
+                # "이미 끝난 씬"으로 계속 건너뛰는데 DB엔 영영 등록이 안 되는 상태(S74)가 됐다.
+                # register_scene_image()를 그런 경우 None을 돌려주도록 고쳤으니, 여기서도
+                # image_url이 애초에 없으면(등록 자체가 반쪽/전부 실패) 곧장 실패 처리한다.
+                if not image_url:
+                    verify_msg = "scenePrompts 등록 실패(업로드는 됐을 수 있으나 DB에 URL이 기록되지 않음)"
+                    log(f"  ✗ {im['id']} {verify_msg}")
+                    failures.append({"id": im["id"], "error": verify_msg})
+                    write_status(current=im["id"], phase="failed", error=verify_msg, failures=list(failures))
+                    continue
+                try:
+                    chk = httpx.get(image_url, timeout=15)
+                    chk.raise_for_status()
+                    if not chk.content:
+                        raise RuntimeError("응답 본문이 비어있음")
+                except Exception as e:
+                    verify_msg = f"이미지 등록 확인 실패(업로드된 URL을 못 받아옴): {e}"
+                    log(f"  ✗ {im['id']} {verify_msg}")
+                    failures.append({"id": im["id"], "error": verify_msg})
+                    write_status(current=im["id"], phase="failed", error=verify_msg, failures=list(failures))
+                    continue
+                # 2026-09-12 추가 — 사용자 요청: "저장되면 삭제해 오류내지말고". 여기까지 왔다는
+                # 건 Storage 업로드 + DB 등록(scenePrompts) + 실제 URL 응답 확인까지 전부 끝났다는
+                # 뜻이라(위에서 하나라도 실패하면 continue로 빠짐), 로컬 사본은 더 이상 필요
+                # 없다 — 지워도 안전하다(_flow_state.json의 done 판정은 파일 존재 여부가 아니라
+                # 이 딕셔너리 기록만 보고 하므로 지워도 "이미 완료" 판정엔 영향 없다).
+                if saved:
                     try:
-                        chk = httpx.get(image_url, timeout=15)
-                        chk.raise_for_status()
-                        if not chk.content:
-                            raise RuntimeError("응답 본문이 비어있음")
-                    except Exception as e:
-                        verify_msg = f"이미지 등록 확인 실패(업로드된 URL을 못 받아옴): {e}"
-                        log(f"  ✗ {im['id']} {verify_msg}")
-                        failures.append({"id": im["id"], "error": verify_msg})
-                        write_status(current=im["id"], phase="failed", error=verify_msg, failures=list(failures))
-                        continue
+                        Path(saved[0]).unlink(missing_ok=True)
+                    except Exception:
+                        pass
                 state["done"][im["id"]] = {"kind": "image", "title": title, "file": saved[0] if saved else None, "url": image_url}
                 state["_last_saved_hash"] = new_hash
                 save()

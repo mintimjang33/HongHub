@@ -3,7 +3,7 @@
 # Windows 작업 스케줄러에도 등록해서 사람이 매번 켤 필요 없게 만들었다.
 
 $ErrorActionPreference = "SilentlyContinue"
-$repo = "C:\Users\user\Desktop\Downloads\flow-media-pack"
+$repo = "C:\Users\user\Downloads\flow-media-pack"
 # 2026-09-11 수정 — PATH의 "python"이 Microsoft Store 스텁(WindowsApps\python.exe)으로
 # 가로채져 있어서 Start-Process가 매번 조용히 실패했다(포트가 안 열림, 에러도 안 남음).
 # 실제 인터프리터 전체 경로를 직접 지정한다.

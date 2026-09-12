@@ -8,11 +8,14 @@ Flow 옆 사이드패널(scripts/status_extension)이 이 서버(127.0.0.1:8799)
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +23,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import httpx
+from websockets.sync.client import connect as ws_connect
 
 HERE = Path(__file__).resolve().parent
 RUN_DIR = HERE.parent / "examples-economics-newstyle" / "dashboard_runs"
@@ -49,6 +53,334 @@ SUPA_KEY = _env["SUPABASE_SERVICE_ROLE_KEY"]
 
 def supa_headers():
     return {"apikey": SUPA_KEY, "Authorization": f"Bearer {SUPA_KEY}"}
+
+
+# 2026-09-12 추가 — 사용자 지적: "계정 포트를 사용자가 바꾸지 않는 한 고정되어야 한다" /
+# "크롬창이 4개가 동시에 다 저장이 되는거지? 각각" — 아니다. localStorage는 브라우저
+# 프로필(크롬창)마다 완전히 분리되어 있어서, 계정 4개(mintimjang33/minsiljang0/minssajang/
+# minsiljjang)가 각자 다른 --user-data-dir로 뜨는 이 구성에서는 창마다 "마지막으로 고른 계정"이
+# 따로 기억되고, 심지어 사이드패널 iframe과 일반 탭도 파티셔닝 때문에 저장소가 갈릴 수 있다 —
+# 그래서 창을 바꿔서 열면(또는 사이드패널/탭을 오가면) 다른 계정으로 "돌아간 것처럼" 보였다.
+# 이 서버(dashboard) 하나를 모든 창이 공유하므로, 선택된 계정을 서버 쪽 파일에 저장해서
+# 어느 창에서 열든 항상 같은 값을 보게 한다 — localStorage는 이제 폴백일 뿐이다.
+DASHBOARD_STATE_PATH = Path(__file__).resolve().parent / "dashboard_state.json"
+_state_lock = threading.Lock()
+
+
+def load_dashboard_state() -> dict:
+    with _state_lock:
+        try:
+            return json.loads(DASHBOARD_STATE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+
+def save_dashboard_state(patch: dict):
+    with _state_lock:
+        try:
+            cur = json.loads(DASHBOARD_STATE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            cur = {}
+        cur.update(patch)
+        DASHBOARD_STATE_PATH.write_text(json.dumps(cur, ensure_ascii=False), encoding="utf-8")
+
+
+# 2026-09-12 추가 — 사용자 요청: "메인컨트롤 페이지에서 각 서버띄우고 페이지 열고 각각 할 수
+# 있게". 바탕화면 개별 아이콘(크롬_{계정}_켜기.bat)이 쓰던 것과 정확히 같은 파라미터를 여기서도
+# 재사용해서, 메인 컨트롤 페이지의 "▶ 크롬 켜기" 버튼이 그 계정의 자동화 크롬을 직접 띄울 수
+# 있게 한다 — 값은 실제 바탕화면 .bat 파일들에서 그대로 옮겨왔다(계정별 --user-data-dir).
+CHROME_ACCOUNTS = {
+    9223: {"name": "mintimjang33", "profile": r"C:\Users\user\flow-automation-chrome"},
+    9224: {"name": "minsiljang0", "profile": r"C:\Users\user\flow-automation-chrome-minsiljang0"},
+    9225: {"name": "minssajang", "profile": r"C:\Users\user\flow-automation-chrome-minssajang"},
+    9226: {"name": "minsiljjang", "profile": r"C:\Users\user\flow-automation-chrome-minsiljang"},
+}
+CHROME_EXE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+
+
+def is_port_open(port: int, timeout: float = 0.8) -> bool:
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def has_open_tab(port: int) -> bool:
+    try:
+        r = httpx.get(f"http://127.0.0.1:{port}/json", timeout=3)
+        return any(t.get("type") == "page" for t in r.json())
+    except Exception:
+        return False
+
+
+def open_tab_for_port(port: int, url: str = "https://flow.google.com/"):
+    httpx.put(f"http://127.0.0.1:{port}/json/new", params={"": url}, timeout=5)
+
+
+# 2026-09-12 추가, 같은 날 2차 수정 — 사용자 지적: "링크를 넣어도 자동으로 저장이 되게끔
+# 해둬야지" / 1차 수정(FLOW_SHARE_RE로 공유 페이지만 골라 계정 크롬으로 열어서 실제 이미지를
+# 찾는 방식)을 넣은 뒤에도 "왜 이렇게 링크로 등록을 하면 항상 깨져서 보여?"가 재발함. 원인이
+# 두 가지였다:
+#   1) URL 형태 판별을 정규식(`flow.google.com/shared/`) 하나에만 의존했다 — Flow가 링크
+#      형식을 바꾸거나(예: www. 접두사, 쿼리스트링 등) 사람이 공유 페이지가 아닌 다른 주소를
+#      붙여넣으면 정규식이 안 맞아서 그 페이지 주소를 실제 이미지인 것처럼 그냥 그대로
+#      등록해버렸다.
+#   2) 설령 정규식이 맞아 진짜 CDN 이미지 주소(`flow-content.google`)를 찾아내도, 그 다음
+#      다운로드를 이 파이썬 프로세스가 `httpx.get()`으로 맨몸(쿠키/리퍼러 없이) 요청했다 —
+#      그 CDN이 접근 권한(세션 쿠키 등)을 요구하면 200과 함께 빈 이미지/에러 페이지를 받아도
+#      코드가 이를 구분하지 못하고 그대로 Storage에 "이미지"로 업로드해버려 깨진 채로 등록됐다.
+# 두 문제를 함께 고친다: 먼저 URL을 직접 받아봐서 진짜 이미지(Content-Type: image/*)인지
+# 확인하고(`_fetch_direct_image`), 아니면 정규식 판별 없이 무조건 계정 크롬으로 그 주소를 열어
+# 화면에 뜨는 진짜 이미지를 찾은 뒤(`resolve_flow_share_image`), 다운로드도 이 서버가 아니라
+# 방금 그 이미지를 실제로 띄운 그 브라우저 탭 안에서(`fetch` → `blob` → dataURL) 받아온다 —
+# 쿠키/리퍼러/세션이 전부 자동으로 함께 전달되므로 권한 문제로 깨질 수가 없다. 최종적으로는
+# 어떤 경로든 항상 우리 Supabase Storage에 다시 업로드해서 등록한다 — Google CDN 주소를 그대로
+# 등록하면 서명 토큰이 나중에 만료돼 "등록 당시엔 멀쩡했다가 나중에 깨지는" 문제도 원천 차단된다.
+def _fetch_direct_image(url: str) -> tuple[bytes, str] | None:
+    """URL을 직접 받아봐서 진짜 이미지(Content-Type: image/*)면 (바이트, mime)을 돌려주고,
+    아니면(HTML 공유 페이지, 에러 응답 등) None을 돌려준다 — 이때 호출자는 resolve_flow_share_image로
+    폴백해야 한다."""
+    try:
+        r = httpx.get(url, timeout=15, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+    except Exception:
+        return None
+    ctype = r.headers.get("content-type", "").split(";")[0].strip().lower()
+    if r.status_code == 200 and ctype.startswith("image/"):
+        return r.content, ctype
+    return None
+
+
+# 2026-09-12 (5차) 수정 — 사용자 지적: "새창은 왜 뜨는거냐고~" / "스샷같은것도 왜 뜨고~" /
+# "생성버튼으로 생성이 되었을땐 아무 반응없이 알아서 가져와서 저장이 되는데". 지금까지
+# resolve_flow_share_image()는 사람이 실제로 보고 있을 수도 있는 4개 계정 중 하나의 진짜 크롬
+# 창을 빌려(CDP로 새 탭을 열어) 공유 페이지를 렌더링했다 — 그게 바로 "생성"과 달리 화면에
+# 갑자기 새 창/탭이 튀어나오는 원인이었다("생성"은 이미 열려서 보이고 있는 프로젝트 탭 위에서
+# 조용히 진행되니 새로 뜨는 게 없다). 이제 그 4개 계정 창을 전혀 건드리지 않고, 이 용도로만
+# 쓰는 눈에 안 보이는 헤드리스 크롬 인스턴스를 임시 프로필로 새로 띄워서 처리한 뒤 바로
+# 종료한다 — 공유 링크는 로그인 없이도 보이는 공개 페이지라(실측 확인됨) 헤드리스로도 문제없이
+# 이미지를 찾을 수 있다.
+HEADLESS_RESOLVE_PORT = 9299
+
+
+def _launch_headless_chrome_for_resolve():
+    profile_dir = Path(tempfile.mkdtemp(prefix="flow_share_resolve_"))
+    proc = subprocess.Popen(
+        [
+            CHROME_EXE,
+            "--headless=new",
+            f"--remote-debugging-port={HEADLESS_RESOLVE_PORT}",
+            f"--user-data-dir={profile_dir}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-gpu",
+        ],
+        close_fds=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    deadline = time.time() + 10
+    while time.time() < deadline:
+        if is_port_open(HEADLESS_RESOLVE_PORT, timeout=0.5):
+            return proc, profile_dir
+        time.sleep(0.3)
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    shutil.rmtree(profile_dir, ignore_errors=True)
+    raise RuntimeError("이미지 회수용 헤드리스 크롬을 띄우지 못했습니다.")
+
+
+# 2026-09-12 (6차) 수정 — 실제로 재현해서 원인을 찾음: 헤드리스 크롬으로 이 URL을 열면
+# document.body가 완전히 비어있다(title도 빈 문자열, innerHTML.length==0) — flow.google.com이
+# User-Agent 문자열의 "HeadlessChrome"을 보고 아예 페이지를 안 내려주는 것으로 확인됨(직접
+# navigator.userAgent를 일반 데스크톱 Chrome UA로 CDP `Network.setUserAgentOverride`로 바꿔서
+# 다시 열어보니 이미지 2개가 정상적으로 바로 나타남). navigator.webdriver는 이미 false라 그쪽은
+# 문제가 아니었다 — 순전히 UA 문자열의 "Headless" 표시 때문이었다.
+DESKTOP_CHROME_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+
+
+def resolve_flow_share_image(share_url: str) -> tuple[bytes, str]:
+    port = HEADLESS_RESOLVE_PORT
+    proc, profile_dir = _launch_headless_chrome_for_resolve()
+    try:
+        # about:blank로 먼저 연 뒤, UA를 일반 Chrome처럼 바꾸고 나서 실제 주소로 이동한다 —
+        # 처음부터 공유 URL로 탭을 열면(?url=) 이동이 이미 "HeadlessChrome" UA로 일어나버려서
+        # 늦다.
+        r = httpx.put(f"http://127.0.0.1:{port}/json/new", params={"": "about:blank"}, timeout=10)
+        r.raise_for_status()
+        tab = r.json()
+        tab_id = tab["id"]
+        ws_url = tab["webSocketDebuggerUrl"]
+        try:
+            ws = ws_connect(ws_url, max_size=None, open_timeout=10)
+            try:
+                def cdp_call(method, **params):
+                    mid = int(time.time() * 1000) % 1000000
+                    ws.send(json.dumps({"id": mid, "method": method, "params": params}))
+                    while True:
+                        msg = json.loads(ws.recv(timeout=15))
+                        if msg.get("id") == mid:
+                            if "error" in msg:
+                                raise RuntimeError(f"CDP {method} 실패: {msg['error']}")
+                            return msg.get("result", {})
+
+                cdp_call("Network.enable")
+                cdp_call("Network.setUserAgentOverride", userAgent=DESKTOP_CHROME_UA)
+                cdp_call("Page.navigate", url=share_url)
+                cdp_call("Runtime.enable")
+                # 페이지가 이미지 목록을 불러와 렌더링할 시간을 준다 — 헤드리스라도 콜드 스타트라
+                # 처음 로딩에 몇 초 이상 걸릴 수 있다 — 넉넉히 기다리고, 중간에 evaluate 자체가
+                # 실패해도(아직 about:blank 등) 계속 재시도한다.
+                # 2026-09-12 (4차) 수정 — 사용자 지시: "생성버튼으로 되듯이 링크를 주면 저장을
+                # 시키라고" — 이 폴백이 정상 생성 경로만큼 그냥 확실히 되길 원함. 30초/엄격한
+                # 정사각형 제외 필터 조합이 실측(직접 이 URL을 열어보니 진짜 이미지가 3초 안에
+                # 떴음)보다 훨씬 여유로워 보이긴 하지만, 45초로 늘리고, 그래도 못 찾았을 때
+                # 완전히 실패시키는 대신 "정사각형이라 제외됐던" flow-content.google 이미지가
+                # 하나라도 있었으면(예: 실제로 1:1 비율로 생성된 씬일 수 있음) 그중 가장 큰
+                # 것을 대신 쓴다 — 아예 등록을 포기하는 것보다 낫다.
+                deadline = time.time() + 45
+                urls: list[str] = []
+                any_fc_candidates: list[dict] = []
+                while time.time() < deadline:
+                    try:
+                        res = cdp_call(
+                            "Runtime.evaluate",
+                            expression=(
+                                "Array.from(document.querySelectorAll('img'))"
+                                ".filter(i => i.naturalWidth > 0)"
+                                ".map(i => ({src: i.src, w: i.naturalWidth, h: i.naturalHeight}))"
+                            ),
+                            returnByValue=True,
+                        )
+                        imgs = (res.get("result") or {}).get("value") or []
+                    except Exception:
+                        imgs = []
+                    fc_imgs = [i for i in imgs if "flow-content.google" in i.get("src", "")]
+                    if fc_imgs:
+                        any_fc_candidates = fc_imgs
+                    candidates = [i for i in fc_imgs if i.get("w") != i.get("h")]
+                    if candidates:
+                        candidates.sort(key=lambda i: i["w"] * i["h"], reverse=True)
+                        urls = [c["src"] for c in candidates]
+                        break
+                    time.sleep(0.75)
+                if not urls and any_fc_candidates:
+                    any_fc_candidates.sort(key=lambda i: i["w"] * i["h"], reverse=True)
+                    urls = [c["src"] for c in any_fc_candidates]
+                if not urls:
+                    raise RuntimeError("공유 페이지에서 실제 이미지를 못 찾았습니다(로딩이 오래 걸렸을 수 있음) — 잠시 후 다시 시도해주세요.")
+            finally:
+                ws.close()
+        finally:
+            try:
+                httpx.get(f"http://127.0.0.1:{port}/json/close/{tab_id}", timeout=5)
+            except Exception:
+                pass
+
+        # 2026-09-12 (3차 수정, 되돌림) — 브라우저 안 fetch()+blob() 방식은 flow_econ_driver.py가
+        # 이미 실측으로 "in-page fetch()도 flow-content.google이 CORS를 막아 실패한다"고
+        # 문서화해둔 함정이었다. capture_newest_images()와 동일하게, CORS는 브라우저 안에서만
+        # 적용되므로 서버사이드 httpx.get()으로는 문제없이 받아진다.
+        img = httpx.get(urls[0], timeout=30)
+        img.raise_for_status()
+        ctype = img.headers.get("content-type", "").split(";")[0].strip().lower()
+        if not ctype.startswith("image/"):
+            ctype = "image/png" if ".png" in urls[0].split("?")[0].lower() else "image/jpeg"
+        return img.content, ctype
+    finally:
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        shutil.rmtree(profile_dir, ignore_errors=True)
+
+
+def start_chrome_for_port(port: int):
+    acc = CHROME_ACCOUNTS.get(port)
+    if not acc:
+        return {"error": f"알 수 없는 포트: {port}"}
+    if is_port_open(port):
+        # 2026-09-12 실사고 수정 — 사용자 지적: "2개는 크롬켜기를 눌렀는데 왜 안떠???".
+        # 원격 디버깅 포트는 열려있는데(프로세스는 살아있음) 실제 창/탭이 하나도 없는 경우가
+        # 있었다(9223/9225에서 실측). 이 상태에선 "이미 켜져있음"으로 그냥 넘겨버리면 사용자
+        # 눈엔 아무것도 안 뜨는 것처럼 보인다 — 탭이 하나도 없으면 새 탭을 직접 열어준다.
+        if not has_open_tab(port):
+            try:
+                open_tab_for_port(port)
+            except Exception as e:
+                return {"error": f"탭이 없어서 새로 열려 했지만 실패: {e}"}
+            return {"ok": True, "already_running": True, "opened_tab": True}
+        return {"ok": True, "already_running": True}
+    try:
+        subprocess.Popen(
+            [
+                CHROME_EXE,
+                f"--remote-debugging-port={port}",
+                f"--user-data-dir={acc['profile']}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-background-timer-throttling",
+                "https://flow.google.com/",
+            ],
+            close_fds=True,
+        )
+    except Exception as e:
+        return {"error": f"크롬 실행 실패: {e}"}
+    return {"ok": True, "already_running": False}
+
+
+# 2026-09-12 추가 — 사용자 지적: "켜기는 있는데 끄기는 없어?" — "크롬 켜기"의 짝. 그 포트로
+# 원격 디버깅을 열어둔 chrome.exe만 정확히 골라서 죽인다(다른 일반 크롬 창까지 건드리지 않도록
+# 커맨드라인에 그 포트 번호가 있는지로 매칭).
+def stop_chrome_for_port(port: int):
+    if port not in CHROME_ACCOUNTS:
+        return {"error": f"알 수 없는 포트: {port}"}
+    ps = (
+        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -match '--remote-debugging-port={port}\\b' }} | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps], timeout=15, capture_output=True)
+    except Exception as e:
+        return {"error": f"크롬 종료 실패: {e}"}
+    return {"ok": True}
+
+
+# 2026-09-12 추가 — 사용자 지적: "각 계정 서버 켜는건 어디있어" / "여기에 만들어 두라고 하자나".
+# 계정별 "크롬 켜기"의 짝으로, 이 대시보드 서버(8799) 자체도 메인 컨트롤 화면에서 재시작할 수
+# 있게 한다 — 지금까지 세션 내내 이 서버를 고칠 때마다 사람이 직접 터미널에서 프로세스를 죽이고
+# 다시 띄워야 했던 걸, 화면의 버튼 하나로 대신한다. 자기 자신을 죽이면서 동시에 응답을 보낼 수는
+# 없으므로, 별도의 짧은 PowerShell 헬퍼를 분리 실행해 "잠깐 기다렸다가 지금 이 프로세스를 죽이고
+# 새로 띄우는" 일을 대신 시킨다.
+def restart_server():
+    this_pid = os.getpid()
+    repo = str(HERE.parent)
+    py = sys.executable
+    script_path = str(Path(__file__).resolve())
+    ps = (
+        f"Start-Sleep -Milliseconds 800; "
+        f"Stop-Process -Id {this_pid} -Force -ErrorAction SilentlyContinue; "
+        f"Start-Sleep -Milliseconds 500; "
+        f"$env:PYTHONIOENCODING='utf-8'; "
+        f"Start-Process -WindowStyle Hidden -FilePath '{py}' "
+        f"-ArgumentList '{script_path}','8799' -WorkingDirectory '{repo}'"
+    )
+    subprocess.Popen(
+        ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+        close_fds=True,
+    )
+    return {"ok": True, "restarting": True}
 
 
 def parse_scene_prompts(text: str):
@@ -188,6 +520,31 @@ def set_scene_image_url(site_id: str, unit_id: str, scene_id: str, image_url: st
     image_url = (image_url or "").strip()
     if not image_url:
         return {"error": "이미지 URL을 입력하세요."}
+    # 2026-09-12 실사고 수정, 같은 날 2차 수정 — 위 _fetch_direct_image/resolve_flow_share_image
+    # 설명 참고. URL 형태를 정규식으로 미리 판별하지 않는다 — 먼저 직접 받아봐서 진짜 이미지가
+    # 맞으면 그걸 쓰고, 아니면(공유 페이지든 그 사이 Flow가 형식을 바꾼 무엇이든) 무조건 계정
+    # 크롬으로 그 주소를 열어 실제 이미지를 찾아 안전하게 받아온다. 둘 중 어느 경로든 결과는
+    # 항상 우리 Storage에 다시 올려서 그 주소로 등록한다 — Google CDN 주소를 그대로 쓰면 서명
+    # 토큰이 나중에 만료돼 등록 당시엔 멀쩡하다가 나중에 깨지는 문제도 막는다.
+    direct = _fetch_direct_image(image_url)
+    if direct is not None:
+        img_bytes, mime = direct
+    else:
+        try:
+            img_bytes, mime = resolve_flow_share_image(image_url)
+        except Exception as e:
+            return {"error": f"이미지를 가져오지 못했습니다: {e}"}
+    ext = (mime.split("/")[-1].split("+")[0] or "jpg") if mime else "jpg"
+    if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
+        ext = "jpg"
+    storage_path = f"scene-images/{unit_id}/{scene_id}.{ext}"
+    up = httpx.post(
+        f"{SUPA_URL}/storage/v1/object/honghub-files/{storage_path}",
+        headers={**supa_headers(), "Content-Type": mime or "image/jpeg", "x-upsert": "true"},
+        content=img_bytes, timeout=60,
+    )
+    up.raise_for_status()
+    image_url = f"{SUPA_URL}/storage/v1/object/public/honghub-files/{storage_path}"
     r = httpx.get(f"{SUPA_URL}/rest/v1/hub_sites", params={"id": f"eq.{site_id}", "select": "script_draft"},
                   headers=supa_headers(), timeout=30)
     r.raise_for_status()
@@ -257,14 +614,20 @@ def delete_scene_image(site_id: str, unit_id: str, scene_id: str):
             new_blocks.append("\n".join(filtered))
         else:
             new_blocks.append(b)
-    if not changed:
-        return {"error": f"{scene_id} 씬엔 등록된 이미지가 없습니다."}
-    unit["scenePrompts"] = "\n\n".join(new_blocks)
-    patch = httpx.patch(f"{SUPA_URL}/rest/v1/hub_sites", params={"id": f"eq.{site_id}"},
-                        headers={**supa_headers(), "Content-Type": "application/json"},
-                        content=json.dumps({"script_draft": script_draft}).encode("utf-8"), timeout=30)
-    patch.raise_for_status()
+    if changed:
+        unit["scenePrompts"] = "\n\n".join(new_blocks)
+        patch = httpx.patch(f"{SUPA_URL}/rest/v1/hub_sites", params={"id": f"eq.{site_id}"},
+                            headers={**supa_headers(), "Content-Type": "application/json"},
+                            content=json.dumps({"script_draft": script_draft}).encode("utf-8"), timeout=30)
+        patch.raise_for_status()
 
+    # 2026-09-12 (7차) 수정 — 실사고: DB에는 등록이 안 됐지만(업로드는 성공했는데 DB 등록
+    # 단계만 누락된 경우) 로컬 done 기록·파일·Storage 원본은 그대로 남아있는 상태에서 삭제를
+    # 누르면, 예전엔 "DB에 지울 게 없다"고 바로 실패 처리하고 로컬 정리를 아예 안 했다 — 그래서
+    # 이어서 "생성"을 눌러도 드라이버가 여전히 로컬 done 기록만 보고 건너뛰어 계속 생성이 안
+    # 되는 사고가 났다(사용자: "삭제가 되었으니 펜딩상태고... 새로 생성이 안되는 상태"). DB에
+    # 지울 게 없어도 로컬 done 기록·파일·Storage 원본은 항상 정리한다 — 이 셋 중 아무것도
+    # 못 찾았을 때만 진짜 "지울 게 없다"로 실패 처리한다.
     # 이 씬을 생성했던 계정(포트)이 여러 개일 수 있으므로(9223~9226), 같은 unit_id를
     # 쓰는 run_dir을 전부 훑어서 로컬 done 기록·저장 파일까지 같이 지운다 — 안 그러면
     # "▶ 생성"을 눌러도 flow_econ_driver.py가 이미 done인 씬으로 보고 건너뛴다.
@@ -290,15 +653,20 @@ def delete_scene_image(site_id: str, unit_id: str, scene_id: str):
 
     # Supabase Storage에 올라간 원본도 지운다(있으면) — 실패해도 위의 핵심 작업(scenePrompts
     # 수정, 로컬 상태 정리)은 이미 끝났으니 무시하고 넘어간다.
+    storage_removed = False
     try:
         for ext in ("jpg", "jpeg", "png"):
-            httpx.delete(
+            resp = httpx.delete(
                 f"{SUPA_URL}/storage/v1/object/honghub-files/scene-images/{unit_id}/{scene_id}.{ext}",
                 headers=supa_headers(), timeout=15,
             )
+            if resp.status_code == 200:
+                storage_removed = True
     except Exception:
         pass
 
+    if not changed and not removed_files and not storage_removed:
+        return {"error": f"{scene_id} 씬엔 등록된 이미지가 DB/로컬/Storage 어디에도 없습니다."}
     return {"ok": True, "scene_id": scene_id, "removed_files": removed_files}
 
 
@@ -595,22 +963,29 @@ HTML = """<!doctype html>
 </style></head>
 <body>
   <h1>🎬 씬 이미지 생성 — 실시간 진행</h1>
+  <!-- 2026-09-12 추가 — 사용자 요청: "제일상단에 통일적용 체크박스 추가 => 여기에서 선택한걸로
+       동일하게 적용되게(워크플로우,콘텐츠,비율,장수,설정)". 통합 패널(?panel=multistart)
+       전용이라 기본은 숨겨두고(다른 모드에선 의미 없음), 그 모드에서만 보여준다 — 체크하면
+       이 화면(워크플로우/콘텐츠/화면비율/생성 장수/에이전트 꺼짐/캐릭터)을 그대로 부모(메인
+       컨트롤) 페이지의 계정별 임베드(?view=922X) 4개에 실시간으로 밀어넣는다
+       (applyUnifyAll() 참고). -->
+  <div id="unifyAllRow" class="row" style="display:none"><label><input type="checkbox" id="unifyAllChk" onchange="saveUiState(); applyUnifyAll()"> 여기서 고른 대로 4개 계정 전부 동일하게 적용(워크플로우·콘텐츠·비율·장수·설정)</label></div>
   <div class="row"><label>씬 파일</label>
     <input type="file" id="sceneFileInput" accept=".txt,.json" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:4px;font-size:11px">
     <button onclick="uploadSceneFile()" style="background:#275;font-weight:700">📤 파일로 씬 등록</button></div>
   <div id="sceneFileResult" style="font-size:11px;color:#c66;white-space:pre-line;margin:-4px 0 6px"></div>
   <div class="row"><label>워크플로우</label>
-    <select id="siteSel" onchange="onSiteChange()"><option value="">불러오는 중...</option></select></div>
+    <select id="siteSel" onchange="onSiteChange().then(applyUnifyAll)"><option value="">불러오는 중...</option></select></div>
   <div class="row"><label>콘텐츠</label>
-    <select id="unitSel" onchange="onUnitChange()"><option value="">워크플로우를 먼저 선택하세요</option></select></div>
+    <select id="unitSel" onchange="onUnitChange().then(applyUnifyAll)"><option value="">워크플로우를 먼저 선택하세요</option></select></div>
   <div class="row"><label>화면비율</label>
-    <select id="ratioSel" onchange="saveUiState()">
+    <select id="ratioSel" onchange="saveUiState(); applyUnifyAll()">
       <option value="16:9">16:9 (가로)</option>
       <option value="9:16">9:16 (세로)</option>
       <option value="1:1">1:1 (정사각)</option>
     </select></div>
   <div class="row"><label>생성 장수</label>
-    <select id="imageCountSel" onchange="saveUiState()">
+    <select id="imageCountSel" onchange="saveUiState(); applyUnifyAll()">
       <option value="1" selected>1장</option>
       <option value="2">2장</option>
       <option value="3">3장</option>
@@ -621,35 +996,48 @@ HTML = """<!doctype html>
        Flow의 새 "에이전트" 대화형 모드(support.google.com/flow/answer/17093911)가 켜져 있으면
        캐릭터를 멘션한 뒤 제출해도 곧장 생성되지 않고 확인 메뉴가 뜨는 게 실측 확인됨(S70 자동화가
        이 지점에서 멈춰있었음) — 기본으로 꺼서 시작하되, 체크 해제하면 건드리지 않는다. -->
-  <div class="row"><label><input type="checkbox" id="agentOffChk" checked onchange="saveUiState()"> 에이전트 꺼짐 확인(프로젝트 시작 시 자동으로 끔)</label></div>
+  <div class="row"><label><input type="checkbox" id="agentOffChk" checked onchange="saveUiState(); applyUnifyAll()"> 에이전트 꺼짐 확인(프로젝트 시작 시 자동으로 끔)</label></div>
   <div style="margin:6px 0"><label style="color:#999;display:block;margin-bottom:4px">캐릭터(선택, 여러 개 가능)</label>
-    <textarea id="charactersInput" rows="2" placeholder="한 줄에 하나씩: Flow등록이름=매칭키워드1,키워드2&#10;예) 젠틀맨루즈=Gentleman Rouge,Rouge&#10;예) 스틱맨=representing" onchange="saveUiState(); renderScenes(previewScenes)" style="width:100%;box-sizing:border-box;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;resize:vertical">젠틀맨루즈=Gentleman Rouge,Rouge
+    <textarea id="charactersInput" rows="2" placeholder="한 줄에 하나씩: Flow등록이름=매칭키워드1,키워드2&#10;예) 젠틀맨루즈=Gentleman Rouge,Rouge&#10;예) 스틱맨=representing" onchange="saveUiState(); renderScenes(previewScenes); applyUnifyAll()" style="width:100%;box-sizing:border-box;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;resize:vertical">젠틀맨루즈=Gentleman Rouge,Rouge
 스틱맨=stickman actor</textarea>
     <span style="color:#777;font-size:10px;display:block;margin-top:2px">씬 프롬프트에 매칭키워드 중 하나라도 있으면 그 이름의 Flow 캐릭터를 자동 첨부합니다(계정 프로젝트에 미리 등록된 이름과 정확히 일치해야 함).</span></div>
-  <div class="row"><label>계정(포트)</label>
-    <select id="portSel" onchange="saveUiState(); applyProjectListForPort(parseInt(this.value,10))">
-      <option value="9223">mintimjang33 (9223)</option>
-      <option value="9224">minsiljang0 (9224)</option>
-      <option value="9225">minssajang (9225)</option>
-      <option value="9226">minsiljjang (9226)</option>
-    </select></div>
-  <div class="row"><label><input type="checkbox" id="newProjectChk" onchange="saveUiState()"> 새 프로젝트로 시작</label></div>
-  <div style="margin:6px 0">
-    <label style="color:#999;display:block;margin-bottom:4px">Flow 프로젝트(선택)</label>
-    <div style="display:flex;gap:6px">
-      <select id="projectSel" onchange="onProjectSelChange()" style="flex:1">
-        <option value="">(고르면 캐릭터가 등록된 정확한 프로젝트로 고정됨)</option>
-      </select>
-      <button onclick="loadFlowProjects()" style="background:#358;white-space:nowrap">🔍 목록 불러오기</button>
+  <!-- 2026-09-12 추가 — 사용자 지적: "이부분 삭제 해야 할꺼 같아"(계정(포트)·새 프로젝트로
+       시작·Flow 프로젝트 선택을 가리킴). 이 셋은 원래 "이 계정 하나"를 위한 설정이라 ?panel=
+       multistart(위쪽 통합 패널, 4개 계정에 동시에 쏘는 용도)에서 보면 마치 그 중 한 계정
+       (예: minsiljjang 9226)에만 적용되는 것처럼 보여 오해를 준다 — 실제로 startAllAccounts/
+       autoDispatch는 이 값들을 아예 읽지 않는다(포트별로 각 계정 화면에 저장된 마지막 프로젝트를
+       그대로 씀). id로 감싸서 통합 패널에서만 숨긴다(계정별 개별 화면 — ?view=922X —  에서는
+       그대로 필요하므로 유지). -->
+  <div id="accountProjectBlock">
+    <div class="row"><label>계정(포트)</label>
+      <select id="portSel" autocomplete="off" onchange="saveUiState(); savePortToServer(this.value); applyProjectListForPort(parseInt(this.value,10))">
+        <option value="9223">mintimjang33 (9223)</option>
+        <option value="9224">minsiljang0 (9224)</option>
+        <option value="9225">minssajang (9225)</option>
+        <option value="9226">minsiljjang (9226)</option>
+      </select></div>
+    <!-- 2026-09-12 추가 — 사용자 요청: "동일한 숫자가 2곳에 표시되어야해". 드롭다운 하나만 보고
+         믿기 어렵다는 지적으로, 서버(dashboard_state.json)에 실제 저장된 값을 별도 텍스트로
+         한 번 더 보여준다 — 두 표시가 항상 같은 값이어야 정상이다. -->
+    <div class="row"><label></label><span id="savedPortLabel" style="color:#6a6;font-size:11px;font-weight:700"></span></div>
+    <div class="row"><label><input type="checkbox" id="newProjectChk" onchange="saveUiState()"> 새 프로젝트로 시작</label></div>
+    <div style="margin:6px 0">
+      <label style="color:#999;display:block;margin-bottom:4px">Flow 프로젝트(선택)</label>
+      <div style="display:flex;gap:6px">
+        <select id="projectSel" onchange="onProjectSelChange()" style="flex:1">
+          <option value="">(고르면 캐릭터가 등록된 정확한 프로젝트로 고정됨)</option>
+        </select>
+        <button onclick="loadFlowProjects()" style="background:#358;white-space:nowrap">🔍 목록 불러오기</button>
+      </div>
+      <span id="projectLoadResult" style="color:#c66;font-size:10px;display:block;margin-top:2px"></span>
+      <span style="color:#777;font-size:10px;display:block;margin-top:2px">비워두면 이 계정에서 마지막에 쓰던 프로젝트를 그대로 씀 — 캐릭터가 다른 프로젝트에 있어서 실패하면 여기서 정확한 프로젝트를 골라주세요.</span>
     </div>
-    <span id="projectLoadResult" style="color:#c66;font-size:10px;display:block;margin-top:2px"></span>
-    <span style="color:#777;font-size:10px;display:block;margin-top:2px">비워두면 이 계정에서 마지막에 쓰던 프로젝트를 그대로 씀 — 캐릭터가 다른 프로젝트에 있어서 실패하면 여기서 정확한 프로젝트를 골라주세요.</span>
   </div>
   <hr style="border-color:#333">
   <!-- 2026-09-12 추가 — 사용자 요청: "이거 접고 펴게 해줘 평소에 접어두고". 여러 계정 동시
        시작 섹션은 자주 안 쓰는 고급 기능이라, <details>로 접어서 평소엔 한 줄(제목)만
        보이게 하고 필요할 때만 펼친다(open 속성 없음 = 기본 접힘). -->
-  <details>
+  <details id="multiStartDetails">
     <summary class="row" style="cursor:pointer;display:list-item"><b>⚡ 여러 계정 동시 시작</b></summary>
     <div class="row"><label style="min-width:110px">9223 범위</label>
       <input type="text" id="range9223" placeholder="예: 5~9" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
@@ -680,6 +1068,10 @@ HTML = """<!doctype html>
     <button id="refreshBtn" onclick="refreshNow()">🔄 새로고침</button>
   </div>
   <div class="row"><span>선택됨:</span><b id="selectedCount">0개</b> <span style="margin-left:10px">남은:</span><b id="remainingCount">0개</b> <span id="lastSync" style="color:#666;font-size:10px;margin-left:auto"></span></div>
+  <!-- 2026-09-12 추가 — 사용자 요청: 기본은 지금 고른 계정 것만 보여주되(위 필터 참고),
+       "차라리 그러면 메인 컨트롤페이지를 띄울 수 있게 해줘" — 4계정을 한눈에 보고 싶을 때는
+       이 체크박스로 전체를 다시 볼 수 있게 한다. -->
+  <div class="row"><label style="color:#999;font-size:11px"><input type="checkbox" id="showAllWorkersChk" onchange="saveUiState(); fetchAndRender()"> 🖥 전체 계정 보기(메인 컨트롤)</label></div>
   <div id="workers" style="width:100%"></div>
   <div id="failBanner" style="display:none;background:#3a1414;border:1px solid #a33;border-radius:6px;padding:8px;margin:6px 0;font-size:11px"></div>
   <div class="row" id="sceneFilterRow" style="gap:4px;flex-wrap:wrap"></div>
@@ -708,6 +1100,19 @@ function parseCharactersInput(raw){
     return {name, match};
   }).filter(Boolean);
 }
+// 2026-09-12 추가 — 계정(포트) 선택은 서버(dashboard_state.json)에도 같이 저장한다.
+// localStorage는 크롬창(프로필)마다 따로 노는데, 이 서버는 4개 창이 전부 공유하는 유일한
+// 지점이라 여기 저장해야 "어느 창에서 열어도 항상 같은 계정"이 보장된다.
+function showSavedPort(port){
+  const el = document.getElementById('savedPortLabel');
+  if(el) el.textContent = port ? `✓ 서버에 저장된 계정: ${port}` : '';
+}
+function savePortToServer(port){
+  fetch('/api/ui_state', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({port: String(port)})})
+    .then(() => showSavedPort(String(port)))
+    .catch(()=>{});
+}
 function saveUiState(){
   localStorage.setItem('flowDashUi', JSON.stringify({
     siteId: document.getElementById('siteSel').value,
@@ -724,7 +1129,53 @@ function saveUiState(){
     imageCount: parseInt(document.getElementById('imageCountSel').value, 10),
     projectUrl: document.getElementById('projectSel').value,
     agentOff: document.getElementById('agentOffChk').checked,
+    unifyAll: document.getElementById('unifyAllChk') ? document.getElementById('unifyAllChk').checked : false,
   }));
+}
+// 2026-09-12 추가 — 사용자 요청: "제일상단에 통일적용 체크박스 추가 => 여기에서 선택한걸로
+// 동일하게 적용되게(워크플로우,콘텐츠,비율,장수,설정)". 통합 패널(?panel=multistart)의
+// "여기서 고른 대로 4개 계정 전부 동일하게 적용" 체크박스가 켜져 있을 때, 지금 이 화면의
+// 워크플로우/콘텐츠/화면비율/생성 장수/에이전트 꺼짐/캐릭터를 그대로 부모(메인 컨트롤)
+// 페이지에 나란히 떠 있는 계정별 임베드(?view=922X) 4개에 밀어넣는다 — 같은 출처
+// (127.0.0.1:8799)라 iframe끼리도 서로 DOM·함수에 접근 가능하다. 워크플로우/콘텐츠는 단순
+// 값 복사가 아니라 그 계정 화면 자신의 onSiteChange()/onUnitChange()를 그대로 호출해서
+// (콘텐츠 목록 재조회 등 필요한 비동기 절차를 그대로 밟도록) 맞춘다. 부모가 없으면(독립 실행)
+// 조용히 아무 일도 안 한다.
+async function applyUnifyAll(){
+  const chk = document.getElementById('unifyAllChk');
+  if(!chk || !chk.checked) return;
+  if(window.parent === window) return;
+  const siteId = document.getElementById('siteSel').value;
+  const unitId = document.getElementById('unitSel').value;
+  const ratio = document.getElementById('ratioSel').value;
+  const imageCount = document.getElementById('imageCountSel').value;
+  const agentOff = document.getElementById('agentOffChk').checked;
+  const charactersText = document.getElementById('charactersInput').value;
+  let frames;
+  try { frames = Array.from(window.parent.document.querySelectorAll('iframe[src*="?view="]')); }
+  catch(e) { return; }
+  for(const f of frames){
+    try {
+      const w = f.contentWindow, d = f.contentDocument;
+      if(!w || !d) continue;
+      const s = d.getElementById('siteSel');
+      if(s && s.value !== siteId && typeof w.onSiteChange === 'function'){
+        s.value = siteId;
+        await w.onSiteChange(unitId);
+      } else {
+        const u = d.getElementById('unitSel');
+        if(u && u.value !== unitId && typeof w.onUnitChange === 'function'){
+          u.value = unitId;
+          await w.onUnitChange();
+        }
+      }
+      const r = d.getElementById('ratioSel'); if(r) r.value = ratio;
+      const c = d.getElementById('imageCountSel'); if(c) c.value = imageCount;
+      const a = d.getElementById('agentOffChk'); if(a) a.checked = agentOff;
+      const ch = d.getElementById('charactersInput'); if(ch) ch.value = charactersText;
+      if(typeof w.saveUiState === 'function') w.saveUiState();
+    } catch(e) {}
+  }
 }
 // 2026-09-11 추가 — "프로잭트를 찾아서 선택을 하게끔 수정해야겠어": 홈 화면의 실제 프로젝트
 // 카드 목록을 읽어와 드롭다운으로 보여준다. 하드코딩된 기본 프로젝트나 로컬 캐시에 의존하지
@@ -1167,17 +1618,39 @@ function beep(){
     o.start(); o.stop(ctx.currentTime + 0.3);
   }catch(e){}
 }
-function notifyIfFinished(port, phase){
+// 2026-09-12 실사고 수정 — 사용자 지적: "9226에서 아무것도 생성이 안되었는데 이렇게 표시가 되".
+// 드라이버(flow_econ_driver.py)는 배치의 모든 씬이 실패해도(예: 크롬 응답 없음 등으로 전부
+// 건너뜀) 루프가 끝나면 그냥 phase="all_done"을 쓴다 — "끝났다"이지 "성공했다"가 아닌데,
+// 여기서는 phase만 보고 무조건 "✅ 배치 완료!"라고 축하하는 알림을 띄웠다. 실제로 등록된 게
+// 하나도 없어도(failures만 쌓였어도) 성공 알림이 뜨는 오탐이었다 — failures 유무로 문구를
+// 나눈다.
+function notifyIfFinished(port, phase, failures, updatedAt){
   const finished = phase === 'all_done' || phase === 'stopped';
   const last = lastPhaseByPort[port];
   if(finished && last !== phase && last !== undefined){
-    beep();
-    try{ if(Notification.permission === 'granted') new Notification('씬 이미지 생성 완료', {body: `포트 ${port} 처리가 끝났습니다.`}); }catch(e){}
-    const banner = document.createElement('div');
-    banner.textContent = `✅ 포트 ${port} 배치 완료!`;
-    banner.style.cssText = 'background:#175;color:#fff;padding:8px;border-radius:6px;text-align:center;font-weight:700;margin-bottom:8px';
-    document.body.insertBefore(banner, document.body.firstChild);
-    setTimeout(()=>banner.remove(), 6000);
+    // 2026-09-12 (8차) 수정 — 사용자 지적: "이것도 왜 이렇게 많이 뜨는거야???". 이 대시보드를
+    // 여러 창/탭(사이드패널 + 메인 컨트롤의 계정별 임베드 등)으로 동시에 열어두면 각 탭이
+    // 독립적으로 "끝났다"를 감지해서 각자 알림을 띄우는 바람에 같은 완료 하나가 여러 번
+    // 겹쳐 보였다. localStorage(같은 출처의 모든 탭이 공유)에 "이 포트에서 마지막으로 알림을
+    // 보낸 updated_at"을 기록해서, 이미 알림을 보낸 완료 건이면 다른 탭이어도 다시 안 띄운다.
+    // Notification에 tag도 같이 줘서, 그래도 겹치면 새로 쌓이는 대신 이전 것을 교체한다.
+    const dedupKey = 'flowGenNotified_' + port;
+    let alreadyNotified = false;
+    try { alreadyNotified = localStorage.getItem(dedupKey) === String(updatedAt); } catch(e) {}
+    if(!alreadyNotified){
+      const failCount = (failures || []).length;
+      const ok = failCount === 0;
+      beep();
+      // 2026-09-12 (9차) 수정 — 사용자 요청: "저 메세지 안나오게 해줘" (OS/브라우저 알림 토스트
+      // 팝업 자체를 원치 않음). new Notification()을 완전히 제거하고, 아래 페이지 내 배너와
+      // beep()만 남긴다 — 화면 밖으로 튀어나오는 팝업 없이 이 대시보드를 보고 있을 때만 표시.
+      const banner = document.createElement('div');
+      banner.textContent = ok ? `✅ 포트 ${port} 배치 완료!` : `⚠️ 포트 ${port} 배치 종료 — ${failCount}개 씬 실패(등록 안 됨)`;
+      banner.style.cssText = `background:${ok ? '#175' : '#733'};color:#fff;padding:8px;border-radius:6px;text-align:center;font-weight:700;margin-bottom:8px`;
+      document.body.insertBefore(banner, document.body.firstChild);
+      setTimeout(()=>banner.remove(), 6000);
+      try { localStorage.setItem(dedupKey, String(updatedAt)); } catch(e) {}
+    }
   }
   lastPhaseByPort[port] = phase;
 }
@@ -1237,7 +1710,10 @@ async function retryFailed(port, ids){
   const siteId = document.getElementById('siteSel').value;
   const unitId = document.getElementById('unitSel').value;
   if(!siteId || !unitId){ alert('워크플로우와 콘텐츠를 먼저 선택하세요.'); return; }
-  document.getElementById('portSel').value = String(port);
+  // 2026-09-12 수정 — 사용자 지적: "계정 포트를 사용자가 바꾸지 않는 한 고정되어야 한다".
+  // 예전엔 실패 배너의 "재시작"을 누르면 그 실패가 난 포트로 드롭다운을 몰래 바꿔버려서,
+  // 사용자가 고른 계정이 자기도 모르게 다른 계정으로 바뀌어 있었다(요청 자체는 아래처럼
+  // port를 명시로 넘기므로 드롭다운을 바꾸지 않아도 정확한 계정으로 재시작된다).
   const r = await fetch('/api/start', {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({site_id: siteId, unit_id: unitId, scene_ids: ids, ...runOptions(), port})});
   const d = await r.json();
@@ -1282,7 +1758,9 @@ async function setSceneImageUrl(sceneId){
     body: JSON.stringify({site_id: siteId, unit_id: unitId, scene_id: sceneId, image_url: url})});
   const d = await r.json();
   if(d.error){ alert(d.error); return; }
-  imageUrlById[sceneId] = url;
+  // 붙여넣은 원본 url이 아니라 서버가 실제로 재업로드해서 등록한 image_url을 써야 한다 —
+  // 원본(공유 페이지 등)을 그대로 쓰면 새로고침 전까지 화면에 깨진 이미지가 보인다.
+  imageUrlById[sceneId] = d.image_url || url;
   await onUnitChange();
 }
 // 2026-09-11 추가 — 사용자 지적: "이미지랑 프롬프트가 안 맞는거 같아" (S03/S04, S09/S12,
@@ -1332,11 +1810,17 @@ async function fetchAndRender(){
     // 2026-09-10 재설계 — 포트(계정) 여러 개가 동시에 돌 수 있어서, 한 줄이 아니라
     // 활성 워커별로 한 줄씩("9223: S05 waiting 20초") 보여준다.
     const wdiv = document.getElementById('workers');
+    // 2026-09-12 추가 — 사용자 지적: "왜 9226에 9223의 작업내용이 보이냐고, 각자 자기꺼만
+    // 보여야지". 예전엔 4계정 워커를 전부 한꺼번에 보여줘서, 지금 고른 계정과 무관한 다른
+    // 계정의 상태(예: 멈춰있는 9223)까지 같이 떠서 "지금 이 계정이 이걸 하고 있나?" 하고
+    // 헷갈리게 만들었다 — 현재 드롭다운에서 고른 계정 하나만 보여준다.
+    const selectedPort = parseInt(document.getElementById('portSel').value, 10);
+    const myWorkers = workers.filter(w => w.port === selectedPort);
     // 2026-09-11 (2차) 수정 — 사용자 요청: "시작을 그냥 플로우에서 보여주는 %를 그대로
     // 보여줘". 자체 경과시간 타이머(elapsed) 대신 Flow 화면이 실제로 표시하는 퍼센트
     // (gen_percent)를 그대로 보여준다 — 로딩 표시가 아직 안 떴으면(gen_started===false)
     // "시작 대기"로 표시해 한눈에 구분되게 한다(로그를 따로 열어볼 필요 없음).
-    wdiv.innerHTML = workers.map(w => {
+    wdiv.innerHTML = myWorkers.map(w => {
       const running = w.phase === 'submitting' || w.phase === 'waiting';
       let badge = '';
       if (running) {
@@ -1349,7 +1833,7 @@ async function fetchAndRender(){
         + badge
         + `</div>`;
     }).join('') || '<div class="row" style="color:#666;font-size:11px">실행 중인 계정 없음</div>';
-    workers.forEach(w => notifyIfFinished(w.port, w.phase));
+    workers.forEach(w => notifyIfFinished(w.port, w.phase, w.failures, w.updated_at));
     // 2026-09-11 추가 — 실패 배너: 어느 포트가 뭘 왜 실패했는지 사유까지 그대로 보여주고,
     // 바로 그 자리에서 재시작 버튼을 눌러 이어갈 수 있게 한다(위 retryFailed 참고).
     // 2026-09-11 추가(2) — 사용자 지적: "이 씬만 재시작이 아니라 확인을 클릭해서 내가
@@ -1444,8 +1928,26 @@ async function restoreAndBoot(){
   if(saved.ratio) document.getElementById('ratioSel').value = saved.ratio;
   if(saved.newProject) document.getElementById('newProjectChk').checked = true;
   if(saved.agentOff === false) document.getElementById('agentOffChk').checked = false;
+  if(saved.unifyAll && document.getElementById('unifyAllChk')) document.getElementById('unifyAllChk').checked = true;
   if(saved.range) document.getElementById('rangeInput').value = saved.range;
-  if(saved.port) document.getElementById('portSel').value = saved.port;
+  // 2026-09-12 수정 — 계정(포트)은 이 서버가 이미 HTML에 정확한 <option selected>를 구워서
+  // 내려주므로 여기서 다시 손대지 않는다(브라우저별 localStorage로 덮어쓰면 크롬창마다 다른
+  // 계정으로 보이는 문제가 재발한다) — 서버 상태만 최종 확인차 한 번 더 반영한다.
+  // 2026-09-12 추가 — ?view=922X로 열린 임베드(메인 컨트롤 페이지의 계정별 iframe)는 전역
+  // 선택값을 절대 따라가면 안 된다 — 그러면 4개 iframe이 서로 자기 계정으로 계속 덮어써서
+  // 전부 마지막 것 하나로 수렴해버린다. view 쿼리스트링이 있으면 서버가 이미 그 값으로
+  // selected를 구워 보냈으니 여기서는 손대지 않고 그대로 둔다.
+  const isViewEmbed = new URLSearchParams(location.search).has('view');
+  if(!isViewEmbed){
+    try {
+      const serverState = await (await fetch('/api/ui_state')).json();
+      if(serverState.port) document.getElementById('portSel').value = serverState.port;
+      showSavedPort(serverState.port || document.getElementById('portSel').value);
+    } catch(e) {}
+  } else {
+    // 읽기 전용 임베드 — 이 계정 선택이 실수로라도 전역 상태를 바꾸지 못하게 막는다.
+    document.getElementById('portSel').disabled = true;
+  }
   if(saved.range9223) document.getElementById('range9223').value = saved.range9223;
   if(saved.range9224) document.getElementById('range9224').value = saved.range9224;
   if(saved.range9225) document.getElementById('range9225').value = saved.range9225;
@@ -1457,9 +1959,205 @@ async function restoreAndBoot(){
   // 2026-09-11 추가 — 기본값 켜짐(1장만 생성)이므로, 저장된 값이 명시적으로 false일 때만 끈다.
   document.getElementById('imageCountSel').value = saved.imageCount || 1;
   updateSelectedCount();
+  // 2026-09-12 추가 — 바탕화면 "메인 컨트롤 열기" 아이콘이 ?all=1로 열면 전체 계정 보기를
+  // 자동으로 켠 상태로 시작한다.
+  if (new URLSearchParams(location.search).get('all') === '1') {
+    document.getElementById('showAllWorkersChk').checked = true;
+  }
+  // 2026-09-12 추가 — 사용자 요청: "메인 컨트롤화면에서 여러계정 동시시작 기능은 각 계정에서는
+  // 빼고 상단에 통합 1번만 있기로 했는데". "⚡ 여러 계정 동시 시작"은 애초에 포트 4개 전부에
+  // /api/start를 순서대로 쏘는 전역 기능이라, 계정별 임베드(?view=922X)마다 하나씩 4번 반복
+  // 보일 이유가 없었다(메인 컨트롤 화면에 4개 나란히 뜸). 코드/설정 값을 그대로 재사용해서
+  // 새로 만들지 않고 이 셀렉터를 두 가지 모드로 나눈다:
+  //   - ?view=922X(계정별 임베드): 이 섹션만 숨긴다 — 나머지(개별 "생성" 등)는 그대로.
+  //   - ?panel=multistart(메인 컨트롤 상단에 새로 추가한 통합 1개용): 이 섹션과 그 위의 설정
+  //     패널(워크플로우/콘텐츠 선택·비율·캐릭터 등 — 여기 값들을 그대로 읽어서 /api/start를
+  //     호출하므로 필요)만 남기고, 그 아래(번호 범위/개별 생성/씬 목록 등)는 전부 숨긴다.
+  const multiStartEl = document.getElementById('multiStartDetails');
+  if(isViewEmbed){
+    if(multiStartEl) multiStartEl.style.display = 'none';
+  } else if(new URLSearchParams(location.search).get('panel') === 'multistart'){
+    // 사용자 지적: "이부분 삭제 해야 할꺼 같아" — 계정(포트)/새 프로젝트로 시작/Flow 프로젝트
+    // 선택은 "이 계정 하나" 설정이라 4계정 동시 시작 패널에는 안 어울린다(startAllAccounts/
+    // autoDispatch도 이 값들을 안 읽음) — 통합 패널에서만 숨긴다.
+    const accountProjectBlock = document.getElementById('accountProjectBlock');
+    if(accountProjectBlock) accountProjectBlock.style.display = 'none';
+    // 사용자 요청: "제일상단에 통일적용 체크박스 추가". 통합 패널에서만 보여준다.
+    const unifyAllRow = document.getElementById('unifyAllRow');
+    if(unifyAllRow) unifyAllRow.style.display = '';
+    if(multiStartEl){
+      // 2026-09-12 수정 — 사용자 지적(강한 어조로): "통채로 접으라니까 아래는 왜 따로
+      // 접어노는거야" — 메인 컨트롤(CONTROL_HTML) 레벨에 이미 이 박스 전체를 감싸는 바깥쪽
+      // <details>를 따로 둬서 "통째로 접기"를 거기서 처리하므로, 이 안쪽 하위 <details>까지
+      // 또 따로 접혀있으면 펼친 뒤에도 한 번 더 펼쳐야 하는 이중 접힘이 된다 — 통합 패널
+      // 안에서는 이 안쪽 것은 항상 펼쳐진 상태로 고정하고, 중복되는 자체 summary(펼치기
+      // 화살표)도 숨긴다.
+      multiStartEl.open = true;
+      const innerSummary = multiStartEl.querySelector('summary');
+      if(innerSummary) innerSummary.style.display = 'none';
+      let sib = multiStartEl.nextElementSibling;
+      while(sib){
+        const next = sib.nextElementSibling;
+        sib.style.display = 'none';
+        sib = next;
+      }
+      // 사용자 요청: "2번 스샷은 추가해줘야 몇개 생성해야 하는지 알꺼 같아" — 캐릭터별
+      // 전체/완료 개수 필터 탭(전체·젠틀맨루즈·스틱맨·같이출연·캐릭터없음, 각 "N개/완료개")을
+      // 몇 개 만들지 가늠하는 용도로 다시 보여준다. 원래 위치(번호 범위보다 한참 아래, 씬 목록
+      // 바로 위)는 방금 다 숨겼으니, 범위 입력 바로 위로 옮겨와 보여준다.
+      const filterRow = document.getElementById('sceneFilterRow');
+      if(filterRow){
+        filterRow.style.display = '';
+        multiStartEl.parentNode.insertBefore(filterRow, multiStartEl);
+      }
+    }
+  }
+  applyUnifyAll();
 }
 restoreAndBoot();
 tick();
+</script>
+</body></html>"""
+
+
+# 2026-09-12 추가 — 계정 하나를 골라 씬 생성을 지시하는 위 HTML(단일 계정 제어 화면)과는
+# 별개의 허브 페이지. 상단엔 계정 4개의 크롬 켜기 버튼, 그 아래엔 4계정 화면을 나란히(iframe)
+# 그대로 띄운다 — 씬 생성 자체는 그 아래 각 계정 화면 안에서 진행한다.
+CONTROL_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>메인 컨트롤</title>
+<style>
+  body{background:#111;color:#eee;font-family:system-ui,sans-serif;margin:0;padding:16px}
+  h1{font-size:16px;margin:0 0 4px}
+  .sub{color:#888;font-size:11px;margin-bottom:16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+  .card{background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:12px}
+  .card h2{font-size:13px;margin:0 0 6px;display:flex;align-items:center;gap:6px}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .dot.on{background:#6a6}
+  .dot.off{background:#666}
+  .row{display:flex;gap:6px;margin-top:8px}
+  button,a.btn{flex:1;text-align:center;background:#275;color:#eee;border:none;border-radius:6px;padding:7px 8px;font-size:11px;font-weight:700;cursor:pointer;text-decoration:none;display:block}
+  button:hover,a.btn:hover{background:#386}
+  button.secondary{background:#333}
+  button.secondary:hover{background:#444}
+  .status{font-size:11px;color:#aaa;margin-top:6px;min-height:14px}
+  /* 2026-09-12 수정 — 사용자 지적: "나란히 4개가 있어야지~왼쪽부터 순서데로 오른쪽으로 4개" —
+     2x2(2줄)이 아니라 한 줄에 4개(9223→9224→9225→9226 왼쪽부터 순서대로) 나란히. */
+  .embeds{margin-top:18px;display:grid;grid-template-columns:repeat(4, 1fr);gap:10px}
+  @media (max-width: 1400px) { .embeds{grid-template-columns:1fr 1fr} }
+  @media (max-width: 700px) { .embeds{grid-template-columns:1fr} }
+  .embed{background:#1a1a1a;border:1px solid #333;border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+  .embed .embed-title{padding:8px 12px;font-size:12px;font-weight:700}
+  .embed iframe{width:100%;height:70vh;border:0;border-top:1px solid #333;background:#fff}
+</style>
+</head>
+<body>
+  <h1>🎛 메인 컨트롤</h1>
+  <div class="sub">계정 4개를 한눈에 보고, 각자 크롬을 켜거나 그 계정 전용 화면을 열 수 있습니다. 씬 생성은 각 계정 화면에서 진행하세요.</div>
+  <!-- 2026-09-12 추가 — 사용자 지적: "각 계정 서버 켜는건 어디있어" / "여기에 만들어 두라고
+       하자나". 계정별 "크롬 켜기"의 짝으로, 이 대시보드 서버(8799) 자체도 여기서 재시작할 수
+       있게 한다 — 이 페이지가 보인다는 건 이미 켜져 있다는 뜻이라 상시 "켜짐"으로 표시하고,
+       고장/갱신이 필요할 때 쓰는 재시작 버튼만 둔다. -->
+  <div class="card" style="max-width:280px;margin-bottom:14px">
+    <h2><span class="dot on"></span>대시보드 서버 (8799)</h2>
+    <div class="status">🟢 켜짐 — 이 화면이 보이면 항상 켜져 있는 상태입니다</div>
+    <div class="row"><button onclick="restartServer(this)" class="secondary">🔄 서버 재시작</button></div>
+  </div>
+  <!-- 2026-09-12 추가 — 사용자 요청: "여러계정 동시시작 기능은 각 계정에서는 빼고 상단에
+       통합 1번만 있기로 했는데". 계정별 임베드 4개마다 반복되던 "⚡ 여러 계정 동시 시작"을
+       여기 상단에 딱 하나만 남긴다 — 코드를 새로 만들지 않고, 같은 페이지를 ?panel=multistart
+       모드로 하나 더 embed해서 재사용한다(그 모드에서는 설정 패널 + 이 기능만 보이고 나머지는
+       자동으로 숨겨짐 — restoreAndBoot() 참고). 계정별 임베드 쪽은 이 섹션이 자동으로 숨겨진다. -->
+  <!-- 2026-09-12 수정 — 사용자 지적: "상단에 따로 빼둔거 통채로 접으란 말인데". 안쪽
+       ?panel=multistart 페이지 안의 "여러 계정 동시 시작" 하위 섹션만 접는 걸론 부족했다 —
+       워크플로우/콘텐츠/비율/캐릭터까지 포함한 이 박스 전체를 여기(메인 컨트롤) 레벨에서
+       <details>로 감싸서, 평소엔 제목 한 줄만 보이고 필요할 때만 펼친다. -->
+  <details style="margin-bottom:14px" class="card">
+    <summary style="cursor:pointer;font-size:13px;font-weight:700;padding:2px 0">⚡ 여러 계정 동시 시작 (통합)</summary>
+    <div class="embed" style="max-width:700px;margin-top:10px">
+      <iframe id="multiStartFrame" src="http://127.0.0.1:8799/?panel=multistart" style="height:520px"></iframe>
+    </div>
+  </details>
+  <script>
+    // 2026-09-12 추가 — 사용자 요청: "스크롤바 하지말고 다 보여줘". 고정 높이(px) 하나로는
+    // 내용(콘텐츠 선택 후 프로젝트 목록이 늘어나는 등)에 따라 모자라거나 남을 수 있어서,
+    // 같은 출처(127.0.0.1:8799)라 접근 가능한 iframe 내부 문서의 실제 높이를 주기적으로
+    // 읽어와 iframe 자체의 높이를 거기 맞춰 늘려준다 — 내부에 스크롤바가 안 생기고 항상
+    // 전체 내용이 다 보인다.
+    (function () {
+      const f = document.getElementById('multiStartFrame');
+      function syncHeight() {
+        try {
+          // 2026-09-12 수정 — documentElement.scrollHeight는 한 번 크게 잡힌 값에서 내용이
+          // 줄어도 다시 안 줄어드는(계정/프로젝트 블록을 숨긴 뒤에도 4000px대에 고정된 채
+          // 안 줄어드는) 문제가 실측 확인됨 — body.scrollHeight는 실제 보이는 내용 기준으로
+          // 정확히 줄어드는 걸 확인해서 이걸로 바꾼다.
+          const h = f.contentDocument.body.scrollHeight;
+          if (h && Math.abs(parseInt(f.style.height, 10) - h) > 4) f.style.height = h + 'px';
+        } catch (e) {}
+      }
+      f.addEventListener('load', syncHeight);
+      setInterval(syncHeight, 1000);
+    })();
+  </script>
+  <div id="grid" class="grid"></div>
+  <div class="embeds">
+    __ACCOUNT_EMBEDS__
+  </div>
+<script>
+const ACCOUNTS = __ACCOUNTS_JSON__;
+async function refresh(){
+  let chromeStatus = {}, workerStatus = {workers: []};
+  try { chromeStatus = await (await fetch('/api/chrome_status')).json(); } catch(e) {}
+  try { workerStatus = await (await fetch('/api/status')).json(); } catch(e) {}
+  const grid = document.getElementById('grid');
+  grid.innerHTML = ACCOUNTS.map(acc => {
+    const on = !!chromeStatus[String(acc.port)];
+    const w = (workerStatus.workers || []).find(x => x.port === acc.port);
+    const running = w && (w.phase === 'submitting' || w.phase === 'waiting');
+    const workLine = running ? `${w.current || ''} ${w.gen_percent || (w.gen_started === false ? '시작 대기 ' + (w.elapsed||0) + '초' : '진행 중')}` : (on ? '대기 중' : '꺼짐');
+    // 2026-09-12 삭제 — 사용자 지적: "상단에서 계정화면 열기는 이제 삭제" — 아래에 이미 4계정
+    // 화면이 전부 나란히(iframe) 떠 있으므로, 새 탭으로 여는 이 링크는 중복이라 없앴다.
+    // 2026-09-12 추가 — 사용자 지적: "켜기는 있는데 끄기는 없어?" — 켜짐이면 끄기 버튼을,
+    // 꺼짐이면 켜기 버튼을 보여준다(항상 둘 다 있는 게 아니라 상태에 맞는 하나만).
+    return `<div class="card">
+      <h2><span class="dot ${on ? 'on' : 'off'}"></span>${acc.name} (${acc.port})</h2>
+      <div class="status">${workLine}</div>
+      <div class="row">
+        ${on
+          ? `<button onclick="stopChrome(${acc.port}, this)" class="secondary">■ 크롬 끄기</button>`
+          : `<button onclick="startChrome(${acc.port}, this)" class="secondary">▶ 크롬 켜기</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+async function startChrome(port, btn){
+  btn.disabled = true; btn.textContent = '여는 중...';
+  try{
+    const r = await fetch('/api/start_chrome', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({port})});
+    const d = await r.json();
+    if(d.error) alert(d.error);
+  }catch(e){ alert('요청 실패: ' + e); }
+  setTimeout(refresh, 1500);
+}
+async function stopChrome(port, btn){
+  if(!confirm(`${port} 계정의 크롬을 종료할까요? 진행 중인 생성 작업이 있으면 실패로 끊깁니다.`)) return;
+  btn.disabled = true; btn.textContent = '끄는 중...';
+  try{
+    const r = await fetch('/api/stop_chrome', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({port})});
+    const d = await r.json();
+    if(d.error) alert(d.error);
+  }catch(e){ alert('요청 실패: ' + e); }
+  setTimeout(refresh, 1500);
+}
+async function restartServer(btn){
+  if(!confirm('대시보드 서버를 재시작할까요? 잠시 접속이 끊겼다가 몇 초 후 자동으로 돌아옵니다.')) return;
+  btn.disabled = true; btn.textContent = '재시작 중...';
+  try{ await fetch('/api/restart_server', {method:'POST'}); }catch(e){}
+  setTimeout(() => location.reload(), 3000);
+}
+refresh();
+setInterval(refresh, 3000);
 </script>
 </body></html>"""
 
@@ -1532,11 +2230,60 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": str(e)}, 500)
         elif parsed.path == "/api/status":
             self._json(worker_status())
-        else:
+        elif parsed.path == "/api/ui_state":
+            self._json(load_dashboard_state())
+        elif parsed.path == "/api/chrome_status":
+            self._json({str(p): is_port_open(p) for p in CHROME_ACCOUNTS})
+        elif parsed.path == "/control":
+            accounts_json = json.dumps(
+                [{"port": p, "name": a["name"]} for p, a in sorted(CHROME_ACCOUNTS.items())],
+                ensure_ascii=False,
+            )
+            embeds_html = "\n".join(
+                f'<div class="embed"><div class="embed-title">{a["name"]} ({p}) 화면</div>'
+                f'<iframe src="/?view={p}"></iframe></div>'
+                for p, a in sorted(CHROME_ACCOUNTS.items())
+            )
+            html = CONTROL_HTML.replace("__ACCOUNTS_JSON__", accounts_json)
+            html = html.replace("__ACCOUNT_EMBEDS__", embeds_html)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(HTML.encode("utf-8"))
+            self.wfile.write(html.encode("utf-8"))
+        else:
+            # 2026-09-12 추가 — 계정(포트) 선택을 서버 상태 기준으로 HTML에 직접 구워 넣는다.
+            # localStorage(브라우저 프로필별로 분리됨)에만 의존하면 크롬창 4개 중 어느 걸로
+            # 열든 그 창이 마지막으로 저장한 값만 보여서 "다른 창에서는 다른 계정으로 보인다"는
+            # 문제가 생긴다 — 이 서버가 모든 창의 공통 소스이므로 여기서 고정한다.
+            # 2026-09-12 추가 — 사용자 요청: "전체 계정 보기에서 각각 페이지 띄워서 통제할 수
+            # 있게" — 워커 목록의 "🔗 이 계정 제어" 링크가 ?port=9223 같은 쿼리스트링으로 새 탭을
+            # 여는데, 그 탭은 그 계정으로 고정해서 열려야 한다. 쿼리스트링이 있으면 서버 저장값
+            # 대신 그걸 최우선으로 쓰고, 서버 저장값도 그걸로 갱신해서 다른 창에서도 일관되게 한다.
+            # 2026-09-12 추가 — 메인 컨트롤 페이지가 계정 4개를 iframe으로 한 화면에 동시에
+            # 보여주려면(?view=9223 등) 그 값이 "이 창이 지금 이 계정을 보고 있다"는 뜻일 뿐,
+            # "앞으로 새 작업을 이 계정으로 시작하라"는 전역 선택값을 덮어쓰면 안 된다 — 4개
+            # iframe이 동시에 로드되면서 서로 저장값을 계속 덮어쓰는 사고를 막기 위해 분리했다.
+            # ?port=(계정 화면 열기 버튼)는 기존대로 전역 선택값을 바꾸고, ?view=(읽기 전용 임베드)는
+            # 화면 표시만 그 계정으로 하고 서버 저장값은 건드리지 않는다.
+            view_port = qs.get("view", [None])[0]
+            query_port = qs.get("port", [None])[0]
+            if view_port in ("9223", "9224", "9225", "9226"):
+                saved_port = view_port
+            elif query_port in ("9223", "9224", "9225", "9226"):
+                save_dashboard_state({"port": query_port})
+                saved_port = query_port
+            else:
+                saved_port = str(load_dashboard_state().get("port") or "9223")
+            html = HTML.replace(f'<option value="{saved_port}">', f'<option value="{saved_port}" selected>', 1)
+            html = html.replace(
+                '<span id="savedPortLabel" style="color:#6a6;font-size:11px;font-weight:700"></span>',
+                f'<span id="savedPortLabel" style="color:#6a6;font-size:11px;font-weight:700">✓ 서버에 저장된 계정: {saved_port}</span>',
+                1,
+            )
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(html.encode("utf-8"))
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -1568,6 +2315,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json(result, 400 if result.get("error") else 200)
         elif self.path == "/api/stop":
             self._json(stop_run(int(data.get("port", 9223))))
+        elif self.path == "/api/ui_state":
+            save_dashboard_state(data or {})
+            self._json({"ok": True})
+        elif self.path == "/api/start_chrome":
+            result = start_chrome_for_port(int(data.get("port", 0)))
+            self._json(result, 400 if result.get("error") else 200)
+        elif self.path == "/api/stop_chrome":
+            result = stop_chrome_for_port(int(data.get("port", 0)))
+            self._json(result, 400 if result.get("error") else 200)
+        elif self.path == "/api/restart_server":
+            self._json(restart_server())
         else:
             self.send_response(404)
             self.end_headers()
