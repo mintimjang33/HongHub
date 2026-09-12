@@ -531,6 +531,13 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
 // 배우들은 전부 같은 베이스(레퍼런스 하나)를 공유하므로, 한 씬에 여러 명이 동시에 등장하면(변호사
 // 둘, 임원 여럿 등) 아무 구분 지시 없인 서로 똑같이 나올 위험이 있다 — 옷차림(정장/앞치마/드레스
 // 등)이나 머리카락 유무 같은 시각적 차이를 텍스트로 명시해서 서로 구분하라는 지침을 추가했다.
+//
+// 2026-09-12 추가 — 사용자 요청: "13단계에서도 탭별로(전체/루즈 등) 분류해서 일관성 유지가 잘
+// 되었는지 확인해볼 수 있게 해줘". 'stickman' 프리셋은 description에 실제로 두 개의 개별 등록
+// 캐릭터("Gentleman Rouge"/"the stickman actor")를 다루므로, 각 장면의 imagePrompt 텍스트에서
+// 이 두 이름을 찾아 탭으로 분류할 수 있게 tabs를 채운다. description에 실제로 등장하는 문구를
+// 그대로 keywords로 썼다 — 프롬프트가 바뀌면 이 keywords도 같이 바꿔야 화면 탭과 실제 생성
+// 프롬프트가 어긋나지 않는다. 캐릭터가 하나뿐인 포동이/식빵맨은 tabs를 안 채운다(분류할 필요 없음).
 const FEMALE_MARKER_RULE =
   '이 캐릭터의 여성 버전이 필요한 장면에서는 외형을 그대로 두고 머리 위에 분홍색 리본 하나만 추가해서 성별을 구분한다(그 외 디자인은 동일).';
 
@@ -543,6 +550,10 @@ export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
     // ⚠️ 이 URL은 아직 옛 디자인(점 두 개 눈) 이미지다 — 새 디자인 레퍼런스 이미지를 Storage에
     // 올린 뒤 이 필드도 같이 교체할 것.
     referenceImageUrl: 'https://iwxpjnwktxpscoktfpyl.supabase.co/storage/v1/object/public/honghub-files/d22236a5-cbb3-4c59-a4a6-c316c2354df7.jpg',
+    tabs: [
+      { label: '젠틀맨 루즈', keywords: ['Gentleman Rouge'] },
+      { label: '스틱맨', keywords: ['the stickman actor', 'stickman actor'] },
+    ],
   },
   {
     id: 'bean_mascot',
