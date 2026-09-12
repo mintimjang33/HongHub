@@ -298,6 +298,10 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
       note: '',
       time: `${formatSec(s.startSec ?? 0)}-${formatSec(s.endSec ?? 0)}`,
       sceneImage: '',
+      // 2026-09-13 추가 — SceneBlock 타입에 sceneVideo 필드가 추가되면서, 여기서도 명시적으로
+      // 빈 문자열을 채워야 한다(제미나이 파싱 결과에는 영상 URL이 없다 — 영상은 항상 사람이
+      // 나중에 SceneDraftForm에서 직접 업로드해서 채운다).
+      sceneVideo: '',
       imagePrompt: s.imagePrompt || '',
       clean: '',
       info: '',
