@@ -242,12 +242,16 @@ def cleanup_debris(here: Path):
     돌아가는 동안 쌓이는 건 사실상 타임아웃 스크린샷(_shots/*_TIMEOUT.png)뿐이다 — 실제
     결과물(output/images/*)은 절대 안 지운다. 이미 지나간 씬의 타임아웃 스샷은 성공했든
     실패했든 더 이상 쓸모없으니 주기적으로 비운다."""
+    # 2026-09-11 수정 — 디버그용 스샷(mention_fail_*, dbg_*)까지 매 씬마다 통째로 같이
+    # 지워져서, 실패 원인을 조사하려 할 때마다 증거가 이미 없어져 있었다. 이 접두어들은
+    # 사람이 직접 지울 때까지 남겨둔다.
     shots_dir = here / "_shots"
     if not shots_dir.exists():
         return
+    keep_prefixes = ("mention_fail_", "dbg_")
     removed = 0
     for f in shots_dir.glob("*"):
-        if f.is_file():
+        if f.is_file() and not f.name.startswith(keep_prefixes):
             try:
                 f.unlink()
                 removed += 1
@@ -281,6 +285,56 @@ class EconFlow:
     def type_text(self, text: str):
         for ch in text:
             self.c.cdp("Input.dispatchKeyEvent", type="char", text=ch)
+
+    def _composer_text_len(self) -> int:
+        """컴포저(하단 40% 안의 contenteditable/textarea) 안 텍스트 길이. 못 찾으면 -1."""
+        r = self.c.js(r"""(()=>{const H=innerHeight;
+          const e=[...document.querySelectorAll("[contenteditable=true],textarea")]
+            .filter(x=>x.offsetParent && x.getBoundingClientRect().top>H*0.6)[0];
+          if(!e) return -1;
+          return (e.innerText||e.value||"").length;})()""")
+        try:
+            return int(r)
+        except (TypeError, ValueError):
+            return -1
+
+    def paste_text(self, text: str):
+        """2026-09-12 추가 — 사용자 지적 + 홍허브 벤치마킹 항목(nam-ai-trend/7_threads_auto)
+        확인: "타이핑은 클립보드 복사+Cmd/Ctrl+V로 붙여넣어 봇탐지 회피"가 실측된 방식이다.
+        한 글자씩 dispatchKeyEvent(type="char")로 타이핑하는 지금 방식은 (1) 씬이 쌓일수록
+        "거절"이 나기 시작했다는 사용자 관찰, (2) "@이름" 멘션이 어떨 때는 붙고 어떨 때는
+        그냥 텍스트로 남는 불안정(S19/S34/S66 등)과 둘 다 관련 있을 수 있다.
+
+        2026-09-12 (4차) 실사고 수정 — 최초 구현은 클립보드에 쓴 뒤 CDP
+        Input.dispatchKeyEvent로 Ctrl+V "키 이벤트"만 흉내 냈는데, 이 컴포저(ProseMirror
+        리치텍스트 에디터)에서는 이 가짜 키 이벤트가 실제 붙여넣기로 처리되지 않는다는 게
+        실측으로 확인됨(9223에 직접 CDP로 붙어 before/after 컴포저 길이를 재보니 그대로 1 →
+        1, 전혀 안 늘어남 — 사용자도 "나는 붙여넣기 되던데?"라며 본인이 직접 누르는 진짜
+        Ctrl+V는 되는데 자동화만 안 된다고 확인해줌). 반면 CDP `Input.insertText`는 같은
+        컴포저에서 한 번에 텍스트 전체를 정확히 삽입하는 게 실측으로 확인됨(1 → 22자, 정확히
+        일치). 그래서 클립보드+가짜 키 이벤트 조합을 걷어내고 Input.insertText로 완전히
+        교체했다 — 이것도 한 글자씩 dispatchKeyEvent(type="char")로 타이핑하는 것과 달리
+        텍스트 전체가 한 번의 삽입 이벤트로 들어가므로, 애초 목적(봇탐지 회피용 "한 번에
+        붙여넣기" 패턴)은 그대로 유지된다.
+        붙여넣기(삽입) 전후로 컴포저 텍스트 길이가 실제로 늘어났는지 확인한 뒤, 확인되면
+        사람처럼 짧게 쉬었다가 리턴한다 — 사용자 지적("프롬프트 다 적히고 클릭하는거 맞아?
+        너무 순식간이라 봇같지 않아?")대로, 삽입 직후 0초 만에 바로 제출 버튼을 누르는 것
+        자체가 부자연스러운 패턴이라 봇 탐지에도 안 좋을 수 있다. 확인이 실패해도(길이 감지
+        자체가 셀렉터 문제로 못 미더울 수 있으므로) 타이핑으로 되돌아가지 않는다 — 이미
+        Input.insertText는 성공했다고 신뢰하고 경고만 남긴다."""
+        before_len = self._composer_text_len()
+        self.c.cdp("Input.insertText", text=text)
+        grew = False
+        for _ in range(8):
+            time.sleep(0.25)
+            if self._composer_text_len() > before_len:
+                grew = True
+                break
+        if not grew:
+            log(f"  ⚠ 붙여넣기(insertText) 반영 확인 실패(컴포저 길이 감지 안 됨, before={before_len}) — "
+                "타이핑으로 전환하지 않고 이미 보낸 insertText를 그대로 신뢰함")
+        # 사람이 붙여넣은 뒤 훑어보는 정도의 짧은 정지 — 확인 성공/실패 여부와 무관하게 항상 쉰다.
+        time.sleep(0.8)
 
     def shot(self, tag):
         if self.shots:
@@ -333,6 +387,36 @@ class EconFlow:
             raise RuntimeError(f"프로젝트 진입 실패: {info}")
         return info["url"]
 
+    # 2026-09-11 추가 — 사용자 지적: "캐릭터도 프로젝트별로 생성이 되네" / "프로잭트를
+    # 찾아서 선택을 하게끔 수정해야겠어". 그동안 project_url을 코드에 하드코딩된 기본값이나
+    # 로컬 상태 파일(_flow_state.json)에 의존했는데, 실측 결과 그 값이 실제 캐릭터가 등록된
+    # 프로젝트와 다른 경우(오래된 테스트 프로젝트 등)가 실제로 발생해서, 대시보드가 "대기중"
+    # 으로 보여줘도 드라이버는 엉뚱한(캐릭터 없는) 프로젝트에서 돌고 있었다. 홈 화면의 프로젝트
+    # 카드 목록을 직접 읽어와서 사람이 고를 수 있게 한다 — 하드코딩 대신 실제 목록에서 선택.
+    def list_projects(self):
+        """flow.google.com 홈 화면의 프로젝트 카드 목록을 [{id,url,name}] 로 반환한다."""
+        self.c.goto_url("https://flow.google.com/")
+        time.sleep(6)
+        self.dismiss_overlays()
+        r = self._poll_js(r"""(()=>{
+          const links = [...document.querySelectorAll('a[href*="/project/"]')];
+          const seen = new Set(); const out = [];
+          for (const a of links) {
+            const m = (a.getAttribute('href')||'').match(/\/project\/([0-9a-fA-F-]{36})/);
+            if (!m) continue;
+            const id = m[1];
+            if (seen.has(id)) continue;
+            seen.add(id);
+            let name = (a.innerText || a.textContent || '').trim().split('\n')[0];
+            if (!name) name = id;
+            out.push({id, name});
+          }
+          return JSON.stringify(out);
+        })()""", tries=6, delay=0.5)
+        if r == "NF" or not r:
+            raise RuntimeError("★홈 화면에서 프로젝트 카드를 하나도 못 찾았다 — UI 구조가 다를 수 있다")
+        return json.loads(r)
+
     # ── 에이전트 설정 (프로젝트당 1회) ───────────────────────
     def _poll_js(self, expr: str, tries: int = 12, delay: float = 0.5):
         """2026-09-10 실사고 수정 — UI를 딱 한 번만 조회하고 못 찾으면 바로 죽던 여러 지점
@@ -366,59 +450,116 @@ class EconFlow:
         return None if r == "NF" else json.loads(r)
 
     def open_settings(self) -> bool:
-        # 2026-09-10 실사고 수정 — 완전히 새 계정의 첫 프로젝트(아직 아무 것도 생성 안 한
-        # 빈 화면)는 설정(tune) 아이콘 자체가 툴바에 없다(실측: body 텍스트에 아예 없음).
-        # 예전엔 여기서 그냥 죽어서 병렬 처리용 새 계정이 전부 못 쓰는 문제가 있었다 — 못
-        # 찾으면 "기본값이 이미 맞다"고 보고 그냥 건너뛴다(기본 비율이 16:9라 우리 기본값과
-        # 어차피 같다).
-        pos = self.find_icon_button("tune")
-        if not pos:
-            log("  (설정 아이콘 없음 — 새 프로젝트 기본값 그대로 사용, 건너뜀)")
+        # 2026-09-11 실사고 수정(2차, 결정적) — 사용자 스크린샷으로 실제 위치 확인: 설정은
+        # 상단 툴바 톱니바퀴가 아니라, 컴포저(화면 하단) 오른쪽의 모델/비율 요약 칩이었다
+        # (예: "Nano Banana 2 ▭ x1" — 모델명+비율아이콘+배치수가 한 칩에 요약돼 있고, 이걸
+        # 클릭하면 팝오버로 "이미지/동영상" 탭 + 16:9/4:3/1:1/3:4/9:16 비율 버튼 + 배치수
+        # x1~x4가 뜬다). 이전 두 번의 수정(하단 25% 제한 → 화면 전체 tune/settings 아이콘
+        # 검색)은 전부 틀린 위치를 찾고 있었다. 이 칩은 "x숫자" 패턴을 포함하는 짧은 버튼
+        # 텍스트로 식별한다.
+        r = self._poll_js(r"""(()=>{const H=innerHeight;
+          const b=[...document.querySelectorAll("button,[role=button]")].filter(e=>{
+            if(!e.offsetParent) return false;
+            const r=e.getBoundingClientRect();
+            if(r.top < H*0.6) return false;
+            const t=(e.innerText||"").replace(/\s+/g," ").trim();
+            return /x\d/i.test(t) && t.length < 40;
+          });
+          if(!b.length) return "NF";
+          const r=b[0].getBoundingClientRect();
+          return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});})()""",
+                          tries=8, delay=0.4)
+        if r == "NF":
+            log("  (모델/비율 칩 없음 — 기본값 그대로 사용, 건너뜀)")
             return False
+        pos = json.loads(r)
         self.click_xy(pos["x"], pos["y"])
-        time.sleep(1.2)
+        time.sleep(1.0)
         return True
 
     def close_settings(self):
-        r = self.c.js(r"""(()=>{const h=[...document.querySelectorAll("*")]
-          .find(e=>e.textContent.trim()==="에이전트 설정" && e.children.length===0);
-          if(!h) return "NF";
-          let n=h; for(let k=0;k<4;k++){ if(!n.parentElement) break; n=n.parentElement;
-            const b=n.querySelector("button"); if(b){ const r=b.getBoundingClientRect();
-              return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});}}
-          return "NF";})()""")
-        if r != "NF":
+        # 팝오버는 별도 닫기 버튼 없이 바깥을 클릭하면 닫힌다 — 컴포저 입력창을 클릭해서
+        # 닫는 동시에 다음 프롬프트 입력 준비까지 겸한다.
+        self.composer_click()
+
+    def switch_settings_tab(self, kind: str) -> None:
+        """팝오버 안 '이미지'/'동영상' 탭 전환. 기본이 '이미지' 탭이라 kind='image'면 생략 가능."""
+        label = "이미지" if kind == "image" else "동영상"
+        r = self.c.js(r"""(()=>{const target=%s;
+          const b=[...document.querySelectorAll("button,[role=button]")]
+            .find(e=>e.offsetParent && (e.innerText||"").trim()===target);
+          if(!b) return "NF"; const r=b.getBoundingClientRect();
+          return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});})()""" % json.dumps(label))
+        if r and r != "NF":
             d = json.loads(r)
             self.click_xy(d["x"], d["y"])
-            time.sleep(0.8)
+            time.sleep(0.5)
 
     def set_ratio_chip(self, ratio: str, kind: str):
-        """kind: 'image' → 이미지 생성 기본값 행 / 'video' → 동영상 생성 기본값 행.
-        둘 다 화면에 같은 라벨(예: '16:9')이 두 번 나오므로 y좌표로 행을 가른다."""
-        r = self.c.js(r"""(()=>{const suf=%s;
+        """팝오버 안에서 '이미지'/'동영상' 탭을 고른 뒤, 그 탭의 비율 버튼(예: '16:9')을 클릭."""
+        self.switch_settings_tab(kind)
+        r = self.c.js(r"""(()=>{const target=%s;
           const b=[...document.querySelectorAll("button,[role=button]")]
-            .filter(e=>e.offsetParent && (e.innerText||"").replace(/\s+/g," ").trim().endsWith(suf));
-          return JSON.stringify(b.map(e=>{const r=e.getBoundingClientRect();
-            return {x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2)};})
-            .sort((a,b)=>a.y-b.y));})()""" % json.dumps(ratio))
-        cands = json.loads(r) if r else []
-        if not cands:
-            log(f"  ✗ 비율 칩 없음: {ratio}")
+            .filter(e=>e.offsetParent && (e.innerText||"").replace(/\s+/g," ").trim()===target);
+          if(!b.length) return "NF"; const r=b[0].getBoundingClientRect();
+          return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});})()""" % json.dumps(ratio))
+        if r == "NF" or not r:
+            log(f"  ✗ 비율 버튼 없음: {ratio} ({kind})")
             return False
-        # 이미지 행이 위, 동영상 행이 아래 (실측 순서 고정)
-        idx = 0 if kind == "image" else (1 if len(cands) > 1 else 0)
-        c = cands[min(idx, len(cands) - 1)]
-        self.click_xy(c["x"], c["y"])
-        time.sleep(0.6)
+        d = json.loads(r)
+        self.click_xy(d["x"], d["y"])
+        time.sleep(0.5)
         return True
 
-    def ensure_settings(self, image_ratio="16:9", video_ratio="16:9"):
-        """프로젝트당 1회 호출. 이미지·동영상 비율을 원하는 값으로 맞춘다(배치수·모델은 기본값 유지)."""
+    def ensure_settings(self, image_ratio="16:9", video_ratio="16:9", agent_off=True):
+        """프로젝트당 1회 호출. 컴포저의 모델/비율 칩을 열어 이미지·동영상 비율을 맞춘다."""
         if not self.open_settings():
             return
         self.set_ratio_chip(image_ratio, "image")
         self.set_ratio_chip(video_ratio, "video")
         self.close_settings()
+        # 2026-09-12 추가 — 대시보드 체크박스("에이전트 꺼짐 확인")로 켜고 끌 수 있게 노출.
+        if agent_off:
+            self.ensure_agent_off()
+
+    def ensure_agent_off(self):
+        """2026-09-12 추가 — Flow가 2026년 5월 새로 붙인 "에이전트" 대화형 모드(구글 공식 문서:
+        support.google.com/flow/answer/17093911) 때문에, 캐릭터를 멘션한 뒤 제출하면 곧장
+        생성되지 않고 "이 캐릭터로 뭘 하고 싶으세요?" 같은 확인 메뉴가 뜨는 게 실측 확인됐다
+        (S70 자동화 실행이 이 지점에서 멈춰있었음 — gen_started:false로 계속 대기).
+        사용자가 직접 화면에서 "에이전트" 칩을 꺼서 문제가 해결됨을 확인했다 — 이 칩이 켜져
+        있으면 자동으로 꺼서, 매 프로젝트 시작 시 이 메뉴가 아예 안 뜨게 한다.
+        Flow가 이 칩의 켜짐 상태를 정확히 어떤 속성/클래스로 표시하는지 실측된 바 없어서,
+        aria-pressed(또는 유사 속성)를 우선 신뢰하되 못 찾으면 함부로 클릭하지 않고 디버그
+        스크린샷만 남긴다 — 꺼진 걸 실수로 다시 켜버리는 것보다는 아무 것도 안 하는 쪽이
+        안전하다."""
+        r = self.c.js(r"""(()=>{const H=innerHeight;
+          const b=[...document.querySelectorAll("button,[role=button]")].filter(e=>{
+            if(!e.offsetParent) return false;
+            const r=e.getBoundingClientRect();
+            if(r.top < H*0.6) return false;
+            const t=(e.innerText||"").replace(/\s+/g," ").trim();
+            return t === "에이전트";
+          });
+          if(!b.length) return "NF";
+          const el=b[0]; const r=el.getBoundingClientRect();
+          const pressed = el.getAttribute("aria-pressed") || el.getAttribute("aria-selected") || "";
+          return JSON.stringify({x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2),
+            pressed, cls: el.className || ""});})()""")
+        if r == "NF":
+            log("  (에이전트 칩 안 보임 — 건너뜀)")
+            return
+        d = json.loads(r)
+        self.shot("dbg_agent_chip")
+        if d["pressed"] == "true":
+            log(f"  에이전트 켜짐 감지(pressed={d['pressed']!r}) — 꺼는 중")
+            self.click_xy(d["x"], d["y"])
+            time.sleep(0.5)
+        elif d["pressed"] == "false":
+            log("  에이전트 이미 꺼짐 확인")
+        else:
+            log(f"  ⚠ 에이전트 칩 상태 불명(pressed 속성 없음, class={d['cls']!r}) — "
+                "잘못 눌러서 켜버릴 위험이 있어 건드리지 않음. dbg_agent_chip 스샷 확인 필요.")
 
     # ── 컴포저 ───────────────────────────────────────────────
     def composer_click(self):
@@ -462,75 +603,71 @@ class EconFlow:
         time.sleep(0.2)
 
     def attach_reference(self, title: str):
-        """'+' 로 애셋 피커를 열고 title 로 검색해 '프롬프트에 추가'."""
-        pos = self.find_icon_button("add")
-        if not pos:
-            raise RuntimeError("★첨부(add) 아이콘을 못 찾았다")
-        self.click_xy(pos["x"], pos["y"])
-        time.sleep(1.5)
-        # 검색창에 제목 입력
-        # 2026-09-10 실사고 수정 — 프로젝트 미디어가 많아질수록(생성 반복) 피커가 열리는
-        # 속도가 느려져 기존 재시도 예산(약 4초)으로도 못 잡는 경우가 실측됨(S14, 9224,
-        # 두 번째 재시도까지 실패). 이 단계만 넉넉하게 늘림(최대 약 8초).
-        r = self._poll_js(r"""(()=>{const i=[...document.querySelectorAll("input")]
-          .find(e=>e.offsetParent && /검색/.test(e.placeholder||""));
-          if(!i) return "NF"; const r=i.getBoundingClientRect();
+        """2026-09-11 전면 재설계 — 사용자 지시("웹 다시 찾아봐 플로우 사용법")로 공식 문서를
+        재확인한 결과(support.google.com/flow/answer/16729550, googleautomator.com/user-guide):
+        등록된 이름 있는 캐릭터를 참조로 쓰는 공식 방법은 "+"로 피커를 여는 게 아니라, 프롬프트
+        입력창에 "@" + 캐릭터 이름을 직접 타이핑해서 뜨는 자동완성 목록에서 고르는 것이다
+        ("+" 버튼은 파일 업로드/프로젝트 애셋 첨부용). 지금까지 이 메서드가 "+"를 눌러 피커를
+        열고 클릭으로 조작하던 접근 전체가 애초에 공식 경로가 아니었던 것으로 보이고, 이게
+        반복된 불안정(어떤 씬은 정상 캐릭터, 어떤 씬은 완전히 다른 캐릭터)의 근본 원인일
+        가능성이 높다. 호출 전제: composer가 이미 포커스돼 있고(컴포저를 지우지 않은 채) 커서
+        위치에 "@이름"을 타이핑한다 — 이 메서드는 컴포저를 새로 클릭/초기화하지 않는다.
+        2026-09-11 실사고 수정 — 사용자 지적: "스탁맨인데 틱맨만 찾고있어". "@"+이름을 한
+        번에 타이핑하면, 이름의 첫 글자 직후에 피커 오버레이가 뜨면서 포커스가 검색창으로
+        넘어가고, 그 타이밍에 나머지 글자만 검색창에 들어가 첫 글자가 빠진다(실측 스샷으로
+        확인 — "@젠"은 컴포저에 남고 "틀맨루즈"만 검색창에 들어감).
+        2026-09-12 단순화 — 사용자가 직접 Flow에서 확인: "검색창에 이름 안 쳐도 되" — 캐릭터가
+        2개뿐이라 "@"만 쳐도 오버레이에 둘 다 뜨고, 검색창에 따로 이름을 입력할 필요가 없다.
+        그래서 검색창을 찾아 비우고 이름을 다시 타이핑/붙여넣던 단계를 통째로 없앴다.
+        2026-09-12 (2차) 단순화 — 사용자 지적: "@를 입력하면 스샷처럼 자동으로 나와, 그런데
+        넌 계속 입력을 했던거야" — 스샷으로 확인해보니 "@" 딱 한 글자만 쳐도 오버레이가 바로
+        뜬다(이름의 첫 글자까지 칠 필요조차 없었다). "@"+첫 글자를 타이핑하던 것도 과했던
+        것 — 이제 "@" 하나만 실제 타이핑해서 오버레이를 띄운다.
+        2026-09-12 (3차, 핵심) — 디버그 스샷(dbg_mention_before/after)으로 실측 확인: "@"만
+        치면 기본으로 "전체"(모든 미디어) 탭이 열리는데, 거기서 이름을 클릭하면 미리보기로
+        선택만 되고 컴포저엔 "@"만 남은 채 첨부는 안 된다 — "프롬프트에 추가"를 한 번 더
+        눌러야 끝난다. 반면 사용자가 직접 확인: "캐릭터에선 그냥 이름만 선택하면 되" — "캐릭터"
+        탭으로 미리 좁혀두면 이름 클릭 한 번으로 바로 첨부까지 끝난다(버튼 불필요). 그래서
+        "캐릭터" 탭을 먼저 클릭해 좁히는 단계를 다시 넣는다 — 예전에 검색창 정리 단계를
+        없애면서 실수로 같이 지워버렸던 부분(사용자 지적: "왜 넌 자꾸 전체로 가???")."""
+        tag = re.sub(r'[^A-Za-z0-9]+', '_', title)[:20]
+        self.type_text("@")
+        time.sleep(1.0)
+        # "캐릭터" 탭을 눌러 좁힌다 — 전체 탭에 남아있으면 이전에 생성된 씬 이미지들의
+        # 자동 캡션(예: "Gentleman Rouge pointing...")과 뒤섞여 있어도, 좁혀두면 등록된
+        # 캐릭터 2개만 남아 이름 클릭 한 번으로 바로 첨부된다.
+        tab_r = self._poll_js(r"""(()=>{
+          const overlay = document.querySelector('.cdk-overlay-container, [role="dialog"]');
+          const root = overlay || document;
+          const all=[...root.querySelectorAll("*")]
+          .filter(e=>e.offsetParent && e.children.length===0 && (e.textContent||"").trim()==="캐릭터");
+          if(!all.length) return "NF"; const r=all[0].getBoundingClientRect();
           return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});})()""",
-                          tries=16, delay=0.5)
-        if r == "NF":
-            self.shot(f"attach_fail_{re.sub(r'[^A-Za-z0-9]+', '_', title)[:20]}")
-            raise RuntimeError("★애셋 검색창을 못 찾았다")
-        d = json.loads(r)
-        search_box_y = d["y"]
-        self.click_xy(d["x"], d["y"])
-        time.sleep(0.3)
-        self.type_text(title)
-        time.sleep(1.2)
-        # 2026-09-10 실사고 수정 — "검색하면 첫 결과가 자동 선택된다"(2026-09-06 실측)는
-        # 항상 그런 게 아니었다 — S14 재시도 중 검색 결과가 선택 안 된 채로 뜬 경우가 실측됨
-        # (미리보기·'프롬프트에 추가' 버튼 자체가 없어 다음 단계가 통째로 실패). 자동 선택을
-        # 믿지 않고 검색 결과 행(제목 텍스트)을 직접 클릭해 확실히 선택시킨다.
-        # 2026-09-10 실사고 수정(2) — 캐릭터를 실제로 씬에 몇 번 쓰고 나면, 그 캐릭터 이름으로
-        # 시작하는 이미지 애셋들(예: "Gentleman Rouge snapping fingers")과 화면 다른 곳(상단
-        # 캐릭터 스트립 등)에 같은 텍스트("Gentleman Rouge")가 동시에 존재해서, document 전체
-        # 기준 첫 매치를 클릭하면 검색 팝업이 아닌 엉뚱한 요소가 클릭되는 사고가 실측됨(9223,
-        # S06 — "프롬프트에 추가" 버튼이 끝내 안 뜸). 검색창 바로 아래(팝업 목록 안)에 있는
-        # 후보만 인정하도록, 검색창 y좌표보다 아래에 있는 것 중 가장 위(=팝업의 첫 결과)를 쓴다.
-        r = self._poll_js(r"""(()=>{const all=[...document.querySelectorAll("*")]
+                              tries=8, delay=0.3)
+        if tab_r and tab_r != "NF":
+            td = json.loads(tab_r)
+            self.click_xy(td["x"], td["y"])
+            time.sleep(0.6)
+        self.shot(f"dbg_step1_{tag}")
+        r = self._poll_js(r"""(()=>{
+          const overlay = document.querySelector('.cdk-overlay-container, [role="dialog"], [role="listbox"]');
+          const root = overlay || document;
+          const all=[...root.querySelectorAll("*")]
           .filter(e=>e.offsetParent && e.children.length===0 && (e.textContent||"").trim()===%s);
-          const below = all.map(e=>({e, r:e.getBoundingClientRect()}))
-            .filter(o=>o.r.top > %s).sort((a,b)=>a.r.top-b.r.top);
-          if(!below.length) return "NF"; const r=below[0].r;
-          return JSON.stringify({x:Math.round(r.left+10),y:Math.round(r.top+r.height/2)});})()""" % (json.dumps(title), search_box_y))
+          if(!all.length) return "NF"; const r=all[0].getBoundingClientRect();
+          return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});})()""" % json.dumps(title),
+                          tries=10, delay=0.4)
         if r == "NF":
-            self.shot(f"attach_fail_row_{re.sub(r'[^A-Za-z0-9]+', '_', title)[:20]}")
-            raise RuntimeError("★검색 결과 행을 못 찾았다")
+            self.shot(f"mention_fail_{tag}")
+            raise RuntimeError(f"★'@{title}' 자동완성 목록에서 못 찾았다")
         d = json.loads(r)
+        self.shot(f"dbg_mention_before_{tag}")
         self.click_xy(d["x"], d["y"])
-        time.sleep(0.6)
-        # '프롬프트에 추가' 버튼
-        # 2026-09-10 실사고 수정(3) — 결과 행을 클릭하면 항상 미리보기+'프롬프트에 추가'
-        # 버튼이 뜬다고 가정했는데, 실측해보니 행을 클릭하는 즉시 피커가 스스로 닫히며
-        # 바로 첨부가 끝나는 경우도 있었다(9223 재검증 — 클릭 직후 스샷에 이미 첨부 칩이
-        # 붙어 있었음). 그 경우 버튼을 아무리 기다려도 없는 게 정상이므로, 버튼이 안 보이면
-        # 먼저 "검색창(피커) 자체가 닫혔는지"부터 확인해 이미 끝난 상태인지 구분한다.
-        r = self._poll_js(r"""(()=>{const b=[...document.querySelectorAll("button")]
-          .find(e=>e.offsetParent && (e.innerText||"").trim()==="프롬프트에 추가");
-          if(!b) return "NF"; const r=b.getBoundingClientRect();
-          return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});})()""",
-                          tries=6, delay=0.4)
-        if r == "NF":
-            picker_closed = self.c.js(r"""(()=>{const i=[...document.querySelectorAll("input")]
-              .find(e=>e.offsetParent && /검색/.test(e.placeholder||""));
-              return i ? "OPEN" : "CLOSED";})()""")
-            if picker_closed == "CLOSED":
-                log("  (행 클릭으로 피커가 바로 닫힘 — 이미 첨부된 것으로 간주)")
-                return
-            self.shot(f"attach_fail_addbtn_{re.sub(r'[^A-Za-z0-9]+', '_', title)[:20]}")
-            raise RuntimeError("★'프롬프트에 추가' 버튼을 못 찾음")
-        d = json.loads(r)
-        self.click_xy(d["x"], d["y"])
-        time.sleep(0.6)
+        time.sleep(0.5)
+        self.shot(f"dbg_mention_after_{tag}")
+        # 멘션 첨부 직후 커서가 그 칩 바로 뒤에 있다 — 이어서 타이핑할 실제 프롬프트와
+        # 붙지 않게 공백 하나 넣는다.
+        self.type_text(" ")
 
     def submit(self, timeout=300):
         # 2026-09-11 실사고 수정 — 사용자 지적: "왜 퍼센트가 진행중인데 지 마음데로
@@ -604,7 +741,7 @@ class EconFlow:
             texts = []
         return texts[0] if texts else None
 
-    def wait_done(self, before: int, timeout=480, tag="", on_tick=None):
+    def wait_done(self, before: int, timeout=480, tag="", on_tick=None, stop_check=None):
         # 2026-09-09 수정 — 기본 240초가 실측 생성 시간(특히 부하가 있을 때)보다 짧아서
         # 실제로는 조금 뒤에 완성되는데도 타임아웃으로 오판하는 사례가 있었다(S05 실측:
         # 두 번의 240초 시도가 다 끝난 직후 화면엔 이미 완성돼 있었음). 480초로 늘림.
@@ -626,7 +763,15 @@ class EconFlow:
         # 제출 직후 로딩 표시가 아주 짧게 떴다 사라질 수 있어서, 시작 확인을 놓치지 않도록
         # 처음 8초는 1초 간격으로 더 촘촘히 본다.
         fast_poll_until = t0 + 8
+        # 2026-09-12 추가 — 사용자 지적: "멈추기를 누르거나 새로고침을 하면 대기가 멈추거나
+        # 사라져야 하는데 계속진행됨". stop.flag는 그동안 씬과 씬 사이(이 while 루프 바깥)
+        # 에서만 확인했는데, 이 루프 자체가 최대 480초(3회 반복이면 최대 1440초)까지 돈다 —
+        # 그 안에서는 "멈추기"를 눌러도 이 루프가 끝날 때까지 전혀 반응하지 않았다. 매 폴링
+        # 간격마다 stop_check()도 같이 확인해서 즉시(최대 1~4초 내) 빠져나오게 한다.
         while time.time() - t0 < timeout:
+            if stop_check and stop_check():
+                log(f"  ★stop.flag 감지 — {tag} 대기 중단")
+                return None
             lc = self.loading_count()
             pct = self.loading_percent_text() if lc > 0 else None
             elapsed = time.time() - t0
@@ -724,6 +869,18 @@ class EconFlow:
 def main():
     global STATUS_PATH
     cdp_url = os.environ.get("BU_CDP_URL", "http://127.0.0.1:9223")
+    stage = os.environ.get("FLOW_STAGE", "images")
+
+    # 2026-09-11 추가 — job.json 없이도 그냥 "지금 이 계정에 어떤 프로젝트가 있는지"만
+    # 가볍게 조회하는 모드. 대시보드의 "프로젝트 불러오기" 버튼이 이 모드로 짧게 한 번
+    # 실행하고 stdout의 JSON 한 줄만 읽어간다(상태 파일·job 없이 즉시 종료).
+    if stage == "list_projects":
+        c = CDP(cdp_url)
+        F = EconFlow(c, shots=Path("_shots_tmp"))
+        projects = F.list_projects()
+        print("LIST_PROJECTS_RESULT:" + json.dumps({"ok": True, "projects": projects}, ensure_ascii=False))
+        return
+
     job_path = Path(os.environ["FLOW_JOB"]).resolve()
     job = json.loads(job_path.read_text(encoding="utf-8"))
     here = job_path.parent
@@ -738,19 +895,23 @@ def main():
     def save():
         state_path.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    stage = os.environ.get("FLOW_STAGE", "images")
     only = os.environ.get("FLOW_ONLY", "")
 
     c = CDP(cdp_url)
     log(f"[harness] 연결됨 → {c.target.get('url')}")
     F = EconFlow(c, shots=here / "_shots")
 
-    state["project_url"] = F.open_project(state.get("project_url"))
+    # 2026-09-11 추가 — job.json에 project_url이 명시돼 있으면(대시보드에서 사람이 목록에서
+    # 직접 고른 경우) 로컬 상태 파일에 캐싱된 값보다 항상 우선한다 — 캐릭터가 실제로 등록된
+    # 프로젝트와 어긋나는 사고(9b8ec20f... 오래된 프로젝트를 계속 쓰던 실사고)를 막기 위함.
+    chosen_project = job.get("project_url") or state.get("project_url")
+    state["project_url"] = F.open_project(chosen_project)
     save()
     log("프로젝트:", state["project_url"])
 
     if not state.get("settings_done"):
-        F.ensure_settings(job.get("ratio", "16:9"), job.get("video_ratio", job.get("ratio", "16:9")))
+        F.ensure_settings(job.get("ratio", "16:9"), job.get("video_ratio", job.get("ratio", "16:9")),
+                          job.get("agent_off", True))
         state["settings_done"] = True
         save()
 
@@ -773,12 +934,15 @@ def main():
         # 튀는 문제(S05/S06/S07/S50 실사고)의 해결책으로, Flow의 공식 "캐릭터"(Ingredient)
         # 기능을 씀 — 프로젝트 안에 미리 만들어둔 캐릭터를 애셋 검색(attach_reference, 캐릭터도
         # 같은 피커에서 검색됨을 실측 확인)으로 매 씬마다 첨부한다.
-        character_name = job.get("character_name")
+        # 2026-09-11 다중 캐릭터로 확장 — 사회자(젠틀맨 루즈)와 배우(스틱맨 베이스)처럼
+        # 캐릭터가 여러 개면 각자 다른 매칭 키워드로 구분해서 첨부해야 한다. 각 항목은
+        # {"name": <Flow에 등록된 캐릭터 이름>, "match": [<이 중 하나라도 프롬프트에 있으면 첨부>]}.
+        characters = job.get("characters") or []
         image_count = int(job.get("image_count", 1))
         one_image_instruction = image_count_instruction(image_count)
         total = len(images)
         done_count = len(state["done"])
-        # 2026-09-11 추가 — 사용자 지적: "그런 오류를 표시를 해줘야 다시 시작을 하던 할꺼 아니야".
+        # 2026-09-11 추가 — 사용자 지적: "그런 오류를 표시를 해줘야 다시 시작을 하던 할꺈 아니야".
         # 예전엔 phase="failed"만 기록해서 다음 씬이 시작되는 순간 곧바로 덮어써졌고(화면엔
         # "실행 중인 계정 없음"으로만 보임), 실패 사유(에러 메시지)도 아예 기록되지 않아서
         # run.log 파일을 직접 열어보지 않는 한 뭐가 왜 실패했는지 알 길이 없었다. 이번 실행에서
@@ -821,19 +985,28 @@ def main():
                 # 아직 끝나지 않은 생성 위에 또 제출이 겹치는 "계속 생성 중" 현상이 있었다.
                 # 이제는 딱 한 번만 제출하고, 끝날 때까지 재제출 없이 계속 기다린다
                 # (wait_done을 구간별로 반복 호출해서 총 대기시간만 늘리는 방식).
+                # 2026-09-11 수정 — attach_reference()가 이제 "@이름"을 컴포저에 직접 타이핑해서
+                # 멘션을 붙이는 방식이라(위 메서드 docstring 참고), 첨부 뒤에 composer_click()을
+                # 또 부르면 방금 붙인 멘션이 지워진다. 컴포저는 이 블록 시작에 한 번만 클릭해서
+                # 비우고, 그 뒤로는 계속 같은 컴포저에 이어서 타이핑만 한다.
                 F.composer_click()
                 if ref_im and state["titles"].get(ref_im["id"]):
                     F.attach_reference(state["titles"][ref_im["id"]])
-                    F.composer_click()
-                # 2026-09-10 실사고 수정 — 처음엔 character_name이 있으면 씬 내용과 무관하게
-                # 무조건 매 씬마다 첨부했는데, 실제로 캐릭터가 안 나오는 씬(S50: 변호사들이
-                # 서류 보여주는 장면)에 억지로 캐릭터가 끼어들어가는 사고가 실측으로 확인됨.
-                # VEO Automation(참고 확장 프로그램) 가이드에도 있는 원칙 그대로 — "프롬프트에
-                # 캐릭터 이름이 실제로 언급된 씬에만" 첨부한다.
-                if character_name and character_name in im["prompt"]:
-                    F.attach_reference(character_name)
-                    F.composer_click()
-                F.type_text(prompt)
+                # 2026-09-10 실사고 수정 — 캐릭터가 있으면 씬 내용과 무관하게 무조건 매 씬마다
+                # 첨부했는데, 실제로 캐릭터가 안 나오는 씬(S50: 변호사들이 서류 보여주는 장면)에
+                # 억지로 캐릭터가 끼어들어가는 사고가 실측으로 확인됨. VEO Automation(참고 확장
+                # 프로그램) 가이드에도 있는 원칙 그대로 — "프롬프트에 캐릭터가 실제로 언급된
+                # 씬에만" 첨부한다. 2026-09-11 — 캐릭터 여러 개 지원: 각자 매칭 키워드가
+                # 프롬프트에 있는지 따로 확인해서, 해당하는 캐릭터를 전부(0~여러 개) 첨부한다.
+                for char in characters:
+                    name = char.get("name")
+                    if name and any(kw in im["prompt"] for kw in char.get("match") or []):
+                        F.attach_reference(name)
+                # 2026-09-12 수정 — 사용자 지적("66번부터 거절") + 홍허브 벤치마킹(nam-ai-trend/
+                # 7_threads_auto: "타이핑은 클립보드 복사+Ctrl+V로 붙여넣어 봇탐지 회피") 확인
+                # 결과, 씬 프롬프트(가장 긴 텍스트, 매 씬 반복)는 한 글자씩 타이핑 대신
+                # 붙여넣기로 바꾼다.
+                F.paste_text(prompt)
                 before = F.media_count()
                 F.submit()
                 write_status(current=im["id"], phase="waiting", elapsed=0, gen_percent=None)
@@ -849,7 +1022,15 @@ def main():
                         write_status(current=_id, phase="waiting", elapsed=round(_base + t),
                                      gen_percent=pct, gen_started=started)
 
-                    if F.wait_done(before, timeout=480, tag=im["id"], on_tick=tick):
+                    wr = F.wait_done(before, timeout=480, tag=im["id"], on_tick=tick,
+                                      stop_check=lambda: stop_requested(here))
+                    if wr is None:
+                        # stop.flag 감지로 중단된 경우 — 이 씬은 실패로 기록하지 않고
+                        # (다음 배치에서 다시 시도 가능하도록) 바로 바깥 루프까지 빠져나간다.
+                        write_status(phase="stopped")
+                        cleanup_debris(here)
+                        raise KeyboardInterrupt("stop.flag")
+                    if wr:
                         # 2026-09-11 수정 — 생성 장수 드롭다운(image_count)만큼 로컬엔 다 저장한다
                         # (n=1 고정이면 2장 이상 선택했을 때 나머지가 그냥 버려짐). 다만 홍허브
                         # scenePrompts 등록(- 장면이미지: 줄)은 필드가 URL 하나뿐이라 여전히
