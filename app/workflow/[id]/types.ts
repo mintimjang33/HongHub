@@ -183,4 +183,13 @@ export type CharacterStylePreset = {
   label: string;
   description: string;
   referenceImageUrl?: string;
+  // 2026-09-12 추가 — 사용자 요청: "13단계에서도 탭별로(전체/루즈 등) 분류해서 일관성 유지가 잘
+  // 되었는지 확인해볼 수 있게 해줘". 이 프리셋의 description 안에 실제로 등장하는 캐릭터
+  // 이름/역할 태그(예: "Gentleman Rouge", "the stickman actor")를 그대로 매칭 키워드로 써서,
+  // 13번 스토리보드 표(SceneEditorList)가 각 장면의 imagePrompt 텍스트를 보고 탭으로 나눠 보여줄
+  // 수 있게 한다. description과 별개 필드로 둔 이유는 자유 서술문에서 정규식으로 이름을 뽑아내는
+  // 것보다, 프리셋을 만들 때 실제 매칭 키워드를 명시적으로 같이 적어두는 쪽이 둘이 어긋날 여지가
+  // 없기 때문(하드코딩 방지 — 화면과 실제 생성 프롬프트가 항상 같은 이 소스를 본다). 캐릭터가
+  // 하나뿐인 프리셋(포동이/식빵맨 등)은 비워두면 되고, 그때는 탭 자체가 표시되지 않는다.
+  tabs?: { label: string; keywords: string[] }[];
 };
