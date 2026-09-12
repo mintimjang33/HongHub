@@ -311,7 +311,8 @@ _runs: dict[int, dict] = {}  # port -> {"proc":..., "run_dir":...}
 
 def start_run(site_id: str, unit_id: str, scene_ids: list[str] | None = None,
               ratio: str = "16:9", new_project: bool = False, port: int = 9223,
-              character_name: str = "", image_count: int = 1):
+              characters: list[dict] | None = None, image_count: int = 1,
+              project_url: str | None = None, agent_off: bool = True):
     with _lock:
         existing = _runs.get(port)
         if existing and existing["proc"] and existing["proc"].poll() is None:
@@ -372,15 +373,27 @@ def start_run(site_id: str, unit_id: str, scene_ids: list[str] | None = None,
             # scenePrompts의 sceneImage 자동 등록까지 하려면 이 두 id가 필요하다.
             "site_id": site_id,
             "unit_id": unit_id,
-            # 2026-09-10 추가 — "일관성" 대응: 프로젝트 안에 미리 만들어둔 Flow 캐릭터 이름을
-            # 넣으면 드라이버가 매 씬마다 자동으로 첨부한다(계정마다 캐릭터를 따로 만들어야
-            # 하므로, 그 계정 프로젝트에 실제로 만들어둔 이름과 정확히 일치해야 함).
-            "character_name": character_name.strip(),
+            # 2026-09-10 추가, 2026-09-11 다중 캐릭터로 확장 — "일관성" 대응: 프로젝트 안에
+            # 미리 만들어둔 Flow 캐릭터 이름들을 넣으면, 드라이버가 씬 프롬프트에 매칭 키워드가
+            # 있는 캐릭터만 골라 자동으로 첨부한다(예: 사회자 "Gentleman Rouge"/"Rouge" 키워드,
+            # 배우 "representing" 키워드 — 계정 프로젝트에 실제로 만들어둔 이름과 정확히 일치해야 함).
+            "characters": [
+                {"name": str(c.get("name", "")).strip(), "match": [str(k).strip() for k in (c.get("match") or []) if str(k).strip()]}
+                for c in (characters or [])
+                if str(c.get("name", "")).strip() and c.get("match")
+            ],
             # 2026-09-11 추가 — 사용자 지시: 패널에서 켜고 끌 수 있는 설정으로 노출("1장으로
             # 지정할 수 있게 설정을 부분을 만들어줘"). True면 드라이버가 제출 프롬프트 맨 앞에
             # "이미지 1장만 만들어라" 지시를 붙인다(기본 켜짐 — Flow 에이전트가 스스로 여러 장을
             # 만드는 창작적 이탈을 줄이기 위함).
             "image_count": int(image_count),
+            # 2026-09-11 추가 — 사람이 "프로젝트 불러오기"로 직접 고른 프로젝트 URL. 있으면
+            # 드라이버가 로컬 캐시(_flow_state.json의 project_url)보다 이걸 항상 우선한다.
+            "project_url": (project_url or "").strip() or None,
+            # 2026-09-12 추가 — Flow의 새 "에이전트" 대화형 모드가 켜져 있으면 캐릭터 멘션 뒤
+            # 제출해도 곧장 생성 안 되고 확인 메뉴가 뜨는 게 실측됨(S70). 기본 켜짐 — 프로젝트
+            # 시작 시 드라이버가 에이전트 칩을 확인해서 켜져 있으면 자동으로 끈다.
+            "agent_off": bool(agent_off),
         }
         job_path = run_dir / "job.json"
         job_path.write_text(json.dumps(job, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -444,6 +457,37 @@ def start_run(site_id: str, unit_id: str, scene_ids: list[str] | None = None,
             tail = log_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
             return {"error": f"포트 {port}: 생성이 시작되자마자 멈췄습니다: " + (tail[-1] if tail else "(로그 없음)")}
         return {"ok": True, "run_dir": str(run_dir), "scene_count": len(scenes), "port": port}
+
+
+# 2026-09-11 추가 — 사용자 지적: "프로잭트를 찾아서 선택을 하게끔 수정해야겠어". 코드에
+# 박힌 기본 프로젝트 URL이나 로컬 상태 파일 캐시가 실제 캐릭터가 등록된 프로젝트와 어긋나는
+# 사고(9b8ec20f... 오래된 프로젝트를 계속 쓰던 실사고)가 있었다 — 매번 홈 화면에서 실제
+# 프로젝트 목록을 읽어와 사람이 직접 고르게 한다. job.json 없이 짧게 한 번만 실행되는
+# 모드(FLOW_STAGE=list_projects)를 서브프로세스로 돌려 결과를 동기적으로 기다린다.
+def list_flow_projects(port: int) -> dict:
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["BU_CDP_URL"] = f"http://127.0.0.1:{port}"
+    env["FLOW_STAGE"] = "list_projects"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(HERE / "flow_econ_driver.py")],
+            cwd=str(HERE.parent), env=env,
+            capture_output=True, text=True, encoding="utf-8", timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": f"포트 {port}: 프로젝트 목록 조회가 60초를 넘겨 타임아웃됐습니다."}
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("LIST_PROJECTS_RESULT:"):
+            try:
+                data = json.loads(line[len("LIST_PROJECTS_RESULT:"):])
+                return {"ok": True, "projects": data.get("projects", [])}
+            except json.JSONDecodeError:
+                pass
+    tail = (result.stdout or "").strip().splitlines()
+    err_tail = (result.stderr or "").strip().splitlines()
+    detail = (err_tail[-1] if err_tail else (tail[-1] if tail else "(출력 없음)"))
+    return {"error": f"포트 {port}: 프로젝트 목록을 못 읽었습니다 — {detail}"}
 
 
 def stop_run(port: int):
@@ -536,6 +580,10 @@ HTML = """<!doctype html>
   .bar{background:#222;border-radius:6px;overflow:hidden;height:16px;flex:1}
   .fill{background:#4a8;height:100%;transition:width .3s}
   img{max-width:100%;border-radius:8px;border:1px solid #333;display:block;margin-top:6px}
+  .gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;padding:8px}
+  .gallery-item{cursor:pointer}
+  .gallery-item img{width:100%;height:120px;object-fit:cover;margin-top:0}
+  .gallery-item .gid{font-size:10px;color:#9ad;text-align:center;margin-top:2px}
   #startBtn{background:#275;font-weight:700}
   #stopBtn{background:#a33;font-weight:700}
   #scenes{max-height:340px;overflow-y:auto;border:1px solid #2a2a2a;border-radius:6px;margin-top:8px}
@@ -547,21 +595,20 @@ HTML = """<!doctype html>
 </style></head>
 <body>
   <h1>🎬 씬 이미지 생성 — 실시간 진행</h1>
-  <div class="row"><label>워크플로우</label>
-    <select id="siteSel" onchange="onSiteChange()"><option value="">불러오는 중...</option></select></div>
-  <div class="row"><label>콘텐츠</label>
-    <select id="unitSel" onchange="onUnitChange()"><option value="">워크플로우를 먼저 선택하세요</option></select></div>
   <div class="row"><label>씬 파일</label>
     <input type="file" id="sceneFileInput" accept=".txt,.json" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:4px;font-size:11px">
     <button onclick="uploadSceneFile()" style="background:#275;font-weight:700">📤 파일로 씬 등록</button></div>
   <div id="sceneFileResult" style="font-size:11px;color:#c66;white-space:pre-line;margin:-4px 0 6px"></div>
+  <div class="row"><label>워크플로우</label>
+    <select id="siteSel" onchange="onSiteChange()"><option value="">불러오는 중...</option></select></div>
+  <div class="row"><label>콘텐츠</label>
+    <select id="unitSel" onchange="onUnitChange()"><option value="">워크플로우를 먼저 선택하세요</option></select></div>
   <div class="row"><label>화면비율</label>
     <select id="ratioSel" onchange="saveUiState()">
       <option value="16:9">16:9 (가로)</option>
       <option value="9:16">9:16 (세로)</option>
       <option value="1:1">1:1 (정사각)</option>
     </select></div>
-  <div class="row"><label><input type="checkbox" id="newProjectChk" onchange="saveUiState()"> 새 프로젝트로 시작</label></div>
   <div class="row"><label>생성 장수</label>
     <select id="imageCountSel" onchange="saveUiState()">
       <option value="1" selected>1장</option>
@@ -570,44 +617,73 @@ HTML = """<!doctype html>
       <option value="4">4장</option>
     </select></div>
   <div class="row" style="margin-top:-4px"><span style="color:#777;font-size:10px">기본 1장 — 이 숫자를 프롬프트에 명시해서 Flow 에이전트가 제멋대로 몇 장씩 만드는 걸 막는다. 저장·홍허브 등록은 항상 가장 최근 1장만 됨(2장 이상 선택해도 나머지는 로컬에만 남고 등록 안 됨).</span></div>
-  <div class="row"><label>캐릭터(선택)</label>
-    <input type="text" id="characterNameInput" placeholder="예: Gentleman Rouge (일관성용, 계정 프로젝트에 미리 만들어둔 이름과 정확히 일치해야 함)" onchange="saveUiState()" style="width:100%;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
+  <!-- 2026-09-12 추가 — 사용자 요청: "화면비율, 생성장수, 에이전트 선택체크를 한곳에 모아두고".
+       Flow의 새 "에이전트" 대화형 모드(support.google.com/flow/answer/17093911)가 켜져 있으면
+       캐릭터를 멘션한 뒤 제출해도 곧장 생성되지 않고 확인 메뉴가 뜨는 게 실측 확인됨(S70 자동화가
+       이 지점에서 멈춰있었음) — 기본으로 꺼서 시작하되, 체크 해제하면 건드리지 않는다. -->
+  <div class="row"><label><input type="checkbox" id="agentOffChk" checked onchange="saveUiState()"> 에이전트 꺼짐 확인(프로젝트 시작 시 자동으로 끔)</label></div>
+  <div style="margin:6px 0"><label style="color:#999;display:block;margin-bottom:4px">캐릭터(선택, 여러 개 가능)</label>
+    <textarea id="charactersInput" rows="2" placeholder="한 줄에 하나씩: Flow등록이름=매칭키워드1,키워드2&#10;예) 젠틀맨루즈=Gentleman Rouge,Rouge&#10;예) 스틱맨=representing" onchange="saveUiState(); renderScenes(previewScenes)" style="width:100%;box-sizing:border-box;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px;font-family:inherit;resize:vertical">젠틀맨루즈=Gentleman Rouge,Rouge
+스틱맨=stickman actor</textarea>
+    <span style="color:#777;font-size:10px;display:block;margin-top:2px">씬 프롬프트에 매칭키워드 중 하나라도 있으면 그 이름의 Flow 캐릭터를 자동 첨부합니다(계정 프로젝트에 미리 등록된 이름과 정확히 일치해야 함).</span></div>
   <div class="row"><label>계정(포트)</label>
-    <select id="portSel" onchange="saveUiState()">
+    <select id="portSel" onchange="saveUiState(); applyProjectListForPort(parseInt(this.value,10))">
       <option value="9223">mintimjang33 (9223)</option>
       <option value="9224">minsiljang0 (9224)</option>
       <option value="9225">minssajang (9225)</option>
       <option value="9226">minsiljjang (9226)</option>
     </select></div>
+  <div class="row"><label><input type="checkbox" id="newProjectChk" onchange="saveUiState()"> 새 프로젝트로 시작</label></div>
+  <div style="margin:6px 0">
+    <label style="color:#999;display:block;margin-bottom:4px">Flow 프로젝트(선택)</label>
+    <div style="display:flex;gap:6px">
+      <select id="projectSel" onchange="onProjectSelChange()" style="flex:1">
+        <option value="">(고르면 캐릭터가 등록된 정확한 프로젝트로 고정됨)</option>
+      </select>
+      <button onclick="loadFlowProjects()" style="background:#358;white-space:nowrap">🔍 목록 불러오기</button>
+    </div>
+    <span id="projectLoadResult" style="color:#c66;font-size:10px;display:block;margin-top:2px"></span>
+    <span style="color:#777;font-size:10px;display:block;margin-top:2px">비워두면 이 계정에서 마지막에 쓰던 프로젝트를 그대로 씀 — 캐릭터가 다른 프로젝트에 있어서 실패하면 여기서 정확한 프로젝트를 골라주세요.</span>
+  </div>
+  <hr style="border-color:#333">
+  <!-- 2026-09-12 추가 — 사용자 요청: "이거 접고 펴게 해줘 평소에 접어두고". 여러 계정 동시
+       시작 섹션은 자주 안 쓰는 고급 기능이라, <details>로 접어서 평소엔 한 줄(제목)만
+       보이게 하고 필요할 때만 펼친다(open 속성 없음 = 기본 접힘). -->
+  <details>
+    <summary class="row" style="cursor:pointer;display:list-item"><b>⚡ 여러 계정 동시 시작</b></summary>
+    <div class="row"><label style="min-width:110px">9223 범위</label>
+      <input type="text" id="range9223" placeholder="예: 5~9" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
+    <div class="row"><label style="min-width:110px">9224 범위</label>
+      <input type="text" id="range9224" placeholder="예: 10~14" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
+    <div class="row"><label style="min-width:110px">9225 범위</label>
+      <input type="text" id="range9225" placeholder="예: 15~19" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
+    <div class="row"><label style="min-width:110px">9226 범위</label>
+      <input type="text" id="range9226" placeholder="예: 20~24" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
+    <div class="row"><button id="startAllBtn" onclick="startAllAccounts()" style="background:#275;font-weight:700;width:100%">▶▶▶ 여러 계정 동시 시작</button></div>
+    <div id="startAllResult" style="font-size:11px;color:#c66"></div>
+    <div class="row"><button id="autoDispatchBtn" onclick="autoDispatch()" style="background:#25a;font-weight:700;width:100%">🔀 대기 씬 자동 분배 시작 (9223~9226 균등 배분)</button></div>
+    <div id="autoDispatchResult" style="font-size:11px;color:#c66"></div>
+  </details>
+  <hr style="border-color:#333">
+  <!-- 2026-09-12 추가 — 사용자 요청: "리스트 바로 위로 위치이동". 번호 범위/시작·멈추기/
+       전체선택·해제·새로고침을 씬 목록 바로 위로 옮겨서, 목록 보면서 바로 선택·시작할 수 있게 함. -->
   <div class="row"><label>번호 범위</label>
     <input type="text" id="rangeInput" placeholder="예: 5~10 (비우면 체크된 씬 전부)" oninput="updateSelectedCount()" onchange="saveUiState()" style="width:100%;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
   <div class="row">
-    <button id="startBtn" onclick="startRun()">▶ 이 콘텐츠로 시작</button>
+    <button id="startBtn" onclick="startRun()">▶ 선택한 번호부터 생성시작</button>
     <button id="stopBtn" onclick="stopRun()">⏹ 지금 멈추기</button>
   </div>
+  <div class="row"><span id="stopResult" style="font-size:11px;color:#999"></span></div>
   <div class="row">
     <button onclick="selectAll(true)">☑ 전체 선택</button>
     <button onclick="selectAll(false)">☐ 전체 해제</button>
     <button id="refreshBtn" onclick="refreshNow()">🔄 새로고침</button>
   </div>
-  <hr style="border-color:#333">
-  <div class="row"><b>⚡ 여러 계정 동시 시작</b></div>
-  <div class="row"><label style="min-width:110px">9223 범위</label>
-    <input type="text" id="range9223" placeholder="예: 5~9" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
-  <div class="row"><label style="min-width:110px">9224 범위</label>
-    <input type="text" id="range9224" placeholder="예: 10~14" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
-  <div class="row"><label style="min-width:110px">9225 범위</label>
-    <input type="text" id="range9225" placeholder="예: 15~19" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
-  <div class="row"><label style="min-width:110px">9226 범위</label>
-    <input type="text" id="range9226" placeholder="예: 20~24" onchange="saveUiState()" style="flex:1;background:#222;color:#eee;border:1px solid #444;border-radius:6px;padding:6px 8px;font-size:12px"></div>
-  <div class="row"><button id="startAllBtn" onclick="startAllAccounts()" style="background:#275;font-weight:700;width:100%">▶▶▶ 여러 계정 동시 시작</button></div>
-  <div id="startAllResult" style="font-size:11px;color:#c66"></div>
-  <div class="row"><button id="autoDispatchBtn" onclick="autoDispatch()" style="background:#25a;font-weight:700;width:100%">🔀 대기 씬 자동 분배 시작 (9223~9226 균등 배분)</button></div>
-  <div id="autoDispatchResult" style="font-size:11px;color:#c66"></div>
-  <hr style="border-color:#333">
-  <div class="row"><span>선택됨:</span><b id="selectedCount">0개</b> <span id="lastSync" style="color:#666;font-size:10px;margin-left:auto"></span></div>
+  <div class="row"><span>선택됨:</span><b id="selectedCount">0개</b> <span style="margin-left:10px">남은:</span><b id="remainingCount">0개</b> <span id="lastSync" style="color:#666;font-size:10px;margin-left:auto"></span></div>
   <div id="workers" style="width:100%"></div>
   <div id="failBanner" style="display:none;background:#3a1414;border:1px solid #a33;border-radius:6px;padding:8px;margin:6px 0;font-size:11px"></div>
+  <div class="row" id="sceneFilterRow" style="gap:4px;flex-wrap:wrap"></div>
+  <div class="row"><button id="galleryToggleBtn" onclick="toggleGalleryMode()">🖼 갤러리로 보기 (일관성 확인)</button></div>
   <div id="scenes"></div>
 <script>
 async function loadSites(){
@@ -619,6 +695,19 @@ async function loadSites(){
 let previewScenes = [];
 // 2026-09-10 추가 — "선택한 상태를 기억하고 있을수 있어?"라는 요청으로, 워크플로우/콘텐츠/
 // 비율/새프로젝트여부/진행개수를 localStorage에 저장해뒀다가 패널을 새로고침해도 복원한다.
+// 2026-09-11 추가 — 캐릭터 2개(사회자+배우) 이상을 지원하려고 "이름=키워드1,키워드2" 한 줄씩
+// 받는 텍스트칸으로 바꿨다. 이름은 Flow에 등록된 캐릭터 이름과 정확히 일치해야 하고, 키워드
+// 중 하나라도 씬 프롬프트에 있으면 그 캐릭터를 자동 첨부한다.
+function parseCharactersInput(raw){
+  return (raw || '').split('\\n').map(line => {
+    const i = line.indexOf('=');
+    if(i < 0) return null;
+    const name = line.slice(0, i).trim();
+    const match = line.slice(i + 1).split(',').map(k => k.trim()).filter(Boolean);
+    if(!name || !match.length) return null;
+    return {name, match};
+  }).filter(Boolean);
+}
 function saveUiState(){
   localStorage.setItem('flowDashUi', JSON.stringify({
     siteId: document.getElementById('siteSel').value,
@@ -631,9 +720,75 @@ function saveUiState(){
     range9224: document.getElementById('range9224').value,
     range9225: document.getElementById('range9225').value,
     range9226: document.getElementById('range9226').value,
-    characterName: document.getElementById('characterNameInput').value,
+    charactersText: document.getElementById('charactersInput').value,
     imageCount: parseInt(document.getElementById('imageCountSel').value, 10),
+    projectUrl: document.getElementById('projectSel').value,
+    agentOff: document.getElementById('agentOffChk').checked,
   }));
+}
+// 2026-09-11 추가 — "프로잭트를 찾아서 선택을 하게끔 수정해야겠어": 홈 화면의 실제 프로젝트
+// 카드 목록을 읽어와 드롭다운으로 보여준다. 하드코딩된 기본 프로젝트나 로컬 캐시에 의존하지
+// 않고, 지금 이 계정에 실제로 존재하는 프로젝트 중에서 고르게 한다.
+//
+// 2026-09-12 추가 — 사용자 지적: "이게 계정마다 다른거자나? 처음 실행했을때 불러온값을
+// 저장하고 있으면 되자나~ 선택한걸로~~", "프로젝트를 삭제하거나 했을때만 사용자가 다시
+// 불러오기 하면 되는거고". 매번 새로고침할 때마다 서버에 다시 물어보지 않고, 계정(포트)별로
+// 마지막에 불러온 프로젝트 목록 + 그때 고른 값을 localStorage에 저장해뒀다가 그대로 복원한다.
+// 실제로 프로젝트를 새로 만들거나 지운 경우에만 사람이 "🔍 목록 불러오기"를 다시 눌러
+// 캐시를 갱신하면 된다.
+function loadProjectCache(){
+  try { return JSON.parse(localStorage.getItem('flowProjectCache') || '{}'); } catch(e) { return {}; }
+}
+function saveProjectCache(cache){
+  localStorage.setItem('flowProjectCache', JSON.stringify(cache));
+}
+function applyProjectListForPort(port){
+  const cache = loadProjectCache();
+  const entry = cache[String(port)];
+  const sel = document.getElementById('projectSel');
+  const resultSpan = document.getElementById('projectLoadResult');
+  if(!entry || !entry.projects){
+    sel.innerHTML = '<option value="">(고르면 캐릭터가 등록된 정확한 프로젝트로 고정됨)</option>';
+    resultSpan.style.color = '#777';
+    resultSpan.textContent = '이 계정은 아직 저장된 목록이 없습니다 — 🔍 목록 불러오기를 눌러주세요.';
+    return;
+  }
+  sel.innerHTML = '<option value="">(고르면 캐릭터가 등록된 정확한 프로젝트로 고정됨)</option>'
+    + entry.projects.map(p => `<option value="https://flow.google.com/project/${p.id}">${p.name} (${p.id.slice(0,8)}…)</option>`).join('');
+  if(entry.selected && [...sel.options].some(o=>o.value===entry.selected)) sel.value = entry.selected;
+  resultSpan.style.color = '#6a6';
+  resultSpan.textContent = `✅ ${entry.projects.length}개 프로젝트(저장된 목록) — 프로젝트를 새로 만들거나 지웠으면 🔍로 갱신하세요.`;
+}
+function onProjectSelChange(){
+  saveUiState();
+  const port = parseInt(document.getElementById('portSel').value, 10);
+  const cache = loadProjectCache();
+  if(cache[String(port)]){
+    cache[String(port)].selected = document.getElementById('projectSel').value;
+    saveProjectCache(cache);
+  }
+}
+async function loadFlowProjects(){
+  const resultSpan = document.getElementById('projectLoadResult');
+  const sel = document.getElementById('projectSel');
+  const port = parseInt(document.getElementById('portSel').value, 10);
+  resultSpan.style.color = '#999'; resultSpan.textContent = '불러오는 중... (홈 화면 여는 중, 몇 초 걸릴 수 있음)';
+  try{
+    const r = await fetch('/api/list_projects', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({port})});
+    const d = await r.json();
+    if(d.error){ resultSpan.style.color = '#c66'; resultSpan.textContent = '⚠ ' + d.error; return; }
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">(고르면 캐릭터가 등록된 정확한 프로젝트로 고정됨)</option>'
+      + d.projects.map(p => `<option value="https://flow.google.com/project/${p.id}">${p.name} (${p.id.slice(0,8)}…)</option>`).join('');
+    if(prev && [...sel.options].some(o=>o.value===prev)) sel.value = prev;
+    resultSpan.style.color = '#6a6';
+    resultSpan.textContent = `✅ ${d.projects.length}개 프로젝트 찾음 — 목록에서 골라주세요.`;
+    const cache = loadProjectCache();
+    cache[String(port)] = { projects: d.projects, selected: sel.value || '' };
+    saveProjectCache(cache);
+    saveUiState();
+  }catch(e){ resultSpan.style.color = '#c66'; resultSpan.textContent = '⚠ 요청 실패: ' + e; }
 }
 // "9223에서 5개, 9224에서 5개, 9225에서 5개 각각 뽑아서 여기서 한번에 명령" 요청 —
 // 계정별 범위 3칸을 한 번에 읽어서 /api/start를 포트마다 따로(순차) 호출한다.
@@ -653,8 +808,10 @@ async function startAllAccounts(){
   if(!siteId || !unitId){ alert('워크플로우와 콘텐츠를 먼저 선택하세요.'); return; }
   const ratio = document.getElementById('ratioSel').value;
   const newProject = document.getElementById('newProjectChk').checked;
-  const characterName = document.getElementById('characterNameInput').value;
+  const characters = parseCharactersInput(document.getElementById('charactersInput').value);
   const imageCount = parseInt(document.getElementById('imageCountSel').value, 10);
+  const projectUrl = document.getElementById('projectSel').value || null;
+  const agentOff = document.getElementById('agentOffChk').checked;
   const ranges = {
     9223: document.getElementById('range9223').value,
     9224: document.getElementById('range9224').value,
@@ -671,7 +828,7 @@ async function startAllAccounts(){
     if(!ids.length){ lines.push(`포트 ${port}: 해당 범위 씬 없음`); continue; }
     try{
       const r = await fetch('/api/start', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({site_id: siteId, unit_id: unitId, scene_ids: ids, ratio, new_project: newProject, port, character_name: characterName, image_count: imageCount})});
+        body: JSON.stringify({site_id: siteId, unit_id: unitId, scene_ids: ids, ratio, new_project: newProject, port, characters, image_count: imageCount, project_url: projectUrl, agent_off: agentOff})});
       const d = await r.json();
       lines.push(d.error ? `포트 ${port}: 실패 — ${d.error}` : `포트 ${port}: ${d.scene_count !== undefined ? ids.length : ''}개 시작됨`);
     }catch(e){ lines.push(`포트 ${port}: 요청 실패 — ${e}`); }
@@ -695,8 +852,10 @@ async function autoDispatch(){
   if(!pending.length){ resultDiv.style.color = '#6a6'; resultDiv.textContent = '대기 중인 씬이 없습니다 — 전부 완료 상태.'; return; }
   const ratio = document.getElementById('ratioSel').value;
   const newProject = document.getElementById('newProjectChk').checked;
-  const characterName = document.getElementById('characterNameInput').value;
+  const characters = parseCharactersInput(document.getElementById('charactersInput').value);
   const imageCount = parseInt(document.getElementById('imageCountSel').value, 10);
+  const projectUrl = document.getElementById('projectSel').value || null;
+  const agentOff = document.getElementById('agentOffChk').checked;
   const ports = [9223, 9224, 9225, 9226];
   const groups = {}; ports.forEach(p => groups[p] = []);
   pending.forEach((s, i) => groups[ports[i % ports.length]].push(s.id));
@@ -708,7 +867,7 @@ async function autoDispatch(){
     if(!ids.length) continue;
     try{
       const r = await fetch('/api/start', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({site_id: siteId, unit_id: unitId, scene_ids: ids, ratio, new_project: newProject, port, character_name: characterName, image_count: imageCount})});
+        body: JSON.stringify({site_id: siteId, unit_id: unitId, scene_ids: ids, ratio, new_project: newProject, port, characters, image_count: imageCount, project_url: port === parseInt(document.getElementById('portSel').value,10) ? projectUrl : null, agent_off: agentOff})});
       const d = await r.json();
       lines.push(d.error ? `포트 ${port}: 실패 — ${d.error}` : `포트 ${port}: ${ids.length}개 배정(${ids[0]}~${ids[ids.length-1]})`);
     }catch(e){ lines.push(`포트 ${port}: 요청 실패 — ${e}`); }
@@ -818,13 +977,105 @@ let promptById = {};
 // "지금 하나만 펼침"이 아니라 "지금 실행 중인 애들은 전부(여러 개) 펼침"으로 바꿨다.
 let expandedIds = new Set();
 let imageUrlById = {};
+// 2026-09-11 추가 — 사용자 요청: "81개씬중 탭으로 분류되? 캐릭터 있는장면, 없는장면 이런거".
+// 별도 필드 없이 프롬프트 텍스트에 "Gentleman Rouge"/"stickman actor" 문자열이 있는지로
+// 분류한다 — 13번 마스터 프롬프트 원칙(캐릭터 롤플레이 명확화)이 항상 이 두 문구를 정확히
+// 그대로 쓰도록 강제하고 있어서, 텍스트 매칭만으로 충분히 정확하다. 필터는 화면 표시에만
+// 영향을 주고, 체크박스 선택(checkedIds)·번호범위 등 실제 생성 대상 목록은 그대로 전체 유지.
+let sceneFilter = 'all';
+// 2026-09-11 추가(3) — 사용자 지적: "어긋 안나게 체크해서 수정해줘" — 필터가 "Gentleman
+// Rouge"/"stickman actor"를 하드코딩해서 판별하면, 화면 위쪽 "캐릭터(선택)" 칸의 매칭
+// 키워드를 나중에 바꿨을 때 실제 생성기(flow_econ_driver.py의 characters 매칭, 886~890줄)
+// 동작과 필터 표시가 어긋난다. 그래서 하드코딩을 없애고, 이 필터도 매번 그 칸을 직접
+// 파싱해서(parseCharactersInput) 같은 매칭 키워드로 판정한다 — 두 곳이 항상 같은 소스를
+// 본다. 캐릭터 목록이 몇 개든(2개 고정 아님) 자동으로 탭이 생기고, 2개 이상 매칭되면
+// "같이출연" 탭에 잡힌다.
+function classifyScene(prompt, characters){
+  if(!prompt) return [];
+  return (characters||[])
+    .filter(c => (c.match||[]).some(kw => kw && prompt.includes(kw)))
+    .map(c => c.name);
+}
+// 2026-09-11 추가(4) — 사용자 지적: "탭별로 해도 되???" — 탭은 지금까지 화면 표시만
+// 필터링하고 실제 체크박스 선택(=생성 대상)은 안 건드려서, 탭을 눌러도 "시작"을 누르면
+// 여전히 81개 전부가 돌아갔다. 탭을 누르면 그 탭에 해당하는(완료 안 된) 씬만 자동으로
+// 체크되게 해서, 탭 → 시작만으로 그 분류만 생성되게 한다.
+function setSceneFilter(f){
+  sceneFilter = f;
+  const characters = parseCharactersInput(document.getElementById('charactersInput').value);
+  checkedIds = new Set((previewScenes||[])
+    .filter(sc => sc.status !== 'done' && (f === 'all' || sceneMatchesFilter(sc.prompt, characters)))
+    .map(sc => sc.id));
+  renderScenes(previewScenes);
+  updateSelectedCount();
+}
+function renderFilterTabs(scenes, characters){
+  const matches = (scenes||[]).map(sc => classifyScene(sc.prompt, characters));
+  const tabs = [{key:'all', label:'전체'}];
+  characters.forEach(c => tabs.push({key: 'char:' + c.name, label: c.name}));
+  if(characters.length >= 2) tabs.push({key:'multi', label:'🎭 같이출연'});
+  tabs.push({key:'none', label:'🎨 캐릭터없음'});
+  // 캐릭터 칸을 수정해서 지금 선택된 탭이 더 이상 존재하지 않으면(예: 그 이름을 지움) 전체로 되돌린다.
+  if(!tabs.some(t => t.key === sceneFilter)) sceneFilter = 'all';
+  const matchesKey = (m, key) => {
+    if(key === 'all') return true;
+    if(key === 'none') return m.length === 0;
+    if(key === 'multi') return m.length >= 2;
+    return m.includes(key.slice(5));
+  };
+  const countFor = (key) => matches.filter(m => matchesKey(m, key)).length;
+  // 2026-09-12 추가 — 사용자 요청: "(해당숫자 / 남은숫자)". 탭별로 전체 개수뿐 아니라 그중
+  // 아직 이미지가 없는(pending) 개수도 같이 보여줘서, 이 캐릭터가 몇 개 남았는지 탭만 보고
+  // 바로 알 수 있게 한다.
+  const remainingFor = (key) => matches.filter((m, i) => matchesKey(m, key) && (scenes[i] || {}).status !== 'done').length;
+  document.getElementById('sceneFilterRow').innerHTML = tabs.map(t =>
+    `<button class="filter-btn" onclick="setSceneFilter('${t.key}')" style="font-size:11px;padding:4px 7px;background:${sceneFilter===t.key?'#358':'#222'}">${t.label} (${countFor(t.key)}/${remainingFor(t.key)})</button>`
+  ).join('');
+}
+function sceneMatchesFilter(prompt, characters){
+  const matched = classifyScene(prompt, characters);
+  if(sceneFilter === 'all') return true;
+  if(sceneFilter === 'none') return matched.length === 0;
+  if(sceneFilter === 'multi') return matched.length >= 2;
+  return matched.includes(sceneFilter.slice(5));
+}
+// 2026-09-12 추가 — 사용자 요청: "13단계에서도 탭별로(전체/루즈 등) 분류해서 일관성 유지가
+// 잘 되었는지 수월하게 확인해볼 수 있게 해줘". 기존 필터 탭은 목록 행만 걸러줄 뿐, 이미지를
+// 보려면 한 줄씩 펼쳐야(toggleExpand) 했다. 탭을 고른 상태에서 그 캐릭터의 완료된 씬 이미지를
+// 썸네일 격자로 한 번에 쭉 늘어놓으면, 클릭 없이 스크롤만으로 디자인이 어긋난 컷을 바로 찾을
+// 수 있다 — 목록 보기와 토글로 전환.
+let galleryMode = false;
+function toggleGalleryMode(){
+  galleryMode = !galleryMode;
+  const btn = document.getElementById('galleryToggleBtn');
+  btn.style.background = galleryMode ? '#358' : '#222';
+  btn.textContent = galleryMode ? '📋 목록으로 보기' : '🖼 갤러리로 보기 (일관성 확인)';
+  renderScenes(previewScenes);
+}
+function renderGallery(visible){
+  const list = document.getElementById('scenes');
+  const withImages = visible.filter(sc => imageUrlById[sc.id]);
+  if(!withImages.length){
+    list.innerHTML = '<div style="padding:12px;color:#777;font-size:12px">이 분류엔 아직 생성된 이미지가 없습니다.</div>';
+    return;
+  }
+  list.innerHTML = '<div class="gallery-grid">' + withImages.map(sc =>
+    `<div class="gallery-item" onclick="window.open('${imageUrlById[sc.id]}','_blank')" title="${(promptById[sc.id]||'').replace(/"/g,'&quot;')}">`
+    + `<img src="${imageUrlById[sc.id]}" loading="lazy">`
+    + `<div class="gid">${sc.id}</div></div>`
+  ).join('') + '</div>';
+}
 function renderScenes(scenes){
   const list = document.getElementById('scenes');
   (scenes||[]).forEach(sc => {
     if(sc.prompt) promptById[sc.id] = sc.prompt;
     if(sc.image_url) imageUrlById[sc.id] = sc.image_url;
   });
-  list.innerHTML = (scenes||[]).map(sc => {
+  const characters = parseCharactersInput(document.getElementById('charactersInput').value);
+  renderFilterTabs(scenes, characters);
+  const visible = (scenes||[]).filter(sc => sceneMatchesFilter(sc.prompt, characters));
+  if(galleryMode){ renderGallery(visible); return; }
+  list.innerHTML = visible.map(sc => {
     const checked = checkedIds === null || checkedIds.has(sc.id);
     const isOpen = expandedIds.has(sc.id);
     const full = promptById[sc.id] || '';
@@ -844,7 +1095,7 @@ function renderScenes(scenes){
       + (isOpen ? `<div class="scene-detail" onclick="event.stopPropagation()">`
           + `<div style="white-space:pre-wrap;color:#ccc;font-size:11px;margin:4px 0">${full.replace(/</g,'&lt;')}</div>`
           + doneBlock
-          + `<button onclick="copyPrompt('${sc.id}')">📋 복사</button>`
+          + `<button onclick="copyPrompt('${sc.id}', this)">📋 복사</button>`
           + `<button onclick="startOne('${sc.id}')" style="margin-left:6px;background:#275">▶ 생성</button>`
           + `<div style="display:flex;gap:4px;margin-top:6px">`
           + `<input type="text" id="manualUrl_${sc.id}" placeholder="Flow에서 완성됐는데 등록이 안 됐으면 이미지 URL을 여기 붙여넣기" style="flex:1;background:#111;color:#9ad;border:1px solid #333;border-radius:4px;padding:4px 6px;font-size:10px">`
@@ -855,9 +1106,42 @@ function toggleExpand(id){
   if(expandedIds.has(id)) expandedIds.delete(id); else expandedIds.add(id);
   renderScenes(previewScenes.length ? previewScenes : []);
 }
-function copyPrompt(id){
+// 2026-09-12 추가 — 사용자 지적: "복사도 안됨". 크롬 사이드패널 iframe 안에서는
+// navigator.clipboard.writeText()가 권한 정책(Permissions Policy)에 막혀 조용히
+// 실패할 수 있다(panel.html의 iframe에 allow="clipboard-write"를 추가했지만, 확장
+// 프로그램은 파일을 고쳐도 재로드 전까진 반영 안 됨). 그 API가 막혀 있어도 동작하도록
+// 구식 document.execCommand('copy') 방식을 대체 경로로 같이 둔다.
+function legacyCopy(text){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch(e) {}
+  document.body.removeChild(ta);
+  return ok;
+}
+// 2026-09-12 추가 — 사용자 지적: "복사는 되는데 복사완료 같은 표시가 안되서 복사가
+// 안되는지 알았나봐". 실제로는 항상 복사가 되고 있었는데 성공 피드백이 전혀 없어서
+// 안 되는 줄 알았던 것 — 버튼 자체에 잠깐 "✅ 복사됨" 표시를 띄운다.
+function flashCopied(btn){
+  if(!btn) return;
+  const orig = btn.textContent;
+  btn.textContent = '✅ 복사됨';
+  btn.disabled = true;
+  setTimeout(()=>{ btn.textContent = orig; btn.disabled = false; }, 1200);
+}
+function copyPrompt(id, btn){
   const text = promptById[id] || '';
-  navigator.clipboard.writeText(text).catch(()=>{});
+  const done = () => flashCopied(btn);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done).catch(() => { legacyCopy(text); done(); });
+  } else {
+    legacyCopy(text);
+    done();
+  }
 }
 function onCheckChange(){
   const boxes = document.querySelectorAll('.scene-chk');
@@ -908,6 +1192,11 @@ function updateSelectedCount(){
   }
   const n = checkedIds === null ? (previewScenes||[]).length : checkedIds.size;
   document.getElementById('selectedCount').textContent = n + '개';
+  // 2026-09-12 추가 — 사용자 요청: "선택된것 숫자, 남은것 숫자, 현재 작업중인 번호"를 한눈에.
+  // "남은"은 선택 여부와 무관하게 전체 씬 중 아직 이미지가 없는(pending) 개수 — 작업중인
+  // 번호는 이미 아래 워커 박스(예: "9223 S81 99%")에 표시되고 있어 여기선 안 겹치게 둔다.
+  const remaining = (previewScenes||[]).filter(s => s.status !== 'done').length;
+  document.getElementById('remainingCount').textContent = remaining + '개';
 }
 function selectedIds(){
   if(checkedIds === null) return (previewScenes||[]).map(s=>s.id);
@@ -918,8 +1207,10 @@ function runOptions(){
     ratio: document.getElementById('ratioSel').value,
     new_project: document.getElementById('newProjectChk').checked,
     port: parseInt(document.getElementById('portSel').value, 10),
-    character_name: document.getElementById('characterNameInput').value,
+    characters: parseCharactersInput(document.getElementById('charactersInput').value),
     image_count: parseInt(document.getElementById('imageCountSel').value, 10),
+    project_url: document.getElementById('projectSel').value || null,
+    agent_off: document.getElementById('agentOffChk').checked,
   };
 }
 async function startRun(){
@@ -1013,7 +1304,14 @@ async function deleteSceneImage(sceneId){
 }
 async function stopRun(){
   const port = parseInt(document.getElementById('portSel').value, 10);
-  await fetch('/api/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({port})});
+  const resultSpan = document.getElementById('stopResult');
+  const r = await fetch('/api/stop', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({port})});
+  const d = await r.json();
+  // 2026-09-12 추가 — 사용자 요청: 멈추기를 눌러도 즉시 멈추는 게 아니라 진행 중인 씬을
+  // 마저 끝낸 뒤에 멈추는 구조라, 눌렀을 때 그 사실을 바로 알려준다("눌렀는데 왜 안 멈춰?"
+  // 오해 방지).
+  if(d.error){ resultSpan.style.color = '#6a6'; resultSpan.textContent = '✅ 작업 중인 게 없어서 바로 멈췄습니다.'; }
+  else { resultSpan.style.color = '#fb5'; resultSpan.textContent = '⏳ 작업 중인 씬이 있으면 완료 후 멈춥니다.'; }
 }
 // 2026-09-10 추가 — "계정마다 달라~ 2초마다 가져온다면서?" 지적: 씬 목록 fetch가 실패해도
 // catch(e){}로 조용히 삼켜서 화면이 낡은 채로 멈춰 있어도 알 방법이 없었다. 실패하면 lastSync에
@@ -1145,13 +1443,17 @@ async function restoreAndBoot(){
   }
   if(saved.ratio) document.getElementById('ratioSel').value = saved.ratio;
   if(saved.newProject) document.getElementById('newProjectChk').checked = true;
+  if(saved.agentOff === false) document.getElementById('agentOffChk').checked = false;
   if(saved.range) document.getElementById('rangeInput').value = saved.range;
   if(saved.port) document.getElementById('portSel').value = saved.port;
   if(saved.range9223) document.getElementById('range9223').value = saved.range9223;
   if(saved.range9224) document.getElementById('range9224').value = saved.range9224;
   if(saved.range9225) document.getElementById('range9225').value = saved.range9225;
   if(saved.range9226) document.getElementById('range9226').value = saved.range9226;
-  if(saved.characterName) document.getElementById('characterNameInput').value = saved.characterName;
+  if(saved.charactersText) document.getElementById('charactersInput').value = saved.charactersText;
+  // 2026-09-12 수정 — 프로젝트 목록·선택값은 이제 계정(포트)별로 캐시돼 있으므로, 현재
+  // 포트 기준으로 복원한다(applyProjectListForPort) — 서버에 다시 안 물어봄.
+  applyProjectListForPort(parseInt(document.getElementById('portSel').value, 10));
   // 2026-09-11 추가 — 기본값 켜짐(1장만 생성)이므로, 저장된 값이 명시적으로 false일 때만 끈다.
   document.getElementById('imageCountSel').value = saved.imageCount || 1;
   updateSelectedCount();
@@ -1246,8 +1548,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/start":
             result = start_run(data.get("site_id", ""), data.get("unit_id", ""), data.get("scene_ids"),
                                data.get("ratio", "16:9"), bool(data.get("new_project")),
-                               int(data.get("port", 9223)), data.get("character_name", ""),
-                               int(data.get("image_count", 1)))
+                               int(data.get("port", 9223)), data.get("characters") or [],
+                               int(data.get("image_count", 1)), data.get("project_url"),
+                               bool(data.get("agent_off", True)))
+            self._json(result, 400 if result.get("error") else 200)
+        elif self.path == "/api/list_projects":
+            result = list_flow_projects(int(data.get("port", 9223)))
             self._json(result, 400 if result.get("error") else 200)
         elif self.path == "/api/register_scenes":
             result = register_scenes(data.get("site_id", ""), data.get("unit_id", ""), data.get("scenes") or [])
