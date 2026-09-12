@@ -511,11 +511,35 @@ class EconFlow:
         time.sleep(0.5)
         return True
 
-    def ensure_settings(self, image_ratio="16:9", video_ratio="16:9", agent_off=True):
-        """프로젝트당 1회 호출. 컴포저의 모델/비율 칩을 열어 이미지·동영상 비율을 맞춘다."""
+    def set_batch_count(self, n: int, kind: str):
+        """팝오버 안에서 '이미지'/'동영상' 탭을 고른 뒤, 그 탭의 배치수 버튼(예: 'x1')을 클릭.
+        2026-09-12 추가 — 사용자 지적: "사진생성1장 설정도 체크 안해". job.json의 image_count는
+        지금까지 image_count_instruction()으로 프롬프트 텍스트에 "정확히 N장만 만들어라"는
+        지시만 넣었을 뿐, Flow 자체의 배치수 UI(설정 칩 "Nano Banana 2 ▭ x1"을 열면 나오는
+        x1~x4 버튼, open_settings() docstring에 실측 기록됨)는 한 번도 클릭한 적이 없었다.
+        비율(set_ratio_chip)과 똑같은 방식으로 실제 UI 버튼도 맞춰서, 텍스트 지시에만
+        의존하지 않게 한다."""
+        self.switch_settings_tab(kind)
+        target = f"x{n}"
+        r = self.c.js(r"""(()=>{const target=%s;
+          const b=[...document.querySelectorAll("button,[role=button]")]
+            .filter(e=>e.offsetParent && (e.innerText||"").replace(/\s+/g," ").trim()===target);
+          if(!b.length) return "NF"; const r=b[0].getBoundingClientRect();
+          return JSON.stringify({x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)});})()""" % json.dumps(target))
+        if r == "NF" or not r:
+            log(f"  ✗ 배치수 버튼 없음: {target} ({kind})")
+            return False
+        d = json.loads(r)
+        self.click_xy(d["x"], d["y"])
+        time.sleep(0.5)
+        return True
+
+    def ensure_settings(self, image_ratio="16:9", video_ratio="16:9", agent_off=True, image_count=1):
+        """프로젝트당 1회 호출. 컴포저의 모델/비율 칩을 열어 이미지·동영상 비율·배치수를 맞춘다."""
         if not self.open_settings():
             return
         self.set_ratio_chip(image_ratio, "image")
+        self.set_batch_count(image_count, "image")
         self.set_ratio_chip(video_ratio, "video")
         self.close_settings()
         # 2026-09-12 추가 — 대시보드 체크박스("에이전트 꺼짐 확인")로 켜고 끌 수 있게 노출.
@@ -954,7 +978,7 @@ def main():
 
     if not state.get("settings_done"):
         F.ensure_settings(job.get("ratio", "16:9"), job.get("video_ratio", job.get("ratio", "16:9")),
-                          job.get("agent_off", True))
+                          job.get("agent_off", True), int(job.get("image_count", 1)))
         state["settings_done"] = True
         save()
 
