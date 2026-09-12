@@ -378,6 +378,20 @@ export function SceneDraftForm({
   );
 }
 
+// 2026-09-12 추가 — 사용자 요청: "13단계에서도 탭별로(전체/루즈 등) 분류해서 일관성 유지가 잘
+// 되었는지 확인해볼 수 있게 해줘". CHARACTER_STYLE_PRESETS의 현재 선택된 프리셋이 tabs를 갖고
+// 있으면(예: 스틱맨 프리셋의 "젠틀맨 루즈"/"스틱맨"), 각 장면의 imagePrompt 텍스트에서 그 탭의
+// keywords를 찾아 매칭되는 탭 번호(인덱스) 배열을 돌려준다 — 하드코딩 없이, 13번 패널 상단에서
+// 고른 캐릭터 프리셋이 실제로 갖고 있는 키워드만 그대로 쓴다(화면 분류와 실제 생성 프롬프트가
+// 항상 같은 소스를 보게 하기 위함).
+function classifyScene(imagePrompt: string, tabs: { label: string; keywords: string[] }[]): number[] {
+  if (!imagePrompt) return [];
+  return tabs.reduce<number[]>((acc, t, i) => {
+    if (t.keywords.some((kw) => kw && imagePrompt.includes(kw))) acc.push(i);
+    return acc;
+  }, []);
+}
+
 // 6번 장면 프롬프트 편집 UI — 예전엔 전체를 통짜 텍스트로 붙여넣는 방식뿐이었는데, 장면 하나씩
 // 추가/수정/삭제할 수 있게 바꿨다. 저장 시엔 여전히 scenePrompts 문자열 전체를 부모에 돌려준다
 // (백엔드/파싱 로직은 그대로 두고 편집 UX만 바꾼 것).
@@ -385,16 +399,22 @@ export function SceneEditorList({
   scenePrompts,
   onSave,
   saving,
+  characterTabs = [],
 }: {
   scenePrompts: string;
   onSave: (text: string) => void | Promise<void>;
   saving: boolean;
+  // 2026-09-12 추가 — 현재 선택된 캐릭터 프리셋의 tabs(CharacterStylePreset.tabs). 비어있으면
+  // (탭 분류가 필요 없는 프리셋, 예: 포동이/식빵맨) 탭 바 자체를 안 보여준다.
+  characterTabs?: { label: string; keywords: string[] }[];
 }) {
   const scenes = parseSceneBlocks(scenePrompts);
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 장면 추가 중
   const [draft, setDraft] = useState<SceneBlock>(EMPTY_SCENE_DRAFT);
   // 2026-09-10 추가 — 장면이미지 썸네일을 클릭하면 이 인덱스로 SceneImageModal을 연다. null=닫힘.
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  // 2026-09-12 추가 — 탭 필터 상태. 'all' | 'none' | 'multi' | 탭 인덱스(문자열).
+  const [filterTab, setFilterTab] = useState<string>('all');
 
   function startEdit(idx: number) {
     setEditingIndex(idx);
@@ -442,6 +462,32 @@ export function SceneEditorList({
     );
   }
 
+  // 2026-09-12 추가 — 탭 유효성: 캐릭터 프리셋을 바꿔서 tabs 구성이 달라지면 이전에 고른 필터가
+  // 더 이상 존재하지 않을 수 있다(예: 인덱스 하나만 있던 프리셋에서 없는 프리셋으로 전환) — 그
+  // 경우 조용히 '전체'로 되돌린다.
+  const validFilterKeys = ['all', 'none', ...(characterTabs.length >= 2 ? ['multi'] : []), ...characterTabs.map((_, i) => String(i))];
+  const effectiveFilterTab = validFilterKeys.includes(filterTab) ? filterTab : 'all';
+
+  const matchesByScene = scenes.map((s) => classifyScene(s.imagePrompt, characterTabs));
+  const countFor = (key: string) =>
+    matchesByScene.filter((m) => {
+      if (key === 'all') return true;
+      if (key === 'none') return m.length === 0;
+      if (key === 'multi') return m.length >= 2;
+      return m.includes(Number(key));
+    }).length;
+
+  const filteredWithIndex = scenes
+    .map((s, idx) => ({ s, idx }))
+    .filter(({ idx }) => {
+      if (characterTabs.length === 0 || effectiveFilterTab === 'all') return true;
+      const m = matchesByScene[idx];
+      if (effectiveFilterTab === 'none') return m.length === 0;
+      if (effectiveFilterTab === 'multi') return m.length >= 2;
+      return m.includes(Number(effectiveFilterTab));
+    });
+  const previewScenes = filteredWithIndex.map((f) => f.s);
+
   // 2026-09-07, 사용자 지시로 13번을 스토리보드 표 형태로 재구성: 타임 / 장면이미지 / 이미지
   // 프롬프트 / 영상프롬프트 or 전환프롬프트 4개 열. 수정 중인 행만 SceneDraftForm으로 펼치고,
   // 나머지는 표 한 줄로 스캔하기 쉽게 보여준다. 좁은 패널이라 가로 스크롤로 감싼다.
@@ -455,7 +501,32 @@ export function SceneEditorList({
           </button>
         </div>
       )}
-      {scenes.length > 0 && (
+      {scenes.length > 0 && characterTabs.length > 0 && (
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {(
+            [
+              { key: 'all', label: '전체' },
+              ...characterTabs.map((t, i) => ({ key: String(i), label: t.label })),
+              ...(characterTabs.length >= 2 ? [{ key: 'multi', label: '🎭 같이출연' }] : []),
+              { key: 'none', label: '🎨 캐릭터없음' },
+            ] as { key: string; label: string }[]
+          ).map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setFilterTab(t.key)}
+              className={`shrink-0 text-[10px] font-black px-2.5 py-1 rounded-full border whitespace-nowrap ${
+                effectiveFilterTab === t.key ? 'bg-black text-white border-black' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300'
+              }`}
+            >
+              {t.label} ({countFor(t.key)})
+            </button>
+          ))}
+        </div>
+      )}
+      {scenes.length > 0 && filteredWithIndex.length === 0 && (
+        <p className="text-[11px] text-neutral-300">이 분류엔 해당하는 장면이 없습니다.</p>
+      )}
+      {filteredWithIndex.length > 0 && (
         <div className="overflow-x-auto border border-neutral-100 rounded-lg">
           <table className="w-full text-[11px] border-collapse min-w-[640px]">
             <thead>
@@ -469,7 +540,7 @@ export function SceneEditorList({
               </tr>
             </thead>
             <tbody>
-              {scenes.map((s, idx) =>
+              {filteredWithIndex.map(({ s, idx }, pos) =>
                 editingIndex === idx ? (
                   <tr key={s.id || idx}>
                     <td colSpan={6} className="p-1.5 bg-neutral-50">
@@ -485,7 +556,7 @@ export function SceneEditorList({
                     <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap">{s.time || '—'}</td>
                     <td className="px-2 py-1.5">
                       {s.sceneImage ? (
-                        <button type="button" onClick={() => setPreviewIndex(idx)} className="block" title="클릭하면 크게 보기 (장면별로 연달아 볼 수 있어요)">
+                        <button type="button" onClick={() => setPreviewIndex(pos)} className="block" title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)">
                           <img
                             src={s.sceneImage}
                             alt={s.title}
@@ -564,7 +635,7 @@ export function SceneEditorList({
         </button>
       )}
       {previewIndex !== null && (
-        <SceneImageModal scenes={scenes} index={previewIndex} onClose={() => setPreviewIndex(null)} onNavigate={setPreviewIndex} />
+        <SceneImageModal scenes={previewScenes} index={previewIndex} onClose={() => setPreviewIndex(null)} onNavigate={setPreviewIndex} />
       )}
     </div>
   );
