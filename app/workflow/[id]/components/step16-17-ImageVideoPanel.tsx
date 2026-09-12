@@ -534,7 +534,12 @@ ${srtText || '(자막 없음)'}`}
                     </div>
                   </div>
 
-                  <SceneEditorList scenePrompts={u.scenePrompts || ''} saving={saving} onSave={(text) => save(u.id, text)} />
+                  <SceneEditorList
+                    scenePrompts={u.scenePrompts || ''}
+                    saving={saving}
+                    onSave={(text) => save(u.id, text)}
+                    characterTabs={selectedCharacterPreset.tabs || []}
+                  />
                 </div>
               )}
             </div>
