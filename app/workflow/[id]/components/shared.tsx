@@ -169,6 +169,85 @@ export function SceneImageModal({
   );
 }
 
+// 2026-09-13 추가 — 사용자 요청: "장면 이미지 오른쪽에 영상장면 추가해줘, 장면 이미지와 동일
+// 방식으로". SceneImageModal과 완전히 같은 구조(같은 필터링된 장면 목록 안에서 좌우 화살표로
+// 이전/다음 넘겨보기)를 영상용으로 그대로 미러링한다. 기존 SceneImageModal의 시그니처를 바꾸지
+// 않고(다른 곳에서 이미 이 컴포넌트를 쓰고 있을 수 있어 영향 범위를 좁히기 위해) 별도 컴포넌트로
+// 분리했다.
+export function SceneVideoModal({
+  scenes,
+  index,
+  onClose,
+  onNavigate,
+}: {
+  scenes: SceneBlock[];
+  index: number;
+  onClose: () => void;
+  onNavigate: (idx: number) => void;
+}) {
+  const scene = scenes[index];
+  const hasPrev = index > 0;
+  const hasNext = index < scenes.length - 1;
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'ArrowRight' && index < scenes.length - 1) onNavigate(index + 1);
+      else if (e.key === 'ArrowLeft' && index > 0) onNavigate(index - 1);
+      else if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [index, scenes.length, onNavigate, onClose]);
+
+  if (!scene) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
+          <span className="text-white/50 text-[11px] font-mono px-1">
+            {scene.id} · {index + 1}/{scenes.length}
+          </span>
+          <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
+            ✕ 닫기
+          </button>
+        </div>
+        <div className="relative flex items-center justify-center bg-black min-h-[45vh]">
+          {hasPrev && (
+            <button
+              type="button"
+              onClick={() => onNavigate(index - 1)}
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+              aria-label="이전 장면"
+            >
+              ‹
+            </button>
+          )}
+          {scene.sceneVideo ? (
+            <video src={scene.sceneVideo} controls autoPlay className="max-w-full max-h-[70vh]" />
+          ) : (
+            <div className="text-neutral-500 text-xs py-24">이 장면엔 아직 영상이 없습니다</div>
+          )}
+          {hasNext && (
+            <button
+              type="button"
+              onClick={() => onNavigate(index + 1)}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+              aria-label="다음 장면"
+            >
+              ›
+            </button>
+          )}
+        </div>
+        <div className="px-3 py-2 bg-neutral-900 space-y-0.5">
+          {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
+          <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 프롬프트 한 줄(CLEAN/INFO/영상)을 클립보드에 복사하는 작은 버튼 — 눌렀을 때만 "복사됨"으로 잠깐 바뀐다.
 // 2026-09-08 추가 — 선택적 label. 한 카드 안에 복사 버튼이 여러 개(예: 11번의 "전체 복사"/"TTS만
 // 복사") 있을 때 전부 "복사"로만 뜨면 뭘 누르는지 구분이 안 돼서, 버튼마다 다른 문구를 넣을 수
@@ -239,6 +318,22 @@ export function SceneDraftForm({
     }
   }
 
+  // 2026-09-13 추가 — 장면영상 업로드. handleSceneImage와 완전히 같은 패턴(단일 파일 →
+  // uploadSceneMedia → draft에 URL 한 개 세팅)이고, video/*만 받는다는 것만 다르다.
+  async function handleSceneVideo(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setUploadError('');
+    try {
+      const url = await uploadSceneMedia(files[0]);
+      setDraft({ ...draft, sceneVideo: url });
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-2 space-y-1.5">
       <div className="flex gap-1.5">
@@ -268,30 +363,60 @@ export function SceneDraftForm({
         placeholder="대본 문장 (선택)"
         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
       />
-      <div>
-        <p className="text-[10px] font-black text-neutral-400 mb-1">장면이미지 — Flow 등에서 생성한 결과물을 여기 올려두면 스토리보드 썸네일로 보입니다</p>
-        {draft.sceneImage ? (
-          <div className="flex items-center gap-1.5 mb-1">
-            <img src={draft.sceneImage} alt={draft.title} className="w-16 h-16 object-cover rounded-lg border border-neutral-200" />
-            <button onClick={() => setDraft({ ...draft, sceneImage: '' })} className="text-[10px] font-black text-neutral-400 hover:text-red-500">
-              ✕ 제거
-            </button>
-          </div>
-        ) : (
-          <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
-            {uploading ? '업로드 중...' : '+ 장면이미지 업로드'}
-            <input
-              type="file"
-              accept="image/*"
-              disabled={uploading}
-              onChange={(e) => {
-                handleSceneImage(e.target.files);
-                e.target.value = '';
-              }}
-              className="hidden"
-            />
-          </label>
-        )}
+      <div className="flex gap-3">
+        <div className="flex-1">
+          <p className="text-[10px] font-black text-neutral-400 mb-1">장면이미지 — Flow 등에서 생성한 결과물을 여기 올려두면 스토리보드 썸네일로 보입니다</p>
+          {draft.sceneImage ? (
+            <div className="flex items-center gap-1.5 mb-1">
+              <img src={draft.sceneImage} alt={draft.title} className="w-16 h-16 object-cover rounded-lg border border-neutral-200" />
+              <button onClick={() => setDraft({ ...draft, sceneImage: '' })} className="text-[10px] font-black text-neutral-400 hover:text-red-500">
+                ✕ 제거
+              </button>
+            </div>
+          ) : (
+            <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
+              {uploading ? '업로드 중...' : '+ 장면이미지 업로드'}
+              <input
+                type="file"
+                accept="image/*"
+                disabled={uploading}
+                onChange={(e) => {
+                  handleSceneImage(e.target.files);
+                  e.target.value = '';
+                }}
+                className="hidden"
+              />
+            </label>
+          )}
+        </div>
+        {/* 2026-09-13 추가 — 사용자 요청: "장면 이미지 오른쪽에 영상장면 추가해줘, 장면 이미지와
+            동일 방식으로(영상 필요한 것들만 몇 개만 등록할 거야)". 대부분의 씬은 비워두면 되고,
+            훅/인트로처럼 실제로 영상 클립을 만든 씬만 여기에 올리면 된다. */}
+        <div className="flex-1">
+          <p className="text-[10px] font-black text-neutral-400 mb-1">장면영상 — 훅/인트로 등 실제로 영상 클립을 만든 장면만 올리면 됩니다(나머지는 비워둠)</p>
+          {draft.sceneVideo ? (
+            <div className="flex items-center gap-1.5 mb-1">
+              <video src={draft.sceneVideo} className="w-16 h-16 object-cover rounded-lg border border-neutral-200" muted />
+              <button onClick={() => setDraft({ ...draft, sceneVideo: '' })} className="text-[10px] font-black text-neutral-400 hover:text-red-500">
+                ✕ 제거
+              </button>
+            </div>
+          ) : (
+            <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
+              {uploading ? '업로드 중...' : '+ 장면영상 업로드'}
+              <input
+                type="file"
+                accept="video/*"
+                disabled={uploading}
+                onChange={(e) => {
+                  handleSceneVideo(e.target.files);
+                  e.target.value = '';
+                }}
+                className="hidden"
+              />
+            </label>
+          )}
+        </div>
       </div>
       <textarea
         value={draft.imagePrompt}
@@ -413,6 +538,8 @@ export function SceneEditorList({
   const [draft, setDraft] = useState<SceneBlock>(EMPTY_SCENE_DRAFT);
   // 2026-09-10 추가 — 장면이미지 썸네일을 클릭하면 이 인덱스로 SceneImageModal을 연다. null=닫힘.
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  // 2026-09-13 추가 — 장면영상 썸네일을 클릭하면 이 인덱스로 SceneVideoModal을 연다. null=닫힘.
+  const [previewVideoIndex, setPreviewVideoIndex] = useState<number | null>(null);
   // 2026-09-12 추가 — 탭 필터 상태. 'all' | 'none' | 'multi' | 탭 인덱스(문자열).
   const [filterTab, setFilterTab] = useState<string>('all');
 
@@ -503,6 +630,7 @@ export function SceneEditorList({
   // 2026-09-07, 사용자 지시로 13번을 스토리보드 표 형태로 재구성: 타임 / 장면이미지 / 이미지
   // 프롬프트 / 영상프롬프트 or 전환프롬프트 4개 열. 수정 중인 행만 SceneDraftForm으로 펼치고,
   // 나머지는 표 한 줄로 스캔하기 쉽게 보여준다. 좁은 패널이라 가로 스크롤로 감싼다.
+  // 2026-09-13 추가 — 장면이미지 오른쪽에 영상장면 열 추가(사용자 요청, 아래 표 참고).
   return (
     <div className="space-y-1.5 mt-1">
       {scenes.length === 0 && editingIndex === null && <p className="text-[11px] text-neutral-300">아직 없음</p>}
@@ -540,12 +668,13 @@ export function SceneEditorList({
       )}
       {filteredWithIndex.length > 0 && (
         <div className="overflow-x-auto border border-neutral-100 rounded-lg">
-          <table className="w-full text-[11px] border-collapse min-w-[640px]">
+          <table className="w-full text-[11px] border-collapse min-w-[720px]">
             <thead>
               <tr className="bg-neutral-50 text-neutral-400">
                 <th className="text-left font-black px-2 py-1.5 w-28">장면</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">타임</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">장면이미지</th>
+                <th className="text-left font-black px-2 py-1.5 w-20">영상장면</th>
                 <th className="text-left font-black px-2 py-1.5">이미지 프롬프트</th>
                 <th className="text-left font-black px-2 py-1.5">영상/전환 프롬프트</th>
                 <th className="text-left font-black px-2 py-1.5 w-14">관리</th>
@@ -555,7 +684,7 @@ export function SceneEditorList({
               {filteredWithIndex.map(({ s, idx }, pos) =>
                 editingIndex === idx ? (
                   <tr key={s.id || idx}>
-                    <td colSpan={6} className="p-1.5 bg-neutral-50">
+                    <td colSpan={7} className="p-1.5 bg-neutral-50">
                       <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
                     </td>
                   </tr>
@@ -574,6 +703,32 @@ export function SceneEditorList({
                             alt={s.title}
                             className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
                           />
+                        </button>
+                      ) : (
+                        <div className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight">
+                          없음
+                        </div>
+                      )}
+                    </td>
+                    {/* 2026-09-13 추가 — 장면영상 열. 장면이미지 열과 완전히 같은 방식(썸네일
+                        클릭 → 모달, 없으면 "없음" 자리표시자) — 실제로 영상 클립을 만든 일부
+                        장면에만 채워진다. */}
+                    <td className="px-2 py-1.5">
+                      {s.sceneVideo ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewVideoIndex(pos)}
+                          className="relative block"
+                          title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)"
+                        >
+                          <video
+                            src={s.sceneVideo}
+                            muted
+                            playsInline
+                            preload="metadata"
+                            className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                          />
+                          <span className="absolute inset-0 flex items-center justify-center text-white text-sm drop-shadow pointer-events-none">▶</span>
                         </button>
                       ) : (
                         <div className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight">
@@ -648,6 +803,9 @@ export function SceneEditorList({
       )}
       {previewIndex !== null && (
         <SceneImageModal scenes={previewScenes} index={previewIndex} onClose={() => setPreviewIndex(null)} onNavigate={setPreviewIndex} />
+      )}
+      {previewVideoIndex !== null && (
+        <SceneVideoModal scenes={previewScenes} index={previewVideoIndex} onClose={() => setPreviewVideoIndex(null)} onNavigate={setPreviewVideoIndex} />
       )}
     </div>
   );
