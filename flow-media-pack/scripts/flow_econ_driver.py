@@ -630,9 +630,36 @@ class EconFlow:
         탭으로 미리 좁혀두면 이름 클릭 한 번으로 바로 첨부까지 끝난다(버튼 불필요). 그래서
         "캐릭터" 탭을 먼저 클릭해 좁히는 단계를 다시 넣는다 — 예전에 검색창 정리 단계를
         없애면서 실수로 같이 지워버렸던 부분(사용자 지적: "왜 넌 자꾸 전체로 가???")."""
-        tag = re.sub(r'[^A-Za-z0-9]+', '_', title)[:20]
+        # 2026-09-12 실사고 수정 — 캐릭터 이름이 전부 한글(스틱맨/젠틀맨루즈)이라, ASCII만
+        # 남기던 이전 방식([^A-Za-z0-9])은 둘 다 밑줄 하나("_")로 뭉개져서 디버그 스샷 파일명이
+        # "dbg_step1__.png"로 완전히 겹쳤다 — 어느 캐릭터를 찾으려던 시도였는지 스샷만으로는
+        # 구분이 안 됐다(사용자 지적: "지금 캐릭터를 루즈만 찾고 있어 확인해봐"에 대응하려다
+        # 발견). 윈도우 파일명에 실제로 못 쓰는 문자만 걸러내고 한글은 그대로 남긴다.
+        tag = re.sub(r'[<>:"/\\|?*\s]+', '_', title)[:20]
+        # 2026-09-12 (4차) 실사고 수정 — 사용자 지적: "스틱맨 장면에서 루즈를 선택하자나".
+        # 라이브 CDP로 컴포저 DOM을 직접 읽어 확인한 결과, class="mention-chip-invalid"인
+        # 깨진 멘션 칩("젠틀맨루즈")이 스틱맨 씬 컴포저에 그대로 남아있었다. 세션이 길어지고
+        # 프로젝트에 이미지가 쌓여 Flow가 무거워지면, "@"를 쳐도 정상 피커 대신 예전에 쓰던
+        # 캐시된 멘션이 그대로 꽂히고 정상 오버레이가 아예 안 뜨는 현상으로 보인다(사용자
+        # 관찰과 일치: "처음에는 스틱맨 잘 찾았는데" 세션 후반부터 이 오류 발생). 다음 씬으로
+        # 오염되지 않게, 매 시도 전에 남은 깨진 칩부터 먼저 지운다.
+        self.c.js(r"""(()=>{const H=innerHeight;
+          const e=[...document.querySelectorAll("[contenteditable=true],textarea")]
+            .filter(x=>x.offsetParent && x.getBoundingClientRect().top>H*0.6)[0];
+          if(!e) return "NF";
+          [...e.querySelectorAll('.mention-chip-invalid')].forEach(b=>b.remove());
+          return "OK";})()""")
         self.type_text("@")
         time.sleep(1.0)
+        # 오버레이(피커) 자체가 실제로 떴는지부터 확인한다 — 안 뜬 채로 "캐릭터" 탭이나
+        # 이름을 찾으러 가면, 방금 꽂힌 캐시된 엉뚱한 멘션이나 화면의 다른 요소를 잘못
+        # 집을 위험이 있다. 없으면 여기서 바로 명확한 원인으로 실패 처리한다.
+        overlay_r = self._poll_js(r"""(()=>{
+          const overlay = document.querySelector('.cdk-overlay-container, [role="dialog"], [role="listbox"]');
+          return overlay ? "OK" : "NF";})()""", tries=8, delay=0.3)
+        if overlay_r != "OK":
+            self.shot(f"mention_no_overlay_{tag}")
+            raise RuntimeError(f"★'@' 입력해도 캐릭터 피커가 안 열렸다(오버레이 없음, 세션 부하로 캐시된 멘션이 꽂혔을 수 있음)")
         # "캐릭터" 탭을 눌러 좁힌다 — 전체 탭에 남아있으면 이전에 생성된 씬 이미지들의
         # 자동 캡션(예: "Gentleman Rouge pointing...")과 뒤섞여 있어도, 좁혀두면 등록된
         # 캐릭터 2개만 남아 이름 클릭 한 번으로 바로 첨부된다.
@@ -665,6 +692,33 @@ class EconFlow:
         self.click_xy(d["x"], d["y"])
         time.sleep(0.5)
         self.shot(f"dbg_mention_after_{tag}")
+        # paste_text()의 "하고 나서 반드시 확인" 원칙과 동일하게, 클릭한 뒤 실제로
+        # 그 이름의 유효한(invalid 아닌) 칩이 컴포저에 붙었는지 검증한다 — 위에서 확인한
+        # "엉뚱한 캐릭터가 붙는" 사고를 여기서 최종적으로 잡아낸다. 다르거나 깨졌으면
+        # 그 칩을 바로 지워서 다음 씬으로 오염되지 않게 하고 이 씬만 실패 처리한다.
+        verify = self._poll_js(r"""(()=>{const H=innerHeight;
+          const e=[...document.querySelectorAll("[contenteditable=true],textarea")]
+            .filter(x=>x.offsetParent && x.getBoundingClientRect().top>H*0.6)[0];
+          if(!e) return "NF";
+          const chips=[...e.querySelectorAll('.mention-chip')];
+          const last=chips[chips.length-1];
+          if(!last) return "NOCHIP";
+          return JSON.stringify({txt:(last.textContent||"").trim(), invalid:last.classList.contains('mention-chip-invalid')});
+          })()""", tries=4, delay=0.3)
+        try:
+            vd = json.loads(verify)
+            ok = isinstance(vd, dict) and not vd.get("invalid") and vd.get("txt") == title
+        except (TypeError, ValueError):
+            vd = verify
+            ok = False
+        if not ok:
+            self.shot(f"mention_bad_attach_{tag}")
+            self.c.js(r"""(()=>{const H=innerHeight;
+              const e=[...document.querySelectorAll("[contenteditable=true],textarea")]
+                .filter(x=>x.offsetParent && x.getBoundingClientRect().top>H*0.6)[0];
+              if(e) e.textContent = "";
+              return "OK";})()""")
+            raise RuntimeError(f"★'@{title}' 첨부 확인 실패(다른 캐릭터가 붙었거나 깨짐): {vd}")
         # 멘션 첨부 직후 커서가 그 칩 바로 뒤에 있다 — 이어서 타이핑할 실제 프롬프트와
         # 붙지 않게 공백 하나 넣는다.
         self.type_text(" ")
@@ -942,7 +996,7 @@ def main():
         one_image_instruction = image_count_instruction(image_count)
         total = len(images)
         done_count = len(state["done"])
-        # 2026-09-11 추가 — 사용자 지적: "그런 오류를 표시를 해줘야 다시 시작을 하던 할꺈 아니야".
+        # 2026-09-11 추가 — 사용자 지적: "그런 오류를 표시를 해줘야 다시 시작을 하던 할꺼 아니야".
         # 예전엔 phase="failed"만 기록해서 다음 씬이 시작되는 순간 곧바로 덮어써졌고(화면엔
         # "실행 중인 계정 없음"으로만 보임), 실패 사유(에러 메시지)도 아예 기록되지 않아서
         # run.log 파일을 직접 열어보지 않는 한 뭐가 왜 실패했는지 알 길이 없었다. 이번 실행에서
