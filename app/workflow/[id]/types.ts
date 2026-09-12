@@ -153,6 +153,11 @@ export type SceneBlock = {
   note: string;
   time: string;
   sceneImage: string;
+  // 2026-09-13 추가 — 사용자 요청: "장면 이미지 오른쪽에 영상장면 추가해줘, 장면 이미지와 동일
+  // 방식으로(영상 필요한 것들만 몇 개만 등록할 거야)". sceneImage와 완전히 같은 패턴(단일 URL,
+  // 파일 업로드로 등록, 값이 없으면 빈 문자열)으로 둔다 — 대부분의 씬은 정지 이미지만 쓰고,
+  // 훅/인트로 등 실제로 영상 클립을 만든 일부 씬에만 채워진다.
+  sceneVideo: string;
   imagePrompt: string;
   clean: string;
   info: string;
