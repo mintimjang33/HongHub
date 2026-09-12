@@ -64,6 +64,7 @@ export function parseSceneBlocks(text: string): SceneBlock[] {
     let note = '';
     let time = '';
     let sceneImage = '';
+    let sceneVideo = '';
     let imagePrompt = '';
     let clean = '';
     let info = '';
@@ -77,13 +78,16 @@ export function parseSceneBlocks(text: string): SceneBlock[] {
       // 깨지지 않도록 그대로 계속 읽는다 — 새 필드만 추가.
       else if (line.startsWith('- 시간:')) time = line.replace(/^- 시간:\s*/, '');
       else if (line.startsWith('- 장면이미지:')) sceneImage = line.replace(/^- 장면이미지:\s*/, '').trim();
+      // 2026-09-13 추가 — 장면이미지와 나란히 놓이는 실제 영상 클립 URL. sceneImage와 완전히
+      // 같은 방식(파일 업로드 → Storage URL 한 줄)이라 파싱도 같은 패턴으로 추가.
+      else if (line.startsWith('- 장면영상:')) sceneVideo = line.replace(/^- 장면영상:\s*/, '').trim();
       else if (line.startsWith('- 이미지프롬프트:')) imagePrompt = line.replace(/^- 이미지프롬프트:\s*/, '');
       else if (line.startsWith('- CLEAN:')) clean = line.replace(/^- CLEAN:\s*/, '');
       else if (line.startsWith('- INFO:')) info = line.replace(/^- INFO:\s*/, '');
       else if (line.startsWith('- 영상:')) video = line.replace(/^- 영상:\s*/, '');
       else if (line.startsWith('- 자료:')) media.push(line.replace(/^- 자료:\s*/, '').trim());
     }
-    return { id, title, script, note, time, sceneImage, imagePrompt, clean, info, video, media };
+    return { id, title, script, note, time, sceneImage, sceneVideo, imagePrompt, clean, info, video, media };
   });
 }
 
@@ -94,6 +98,7 @@ export const EMPTY_SCENE_DRAFT: SceneBlock = {
   note: '',
   time: '',
   sceneImage: '',
+  sceneVideo: '',
   imagePrompt: '',
   clean: '',
   info: '',
@@ -123,6 +128,7 @@ export function serializeSceneBlocks(scenes: SceneBlock[]): string {
       if (s.note) lines.push(`- 해석: ${s.note}`);
       if (s.time) lines.push(`- 시간: ${s.time}`);
       if (s.sceneImage) lines.push(`- 장면이미지: ${s.sceneImage}`);
+      if (s.sceneVideo) lines.push(`- 장면영상: ${s.sceneVideo}`);
       if (s.imagePrompt) lines.push(`- 이미지프롬프트: ${s.imagePrompt}`);
       if (s.clean) lines.push(`- CLEAN: ${s.clean}`);
       if (s.info) lines.push(`- INFO: ${s.info}`);
