@@ -476,6 +476,18 @@ export function SceneEditorList({
       if (key === 'multi') return m.length >= 2;
       return m.includes(Number(key));
     }).length;
+  // 2026-09-12 추가 — 사용자 요청: "탭에도 (해당숫자 / 남은숫자)로 표시해줘". 그 분류에 속하는
+  // 장면 중 아직 sceneImage(장면이미지)가 없는 것만 센다 — 탭 라벨만 보고도 그 캐릭터 분류에서
+  // 이미지 생성이 얼마나 남았는지 바로 알 수 있게 한다.
+  const remainingFor = (key: string) =>
+    scenes.filter((s, idx) => {
+      if (s.sceneImage) return false;
+      const m = matchesByScene[idx];
+      if (key === 'all') return true;
+      if (key === 'none') return m.length === 0;
+      if (key === 'multi') return m.length >= 2;
+      return m.includes(Number(key));
+    }).length;
 
   const filteredWithIndex = scenes
     .map((s, idx) => ({ s, idx }))
@@ -518,7 +530,7 @@ export function SceneEditorList({
                 effectiveFilterTab === t.key ? 'bg-black text-white border-black' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-300'
               }`}
             >
-              {t.label} ({countFor(t.key)})
+              {t.label} ({countFor(t.key)} / {remainingFor(t.key)})
             </button>
           ))}
         </div>
