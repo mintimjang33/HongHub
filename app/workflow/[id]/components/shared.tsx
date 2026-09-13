@@ -929,28 +929,46 @@ export function StepDocSection({
   const [editing, setEditing] = useState(false);
   const [draftText, setDraftText] = useState('');
   const [saving, setSaving] = useState(false);
+  // 2026-09-13 (4차) 추가 — 실사고: persist()가 fetch 응답의 성공 여부(res.ok)를 확인하지 않고
+  // 무조건 성공한 것처럼 창을 닫아버렸다. fetch는 네트워크 자체가 끊기지 않는 한 서버가 400/500을
+  // 돌려줘도 reject하지 않으므로, 저장이 실제로 실패해도 사용자는 알 방법이 없었다(사용자가 등록
+  // 버튼을 눌렀는데 DB엔 아무것도 안 남아있던 사고로 발견). 이제 res.ok를 확인해서 실패하면
+  // 에러 메시지를 화면에 남기고 창을 닫지 않는다.
+  const [error, setError] = useState('');
 
+  // 2026-09-13 (5차) 수정 — 사용자 지적: "원래 있던 내용이 설명서에 들어 있어야 수정을 하지" —
+  // 아직 새 설명서(stepDocs)가 없는 단계는 편집창이 빈 칸으로 열려서, 기존 workflow_content
+  // 원문(step.desc)을 처음부터 다시 타이핑/붙여넣기해야 하는 것처럼 보였다. 새 설명서가 없으면
+  // 원문을 기본값으로 채워서 열어, 그 자리에서 다듬어 등록할 수 있게 한다.
   function startEdit() {
-    setDraftText(doc || '');
+    setDraftText(doc || step.desc || '');
+    setError('');
     setEditing(true);
   }
 
   async function persist(nextStepDocs: Record<string, string>) {
-    await fetch(`/api/sites/${site.id}`, {
+    const res = await fetch(`/api/sites/${site.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         analysis_result: { ...site.analysis_result, stepDocs: nextStepDocs },
       }),
     });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || `저장 실패 (HTTP ${res.status})`);
+    }
     onRefresh();
   }
 
   async function save() {
     setSaving(true);
+    setError('');
     try {
       await persist({ ...stepDocs, [step.n]: draftText });
       setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -962,10 +980,13 @@ export function StepDocSection({
   async function removeDoc() {
     if (!confirm(`${step.n}번 설명서를 삭제할까요? 되돌릴 수 없습니다.`)) return;
     setSaving(true);
+    setError('');
     try {
       const next = { ...stepDocs };
       delete next[step.n];
       await persist(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -982,6 +1003,7 @@ export function StepDocSection({
           placeholder="설명서 본문을 여기 붙여넣으세요"
           className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[12px] font-mono leading-relaxed mb-1.5"
         />
+        {error && <p className="text-[11px] text-red-500 font-bold mb-1.5">⚠ {error}</p>}
         <div className="flex justify-end gap-1.5">
           <button onClick={() => setEditing(false)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
             취소
@@ -1012,6 +1034,7 @@ export function StepDocSection({
             </button>
           </div>
         </div>
+        {error && <p className="text-[11px] text-red-500 font-bold mb-1.5">⚠ {error}</p>}
         <div className="text-[13px] text-neutral-700 leading-relaxed text-left">{renderStepDoc(doc)}</div>
       </div>
     );
