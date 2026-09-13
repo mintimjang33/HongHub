@@ -226,10 +226,17 @@ export function SceneImageModal({
               💡 {scene.note}
             </p>
           )}
+          {/* 2026-09-13 (11차) 추가 — 사용자 요청: "모달에서 프롬프트 복사버튼 추가 해줘" —
+              지금까지는 표에서만(CopyButton, 아래 SceneEditorList) 프롬프트를 복사할 수 있고
+              모달에선 눈으로 보고 직접 드래그해서 복사해야 했다. 다른 곳(표)과 같은
+              CopyButton을 그대로 재사용한다. */}
           {scene.imagePrompt && (
-            <p className="text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
-              {scene.imagePrompt}
-            </p>
+            <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
+              <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
+                {scene.imagePrompt}
+              </p>
+              <CopyButton text={scene.imagePrompt} />
+            </div>
           )}
         </div>
       </div>
@@ -334,9 +341,12 @@ export function SceneVideoModal({
             </p>
           )}
           {scene.video && (
-            <p className="text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
-              {scene.video}
-            </p>
+            <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
+              <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
+                {scene.video}
+              </p>
+              <CopyButton text={scene.video} />
+            </div>
           )}
         </div>
       </div>
