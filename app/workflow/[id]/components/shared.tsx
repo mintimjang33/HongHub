@@ -1086,7 +1086,7 @@ export function StepDocSection({
     return (
       <div className="mb-3 bg-white border border-neutral-200 rounded-lg p-4">
         <details>
-          <summary className="cursor-pointer text-[11px] font-black text-neutral-400 inline">📖 설명서</summary>
+          <summary className="cursor-pointer text-[11px] font-black text-neutral-400">📖 설명서</summary>
           {error && <p className="text-[11px] text-red-500 font-bold mt-1.5 mb-1.5">⚠ {error}</p>}
           <div className="text-[13px] text-neutral-700 leading-relaxed text-left mt-2">{renderStepDoc(doc)}</div>
         </details>
