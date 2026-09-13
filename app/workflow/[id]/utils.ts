@@ -68,6 +68,10 @@ export function parseSceneBlocks(text: string): SceneBlock[] {
     let imagePrompt = '';
     let clean = '';
     let info = '';
+    let moving = '';
+    // 2026-09-13 (2차) 추가 — "- 영상클립필요:" 줄이 실제로 있었는지(새 포맷)를 판별하는
+    // 용도라 boolean이 아니라 string|null로 둔다 — null이면 옛 포맷(마커 방식)으로 간주한다.
+    let needsVideoClipRaw: string | null = null;
     let video = '';
     const media: string[] = [];
     for (const line of lines.slice(1)) {
@@ -84,10 +88,34 @@ export function parseSceneBlocks(text: string): SceneBlock[] {
       else if (line.startsWith('- 이미지프롬프트:')) imagePrompt = line.replace(/^- 이미지프롬프트:\s*/, '');
       else if (line.startsWith('- CLEAN:')) clean = line.replace(/^- CLEAN:\s*/, '');
       else if (line.startsWith('- INFO:')) info = line.replace(/^- INFO:\s*/, '');
+      // 2026-09-13 (2차) 추가 — 새 포맷: 무빙(정지 이미지 카메라 지시, Flow에 안 보냄)과
+      // 영상클립필요(진짜 boolean)를 별도 줄로 쓴다. 이 둘 중 하나라도 있으면 그 아래
+      // "- 영상:" 줄은 새 포맷(순수 Flow 영상 생성 프롬프트, 마커 없음)으로 해석한다.
+      else if (line.startsWith('- 무빙:')) moving = line.replace(/^- 무빙:\s*/, '');
+      else if (line.startsWith('- 영상클립필요:')) needsVideoClipRaw = line.replace(/^- 영상클립필요:\s*/, '').trim();
       else if (line.startsWith('- 영상:')) video = line.replace(/^- 영상:\s*/, '');
       else if (line.startsWith('- 자료:')) media.push(line.replace(/^- 자료:\s*/, '').trim());
     }
-    return { id, title, script, note, time, sceneImage, sceneVideo, imagePrompt, clean, info, video, media };
+    // 하위호환 — 2026-09-13(2차) 이전 데이터는 "- 무빙:"/"- 영상클립필요:" 줄이 아예 없고,
+    // "- 영상:" 한 줄에 "[영상클립 필요]" 마커로 두 가지 뜻(카메라 무빙 지시 또는 실제 Flow
+    // 영상 생성 프롬프트)을 겸했다(사용자 지적: "영상 / 무빙 이렇게 나눠서 정확하게 분리를
+    // 하면 어떨까?" → 완전 분리로 결정). 새 줄이 하나도 없으면 옛 포맷으로 보고, 마커 유무에
+    // 따라 이 값을 정확히 한쪽(moving 또는 video)으로만 옮긴다 — 데이터를 둘 다 채우지
+    // 않고, 원래 그 값이 뜻했던 쪽으로만 재해석해서 유실 없이 이관한다.
+    let needsVideoClip: boolean;
+    if (needsVideoClipRaw === null) {
+      const legacyHasMarker = video.includes('[영상클립 필요]');
+      needsVideoClip = legacyHasMarker;
+      if (legacyHasMarker) {
+        video = video.replace('[영상클립 필요]', '').trim();
+      } else if (video) {
+        moving = video;
+        video = '';
+      }
+    } else {
+      needsVideoClip = needsVideoClipRaw === 'true';
+    }
+    return { id, title, script, note, time, sceneImage, sceneVideo, imagePrompt, clean, info, moving, needsVideoClip, video, media };
   });
 }
 
@@ -102,6 +130,8 @@ export const EMPTY_SCENE_DRAFT: SceneBlock = {
   imagePrompt: '',
   clean: '',
   info: '',
+  moving: '',
+  needsVideoClip: false,
   video: '',
   media: [],
 };
@@ -132,6 +162,12 @@ export function serializeSceneBlocks(scenes: SceneBlock[]): string {
       if (s.imagePrompt) lines.push(`- 이미지프롬프트: ${s.imagePrompt}`);
       if (s.clean) lines.push(`- CLEAN: ${s.clean}`);
       if (s.info) lines.push(`- INFO: ${s.info}`);
+      if (s.moving) lines.push(`- 무빙: ${s.moving}`);
+      // 2026-09-13 (2차) 추가 — needsVideoClip은 값이 없어도(false여도) 항상 줄을 쓴다 —
+      // 그래야 parseSceneBlocks가 "이건 새 포맷"임을 확실히 판별해서, 옛 데이터의 마커
+      // 재해석 로직(위 참고)을 다시 타지 않는다. 다른 필드들의 "비어있으면 줄 자체를 안 씀"
+      // 관례의 의도적 예외다.
+      lines.push(`- 영상클립필요: ${s.needsVideoClip ? 'true' : 'false'}`);
       if (s.video) lines.push(`- 영상: ${s.video}`);
       for (const m of s.media || []) if (m) lines.push(`- 자료: ${m}`);
       return lines.join('\n');
