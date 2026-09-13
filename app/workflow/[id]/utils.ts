@@ -580,6 +580,12 @@ export const IMAGE_STYLE_PRESETS: ImageStylePreset[] = [
 // 이 두 이름을 찾아 탭으로 분류할 수 있게 tabs를 채운다. description에 실제로 등장하는 문구를
 // 그대로 keywords로 썼다 — 프롬프트가 바뀌면 이 keywords도 같이 바꿔야 화면 탭과 실제 생성
 // 프롬프트가 어긋나지 않는다. 캐릭터가 하나뿐인 포동이/식빵맨은 tabs를 안 채운다(분류할 필요 없음).
+//
+// 2026-09-14 추가 — 실사고: 코카콜라 유닛의 실제 등장인물(Asa Candler, John Pemberton) 실명을
+// 프롬프트에 그대로 썼더니 Flow가 "유명인의 동영상 생성에 관한 Google 정책을 위반할 가능성이
+// 있다"며 영상 생성을 계속 거부했다(스틱맨 그림체인데도 실명 문자열 자체가 필터에 걸림) —
+// Gentleman Rouge(가상 이름)는 같은 문제가 없었다. "the stickman actor" 예시에서 실존 인물의
+// 실명을 완전히 빼고, 실명을 절대 쓰지 말라는 규칙을 명시했다.
 const FEMALE_MARKER_RULE =
   '이 캐릭터의 여성 버전이 필요한 장면에서는 외형을 그대로 두고 머리 위에 분홍색 리본 하나만 추가해서 성별을 구분한다(그 외 디자인은 동일).';
 
@@ -587,7 +593,7 @@ export const CHARACTER_STYLE_PRESETS: CharacterStylePreset[] = [
   {
     id: 'stickman',
     label: '스틱맨',
-    description: `이 채널의 스틱맨 캐릭터는 Flow 프로젝트에 이미 캐릭터로 등록돼 있다('Gentleman Rouge', '스틱맨' 두 개). 장면에 이 캐릭터가 등장하면 반드시 등록된 캐릭터를 참조(레퍼런스)로 첨부하고, 텍스트로 외형을 다시 설명하지 않는다 — 레퍼런스 이미지가 얼굴·손·몸 비율을 그대로 유지해준다(구글 Flow 공식 가이드: 텍스트 프롬프트는 레퍼런스와 상충하지 않고 보완해야 한다). 대신 이름/역할과 그 장면에서 하는 행동·표정만 쓴다. 진행자(젠틀맨 루즈): "Gentleman Rouge" 이름과 톱햇·외알렌즈·연미복 정체성만 짧게 언급하고 나머지는 행동으로: 예) "Gentleman Rouge walks confidently out of the shadows, touching his monocle with a sly smirk." 상황극 주인공(스틱맨 배우): "the stickman actor" 언급 후 역할 소품·행동·감정만: 예) "the stickman actor (pharmacist John Pemberton) holds up a medicine bottle with a startled expression." 한 씬에 스틱맨 배우가 여러 명 동시에 등장하면(변호사 두 명, 임원 여럿 등) 전부 같은 베이스를 공유하므로 서로 구분이 안 될 수 있다 — 각자 다른 옷차림(정장/앞치마/드레스 등)이나 머리카락 유무 같은 시각적 차이를 명시해서 구분되게 쓴다: 예) "one stickman actor wearing a brown apron and another wearing a black suit with slicked-back hair, both holding briefcase props." 혹시 레퍼런스 첨부가 안 되는 상황을 대비한 최소 식별 문구만 유지: "a minimalist stickman character with a bald round white face and expressive eyes". ${FEMALE_MARKER_RULE}`,
+    description: `이 채널의 스틱맨 캐릭터는 Flow 프로젝트에 이미 캐릭터로 등록돼 있다('Gentleman Rouge', '스틱맨' 두 개). 장면에 이 캐릭터가 등장하면 반드시 등록된 캐릭터를 참조(레퍼런스)로 첨부하고, 텍스트로 외형을 다시 설명하지 않는다 — 레퍼런스 이미지가 얼굴·손·몸 비율을 그대로 유지해준다(구글 Flow 공식 가이드: 텍스트 프롬프트는 레퍼런스와 상충하지 않고 보완해야 한다). 대신 이름/역할과 그 장면에서 하는 행동·표정만 쓴다. ⚠️ 실존 인물의 실명(발명가·경영자 등 실제 역사적 인물의 이름)은 절대 프롬프트에 쓰지 않는다 — 스틱맨 그림체여도 Flow가 "유명인의 동영상 생성 정책 위반"으로 생성을 거부한다(실제로 겪은 사고). 실명 대신 반드시 직업/역할만으로 지칭한다(예: "그 약사", "새로운 사장", "그 발명가"). 진행자(젠틀맨 루즈): "Gentleman Rouge" 이름과 톱햇·외알렌즈·연미복 정체성만 짧게 언급하고 나머지는 행동으로: 예) "Gentleman Rouge walks confidently out of the shadows, touching his monocle with a sly smirk." 상황극 주인공(스틱맨 배우): "the stickman actor" 언급 후 역할 소품·행동·감정만, 실명 없이: 예) "the stickman actor (a humble pharmacist) holds up a medicine bottle with a startled expression." 한 씬에 스틱맨 배우가 여러 명 동시에 등장하면(변호사 두 명, 임원 여럿 등) 전부 같은 베이스를 공유하므로 서로 구분이 안 될 수 있다 — 각자 다른 옷차림(정장/앞치마/드레스 등)이나 머리카락 유무 같은 시각적 차이를 명시해서 구분되게 쓴다: 예) "one stickman actor wearing a brown apron and another wearing a black suit with slicked-back hair, both holding briefcase props." 혹시 레퍼런스 첨부가 안 되는 상황을 대비한 최소 식별 문구만 유지: "a minimalist stickman character with a bald round white face and expressive eyes". ${FEMALE_MARKER_RULE}`,
     // 2026-09-11 — 사용자가 배경 얼룩 없는 더 깨끗한 레퍼런스 시트로 교체(체크섬 검증 완료).
     // ⚠️ 이 URL은 아직 옛 디자인(점 두 개 눈) 이미지다 — 새 디자인 레퍼런스 이미지를 Storage에
     // 올린 뒤 이 필드도 같이 교체할 것.
