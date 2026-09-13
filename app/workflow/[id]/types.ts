@@ -161,7 +161,14 @@ export type SceneBlock = {
   imagePrompt: string;
   clean: string;
   info: string;
-  video: string; // = 영상프롬프트 or 전환프롬프트
+  // 2026-09-13 (2차) 추가 — 사용자 지적: "영상 / 무빙 이렇게 나눠서 정확하게 분리를 하면
+  // 어떨까?" / "무빙은 플로우에서 만들 필요는 없으니까 구분을 해야 착오가 없을꺼 같아".
+  // 지금까지 이 아래 video 필드 하나를 "[영상클립 필요]" 문자열 마커로 두 가지 뜻을 겸용했다
+  // (마커 없으면 정지 이미지 카메라 무빙 지시, 있으면 실제 Flow 영상 생성 프롬프트) — 완전히
+  // 분리한다.
+  moving: string; // 정지 이미지 카메라 무빙/전환 지시(줌인·패닝 등) — Flow에 보내지 않고 14번 렌더링(CapCut/Remotion)에서만 쓴다.
+  needsVideoClip: boolean; // 이 씬이 실제 Flow 영상 클립 생성이 필요한지 — 더 이상 텍스트 마커가 아니라 진짜 boolean.
+  video: string; // needsVideoClip이 true일 때만 의미 있는 실제 Flow 영상 생성 프롬프트.
   media: string[];
 };
 
