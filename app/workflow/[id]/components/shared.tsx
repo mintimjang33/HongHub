@@ -1078,21 +1078,26 @@ export function StepDocSection({
   }
 
   if (doc) {
+    // 2026-09-13 (7차) 수정 — 사용자 지적: "13단계 설명서는 왜 안접혀있어?? 원래 접히는
+    // 방식인데?" — StepDocSection 도입 전엔 FlowChart.tsx가 <details>로 기본 접힌 채
+    // "단계 설명 보기"만 보여줬는데, 새 UI는 등록된 설명서를 항상 펼친 채로 보여줘서 패널이
+    // 불필요하게 길어졌다. <details>로 감싸 기본은 접힌 상태(제목 요약만)로 되돌리고, 열어야
+    // 본문이 보이게 한다 — 수정/삭제 버튼은 접힌 상태에서도 바로 누를 수 있게 summary 밖에 둔다.
     return (
       <div className="mb-3 bg-white border border-neutral-200 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-[11px] font-black text-neutral-400">📖 설명서</p>
-          <div className="flex items-center gap-2">
-            <button onClick={startEdit} className="text-[10px] font-bold text-blue-600 hover:underline">
-              수정
-            </button>
-            <button onClick={removeDoc} disabled={saving} className="text-[10px] font-bold text-red-500 hover:underline disabled:opacity-40">
-              삭제
-            </button>
-          </div>
+        <details>
+          <summary className="cursor-pointer text-[11px] font-black text-neutral-400 inline">📖 설명서</summary>
+          {error && <p className="text-[11px] text-red-500 font-bold mt-1.5 mb-1.5">⚠ {error}</p>}
+          <div className="text-[13px] text-neutral-700 leading-relaxed text-left mt-2">{renderStepDoc(doc)}</div>
+        </details>
+        <div className="flex items-center justify-end gap-2 mt-2">
+          <button onClick={startEdit} className="text-[10px] font-bold text-blue-600 hover:underline">
+            수정
+          </button>
+          <button onClick={removeDoc} disabled={saving} className="text-[10px] font-bold text-red-500 hover:underline disabled:opacity-40">
+            삭제
+          </button>
         </div>
-        {error && <p className="text-[11px] text-red-500 font-bold mb-1.5">⚠ {error}</p>}
-        <div className="text-[13px] text-neutral-700 leading-relaxed text-left">{renderStepDoc(doc)}</div>
       </div>
     );
   }
