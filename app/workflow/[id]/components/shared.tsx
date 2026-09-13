@@ -935,18 +935,37 @@ export function StepDocSection({
     setEditing(true);
   }
 
+  async function persist(nextStepDocs: Record<string, string>) {
+    await fetch(`/api/sites/${site.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        analysis_result: { ...site.analysis_result, stepDocs: nextStepDocs },
+      }),
+    });
+    onRefresh();
+  }
+
   async function save() {
     setSaving(true);
     try {
-      await fetch(`/api/sites/${site.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          analysis_result: { ...site.analysis_result, stepDocs: { ...stepDocs, [step.n]: draftText } },
-        }),
-      });
-      onRefresh();
+      await persist({ ...stepDocs, [step.n]: draftText });
       setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // 2026-09-13 (3차) 추가 — 사용자 확인: "수정 삭제버튼도 다 넣었지?" — 등록만 있고 삭제가
+  // 없었던 걸 지적받아 추가. 다른 곳의 삭제 패턴(removeScene 등)과 동일하게 confirm으로 한 번
+  // 더 확인한 뒤, stepDocs 객체에서 이 단계 키만 제거해서 저장한다(다른 단계 설명서는 안 건드림).
+  async function removeDoc() {
+    if (!confirm(`${step.n}번 설명서를 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    setSaving(true);
+    try {
+      const next = { ...stepDocs };
+      delete next[step.n];
+      await persist(next);
     } finally {
       setSaving(false);
     }
@@ -984,9 +1003,14 @@ export function StepDocSection({
       <div className="mb-3 bg-white border border-neutral-200 rounded-lg p-4">
         <div className="flex items-center justify-between mb-2">
           <p className="text-[11px] font-black text-neutral-400">📖 설명서</p>
-          <button onClick={startEdit} className="text-[10px] font-bold text-blue-600 hover:underline">
-            수정
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={startEdit} className="text-[10px] font-bold text-blue-600 hover:underline">
+              수정
+            </button>
+            <button onClick={removeDoc} disabled={saving} className="text-[10px] font-bold text-red-500 hover:underline disabled:opacity-40">
+              삭제
+            </button>
+          </div>
         </div>
         <div className="text-[13px] text-neutral-700 leading-relaxed text-left">{renderStepDoc(doc)}</div>
       </div>
