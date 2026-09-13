@@ -395,6 +395,14 @@ export function SceneDraftForm({
 }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  // 2026-09-14 추가 — 사용자 요청: "링크는 내가 수동으로 할꺼야~ 저기에 이미지 영상에
+  // 링크를 입력하게 하면 되자나?" — 로컬 자동화 대시보드의 "🔗 링크로 등록"과 달리, 여기는
+  // 서버가 링크를 대신 열어보지 않는다(Flow 공유 링크를 실제로 열려면 헤드리스 브라우저가
+  // 필요한데, Vercel 서버리스에 올리면 타임아웃 위험이 크다고 판단해 보류함). 사용자가 이미
+  // 실제 파일 URL로 직접 해석해서 붙여넣는다는 전제로, 입력한 문자열을 그대로
+  // sceneImage/sceneVideo에 저장만 한다 — 파일 업로드의 대체 입력 경로일 뿐.
+  const [imageUrlInput, setImageUrlInput] = useState('');
+  const [videoUrlInput, setVideoUrlInput] = useState('');
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -480,19 +488,52 @@ export function SceneDraftForm({
               </button>
             </div>
           ) : (
-            <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
-              {uploading ? '업로드 중...' : '+ 장면이미지 업로드'}
-              <input
-                type="file"
-                accept="image/*"
-                disabled={uploading}
-                onChange={(e) => {
-                  handleSceneImage(e.target.files);
-                  e.target.value = '';
-                }}
-                className="hidden"
-              />
-            </label>
+            <div>
+              <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
+                {uploading ? '업로드 중...' : '+ 장면이미지 업로드'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    handleSceneImage(e.target.files);
+                    e.target.value = '';
+                  }}
+                  className="hidden"
+                />
+              </label>
+              {/* 2026-09-14 추가 — 사용자 요청: "링크는 내가 수동으로 할꺼야~ 저기에 이미지
+                  영상에 링크를 입력하게 하면 되자나?" — 이미 완성된 이미지 URL(Flow 링크를
+                  직접 다운로드/재호스팅해서 얻었거나, 다른 경로로 확보한 실제 파일 URL)을
+                  파일 선택 없이 바로 붙여넣을 수 있는 대체 입력칸. 업로드 버튼과 동일하게
+                  draft.sceneImage만 채워두고, 실제 저장은 아래 "저장" 버튼을 눌러야 반영된다. */}
+              <div className="flex items-center gap-1 mt-1">
+                <input
+                  value={imageUrlInput}
+                  onChange={(e) => setImageUrlInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && imageUrlInput.trim()) {
+                      setDraft({ ...draft, sceneImage: imageUrlInput.trim() });
+                      setImageUrlInput('');
+                    }
+                  }}
+                  placeholder="또는 이미지 링크 붙여넣기"
+                  className="flex-1 min-w-0 border border-neutral-200 rounded-lg px-2 py-1 text-[10px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!imageUrlInput.trim()) return;
+                    setDraft({ ...draft, sceneImage: imageUrlInput.trim() });
+                    setImageUrlInput('');
+                  }}
+                  disabled={!imageUrlInput.trim()}
+                  className="shrink-0 text-[10px] font-black px-2 py-1 rounded-lg bg-neutral-100 text-neutral-600 disabled:opacity-40"
+                >
+                  등록
+                </button>
+              </div>
+            </div>
           )}
         </div>
         {/* 2026-09-13 추가 — 사용자 요청: "장면 이미지 오른쪽에 영상장면 추가해줘, 장면 이미지와
@@ -508,19 +549,48 @@ export function SceneDraftForm({
               </button>
             </div>
           ) : (
-            <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
-              {uploading ? '업로드 중...' : '+ 장면영상 업로드'}
-              <input
-                type="file"
-                accept="video/*"
-                disabled={uploading}
-                onChange={(e) => {
-                  handleSceneVideo(e.target.files);
-                  e.target.value = '';
-                }}
-                className="hidden"
-              />
-            </label>
+            <div>
+              <label className="inline-block text-[11px] font-bold text-blue-600 hover:underline cursor-pointer">
+                {uploading ? '업로드 중...' : '+ 장면영상 업로드'}
+                <input
+                  type="file"
+                  accept="video/*"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    handleSceneVideo(e.target.files);
+                    e.target.value = '';
+                  }}
+                  className="hidden"
+                />
+              </label>
+              {/* 2026-09-14 추가 — 이미지와 동일한 링크 붙여넣기 입력칸. */}
+              <div className="flex items-center gap-1 mt-1">
+                <input
+                  value={videoUrlInput}
+                  onChange={(e) => setVideoUrlInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && videoUrlInput.trim()) {
+                      setDraft({ ...draft, sceneVideo: videoUrlInput.trim() });
+                      setVideoUrlInput('');
+                    }
+                  }}
+                  placeholder="또는 영상 링크 붙여넣기"
+                  className="flex-1 min-w-0 border border-neutral-200 rounded-lg px-2 py-1 text-[10px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!videoUrlInput.trim()) return;
+                    setDraft({ ...draft, sceneVideo: videoUrlInput.trim() });
+                    setVideoUrlInput('');
+                  }}
+                  disabled={!videoUrlInput.trim()}
+                  className="shrink-0 text-[10px] font-black px-2 py-1 rounded-lg bg-neutral-100 text-neutral-600 disabled:opacity-40"
+                >
+                  등록
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>
