@@ -4,6 +4,29 @@ import { useEffect, useState } from 'react';
 import type { SceneBlock, Site, Step } from '../types';
 import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById } from '../utils';
 
+// 2026-09-13 (4차) 추가 — 사용자 요청: "13단계에서 모달을 띄웠을 때 선택한 이미지를 다운받을
+// 수 있어야 하는데 다운로드 버튼이 없어 추가해줘". Supabase Storage 공개 URL은 HongHub와
+// 다른 오리진이라, <a href download>만으로는 브라우저가 download 속성을 무시하고 새 탭에서
+// 열어버리는 경우가 많다(교차 출처 다운로드 제약) — fetch로 실제 바이트를 받아 blob URL을
+// 만든 뒤 숨겨진 <a>를 눌러야 오리진에 상관없이 항상 실제로 저장된다.
+async function downloadFile(url: string, filename: string) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    // 다운로드 실패(네트워크/CORS 등) — 최후 수단으로 새 탭에서 원본 URL을 열어준다.
+    window.open(url, '_blank');
+  }
+}
+
 // 영상을 새 탭으로 안 열고 페이지 안에서 바로 확인할 수 있게 하는 작은 모달.
 // 확인 → 닫기 → 다음 확인 → 닫기 흐름이 되게, 오버레이 클릭이나 ✕로 바로 닫힌다.
 export function VideoPreviewModal({ videoId, onClose }: { videoId: string; onClose: () => void }) {
@@ -128,9 +151,21 @@ export function SceneImageModal({
           <span className="text-white/50 text-[11px] font-mono px-1">
             {scene.id} · {index + 1}/{scenes.length}
           </span>
-          <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
-            ✕ 닫기
-          </button>
+          <div className="flex items-center gap-1">
+            {/* 2026-09-13 (4차) 추가 — 사용자 요청: "13단계에서 모달을 띄웠을 때 선택한
+                이미지를 다운받을 수 있어야 하는데 다운로드 버튼이 없어 추가해줘". */}
+            {scene.sceneImage && (
+              <button
+                onClick={() => downloadFile(scene.sceneImage, `${scene.id}.jpg`)}
+                className="text-white/70 hover:text-white text-xs font-black px-2 py-1"
+              >
+                ⬇ 다운로드
+              </button>
+            )}
+            <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
+              ✕ 닫기
+            </button>
+          </div>
         </div>
         <div className="relative flex items-center justify-center bg-black min-h-[45vh]">
           {hasPrev && (
@@ -208,9 +243,19 @@ export function SceneVideoModal({
           <span className="text-white/50 text-[11px] font-mono px-1">
             {scene.id} · {index + 1}/{scenes.length}
           </span>
-          <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
-            ✕ 닫기
-          </button>
+          <div className="flex items-center gap-1">
+            {scene.sceneVideo && (
+              <button
+                onClick={() => downloadFile(scene.sceneVideo, `${scene.id}.mp4`)}
+                className="text-white/70 hover:text-white text-xs font-black px-2 py-1"
+              >
+                ⬇ 다운로드
+              </button>
+            )}
+            <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
+              ✕ 닫기
+            </button>
+          </div>
         </div>
         <div className="relative flex items-center justify-center bg-black min-h-[45vh]">
           {hasPrev && (
