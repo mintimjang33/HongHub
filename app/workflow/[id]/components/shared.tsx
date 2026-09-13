@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { SceneBlock } from '../types';
+import type { SceneBlock, Site, Step } from '../types';
 import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById } from '../utils';
 
 // 영상을 새 탭으로 안 열고 페이지 안에서 바로 확인할 수 있게 하는 작은 모달.
@@ -847,6 +847,163 @@ export function SceneEditorList({
       {previewVideoIndex !== null && (
         <SceneVideoModal scenes={previewScenes} index={previewVideoIndex} onClose={() => setPreviewVideoIndex(null)} onNavigate={setPreviewVideoIndex} />
       )}
+    </div>
+  );
+}
+
+// 2026-09-13 (3차) 추가 — 사용자 요청: "각 단계별로 설명서를 등록하게끔 해주면 어때?" 지금까지
+// 단계 설명(FlowChart.tsx의 "단계 설명 보기")은 workflow_content 마크다운 표의 "내용" 셀 원문을
+// 그대로 <p>{desc}</p>로 찍었다 — **볼드**/`코드`/줄바꿈(<br>) 같은 마크다운 기호가 전부 그대로
+// 문자로 보여서 "이게 설명서야 작업과정이야?"라는 혼란을 일으켰다(사용자 지적). 근본 원인은
+// "한 파이프라인 전체가 workflow_content 텍스트 필드 하나"라 단계 하나만 고치려 해도 4만자 넘는
+// 문서 전체를 다시 써야 해서 느리고 사고 위험도 크다는 것 — 그래서 파이프라인 전체 공유값인
+// analysis_result(jsonb, 이미 존재하는 컬럼)에 stepDocs를 추가해 단계별로 독립된 "설명서"를
+// 둔다(경제학 파이프라인부터 시범 적용, 사용자 확정: "우선 경제학만 우선 해보자"). 등록 흐름은
+// 13번 제미나이 프롬프트 왕복과 같은 패턴 — Claude가 정리한 설명서 텍스트를 전달하면, 사용자가
+// 이 버튼으로 붙여넣어 등록한다.
+const STEP_DOC_INLINE_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+
+function renderStepDocInline(line: string, keyPrefix: string) {
+  const parts = line.split(STEP_DOC_INLINE_RE).filter((p) => p !== '');
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={`${keyPrefix}-${i}`} className="font-black text-neutral-900">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return (
+        <code key={`${keyPrefix}-${i}`} className="bg-neutral-100 text-neutral-700 rounded px-1 py-0.5 text-[12px] font-mono">
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+    return part;
+  });
+}
+
+// 마크다운 전체 파서가 아니라, 이 문서들이 실제로 쓰는 표기(굵게/인라인코드/<br> 줄바꿈/빈 줄
+// 단락 구분/"- "·숫자. 목록)만 처리하는 가벼운 렌더러 — 새 npm 의존성을 추가하지 않기 위함.
+function renderStepDoc(text: string) {
+  const normalized = text.replace(/<br\s*\/?>/gi, '\n');
+  const paragraphs = normalized.split(/\n{2,}/);
+  return paragraphs.map((para, pi) => {
+    const lines = para.split('\n').filter((l) => l.trim() !== '');
+    if (lines.length === 0) return null;
+    const isList = lines.every((l) => /^\s*([-•]|\d+\.)\s/.test(l));
+    if (isList) {
+      return (
+        <ul key={pi} className="mb-3 last:mb-0 pl-4 space-y-1 list-disc">
+          {lines.map((line, li) => (
+            <li key={li}>{renderStepDocInline(line.replace(/^\s*([-•]|\d+\.)\s/, ''), `${pi}-${li}`)}</li>
+          ))}
+        </ul>
+      );
+    }
+    return (
+      <p key={pi} className="mb-3 last:mb-0">
+        {lines.map((line, li) => (
+          <span key={li}>
+            {renderStepDocInline(line, `${pi}-${li}`)}
+            {li < lines.length - 1 && <br />}
+          </span>
+        ))}
+      </p>
+    );
+  });
+}
+
+export function StepDocSection({
+  site,
+  step,
+  onRefresh,
+}: {
+  site: Site;
+  step: Step;
+  onRefresh: () => void;
+}) {
+  const stepDocs = site.analysis_result?.stepDocs || {};
+  const doc = stepDocs[step.n];
+  const [editing, setEditing] = useState(false);
+  const [draftText, setDraftText] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  function startEdit() {
+    setDraftText(doc || '');
+    setEditing(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await fetch(`/api/sites/${site.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          analysis_result: { ...site.analysis_result, stepDocs: { ...stepDocs, [step.n]: draftText } },
+        }),
+      });
+      onRefresh();
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="mb-3 bg-neutral-50 border border-neutral-200 rounded-lg p-3">
+        <p className="text-[11px] font-black text-neutral-500 mb-1.5">📖 설명서 등록/수정 — Claude가 정리해준 텍스트를 그대로 붙여넣으세요</p>
+        <textarea
+          value={draftText}
+          onChange={(e) => setDraftText(e.target.value)}
+          rows={12}
+          placeholder="설명서 본문을 여기 붙여넣으세요"
+          className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[12px] font-mono leading-relaxed mb-1.5"
+        />
+        <div className="flex justify-end gap-1.5">
+          <button onClick={() => setEditing(false)} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+            취소
+          </button>
+          <button
+            onClick={save}
+            disabled={saving || !draftText.trim()}
+            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+          >
+            {saving ? '등록 중...' : '등록'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (doc) {
+    return (
+      <div className="mb-3 bg-white border border-neutral-200 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-[11px] font-black text-neutral-400">📖 설명서</p>
+          <button onClick={startEdit} className="text-[10px] font-bold text-blue-600 hover:underline">
+            수정
+          </button>
+        </div>
+        <div className="text-[13px] text-neutral-700 leading-relaxed text-left">{renderStepDoc(doc)}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3">
+      {step.desc && (
+        <details className="mb-1.5">
+          <summary className="cursor-pointer text-xs text-neutral-400 font-bold">단계 설명 보기 (원문 — 아직 설명서 등록 전)</summary>
+          <p className="text-sm text-neutral-600 leading-relaxed mt-2 whitespace-pre-wrap">{step.desc}</p>
+        </details>
+      )}
+      <button onClick={startEdit} className="text-[11px] font-bold text-blue-600 hover:underline">
+        + 설명서 등록
+      </button>
     </div>
   );
 }

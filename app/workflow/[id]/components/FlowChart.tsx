@@ -33,6 +33,7 @@ import { PlanningDocPanel } from './step10-PlanningDocPanel';
 import { ScriptWritingPanel } from './step11-ScriptWritingPanel';
 import { NarrationSubtitlePanel } from './step13-14-LabeledLinksPanel';
 import { ImageVideoPanel } from './step16-17-ImageVideoPanel';
+import { StepDocSection } from './shared';
 
 export function FlowChart({
   steps,
@@ -115,12 +116,11 @@ export function FlowChart({
               {activeTone.label}
             </span>
           </div>
-          {active.desc && (
-            <details className="mb-3">
-              <summary className="cursor-pointer text-xs text-neutral-400 font-bold">단계 설명 보기</summary>
-              <p className="text-sm text-neutral-600 leading-relaxed mt-2">{active.desc}</p>
-            </details>
-          )}
+          {/* 2026-09-13 (3차) 수정 — 사용자 요청("각 단계별로 설명서를 등록하게끔 해주면 어때?")으로
+              raw desc를 그대로 찍던 <details>를 StepDocSection(shared.tsx)으로 교체. 등록된
+              설명서(analysis_result.stepDocs[n])가 있으면 마크다운을 깔끔하게 렌더링해서 보여주고,
+              없으면 기존처럼 원문을 접어서(details) 보여주면서 "+ 설명서 등록" 버튼을 같이 띄운다. */}
+          <StepDocSection site={site} step={active} onRefresh={onRefreshSite} />
           {active.status && (
             <details className="border-t border-black/5 pt-3 mb-3">
               <summary className="cursor-pointer text-xs text-neutral-400 font-bold">진행 로그 보기</summary>
