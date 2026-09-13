@@ -210,6 +210,14 @@ export function SceneImageModal({
         <div className="px-3 py-2 bg-neutral-900 space-y-0.5">
           {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
           <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
+          {/* 2026-09-13 (8차) 추가 — 사용자 지적: "지금 스샷에 있는 문구와 대본은 전혀 다른
+              느낌" — title(장면 요약)만 보이고 실제 나레이션(대본)은 안 보여서, 화면 문구와
+              대본이 다르게 느껴지는 혼란이 있었다. 실제 대본 문장을 같이 보여준다. */}
+          {scene.script && (
+            <p className="text-white/70 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
+              {scene.script}
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -299,6 +307,11 @@ export function SceneVideoModal({
         <div className="px-3 py-2 bg-neutral-900 space-y-0.5">
           {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
           <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
+          {scene.script && (
+            <p className="text-white/70 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
+              {scene.script}
+            </p>
+          )}
         </div>
       </div>
     </div>
