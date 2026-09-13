@@ -9,6 +9,18 @@ import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBl
 // 다른 오리진이라, <a href download>만으로는 브라우저가 download 속성을 무시하고 새 탭에서
 // 열어버리는 경우가 많다(교차 출처 다운로드 제약) — fetch로 실제 바이트를 받아 blob URL을
 // 만든 뒤 숨겨진 <a>를 눌러야 오리진에 상관없이 항상 실제로 저장된다.
+// 2026-09-13 (6차) 추가 — 사용자 요청: "한 장면당 타임도 적어줘 예) 0:00~0:09 (9s) 이런 방식으로".
+// "0:00-0:09" 형태의 time 문자열에서 초 단위 길이를 계산해 뒤에 "(Ns)"로 덧붙인다. 형식이 안
+// 맞으면(자유 텍스트로 남긴 옛 데이터 등) 원문 그대로 돌려준다.
+function formatTimeWithDuration(time: string): string {
+  const m = time.match(/^(\d+):(\d+)\s*[-~]\s*(\d+):(\d+)$/);
+  if (!m) return time;
+  const start = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  const end = parseInt(m[3], 10) * 60 + parseInt(m[4], 10);
+  const dur = end - start;
+  return `${time} (${dur}s)`;
+}
+
 async function downloadFile(url: string, filename: string) {
   try {
     const res = await fetch(url);
@@ -763,7 +775,7 @@ export function SceneEditorList({
                       <span className="font-mono text-neutral-400">{s.id}</span>
                       {s.title && <div className="font-bold truncate max-w-[7rem]">{s.title}</div>}
                     </td>
-                    <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap">{s.time || '—'}</td>
+                    <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap">{s.time ? formatTimeWithDuration(s.time) : '—'}</td>
                     <td className="px-2 py-1.5">
                       {s.sceneImage ? (
                         <button type="button" onClick={() => setPreviewIndex(pos)} className="block" title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)">
