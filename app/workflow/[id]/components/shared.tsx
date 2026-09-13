@@ -207,7 +207,7 @@ export function SceneImageModal({
             </button>
           )}
         </div>
-        <div className="px-3 py-2 bg-neutral-900 space-y-0.5">
+        <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
           {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
           <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
           {/* 2026-09-13 (8차) 추가 — 사용자 지적: "지금 스샷에 있는 문구와 대본은 전혀 다른
@@ -216,6 +216,20 @@ export function SceneImageModal({
           {scene.script && (
             <p className="text-white/70 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
               {scene.script}
+            </p>
+          )}
+          {/* 2026-09-13 (9차) 추가 — 사용자 요청: "대본 아래에 영어 프롬프트, 그 아래에는
+              내가 이해할 수 있게 해석 적어줘" — 이미지가 실제로 무슨 프롬프트로 만들어졌는지,
+              그리고 그 영어 프롬프트가 무슨 뜻인지(note="해석" 필드, 기존에 있었지만 안
+              쓰이고 있던 필드) 순서대로 보여준다. */}
+          {scene.imagePrompt && (
+            <p className="text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
+              {scene.imagePrompt}
+            </p>
+          )}
+          {scene.note && (
+            <p className="text-amber-200/80 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
+              💡 {scene.note}
             </p>
           )}
         </div>
@@ -304,12 +318,24 @@ export function SceneVideoModal({
             </button>
           )}
         </div>
-        <div className="px-3 py-2 bg-neutral-900 space-y-0.5">
+        <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
           {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
           <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
           {scene.script && (
             <p className="text-white/70 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
               {scene.script}
+            </p>
+          )}
+          {/* 영상 모달은 이미지프롬프트가 아니라 실제로 이 영상을 만든 영상 프롬프트(video)를
+              보여준다 — 화면에 나오는 결과물과 같은 프롬프트여야 비교가 맞다. */}
+          {scene.video && (
+            <p className="text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
+              {scene.video}
+            </p>
+          )}
+          {scene.note && (
+            <p className="text-amber-200/80 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
+              💡 {scene.note}
             </p>
           )}
         </div>
