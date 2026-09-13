@@ -425,13 +425,37 @@ export function SceneDraftForm({
         placeholder="이미지 프롬프트 — 위 장면이미지를 생성할 때 쓴(또는 쓸) 프롬프트"
         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed"
       />
+      {/* 2026-09-13 (2차) 수정 — 사용자 지시로 무빙(카메라 지시)과 영상(Flow 생성 프롬프트)을
+          완전히 분리(SceneBlock.moving/needsVideoClip/video 참고). 무빙은 정지 이미지에 대한
+          연출 지시라 항상 채울 수 있고 Flow에는 절대 안 보낸다 — 항상 펼쳐서 보여준다. 영상은
+          "이 씬이 실제로 클립이 필요한가"라는 별도 결정이 먼저 있어야 의미가 있으므로, 체크박스로
+          needsVideoClip을 정하고 체크했을 때만 프롬프트 입력창을 펼친다. */}
       <textarea
-        value={draft.video}
-        onChange={(e) => setDraft({ ...draft, video: e.target.value })}
-        rows={3}
-        placeholder="영상프롬프트 or 전환프롬프트 — 장면이미지를 영상 클립으로 만들 때 쓰는 프롬프트, 또는 다음 장면으로 넘어가는 전환 연출 지시"
+        value={draft.moving}
+        onChange={(e) => setDraft({ ...draft, moving: e.target.value })}
+        rows={2}
+        placeholder="무빙(전환) 프롬프트 — 정지 이미지의 줌인/패닝 등 카메라 무빙, 또는 다음 장면으로의 전환 연출 지시. Flow에는 안 보내고 14번 렌더링(CapCut/Remotion)에서만 씀"
         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed"
       />
+      <div className="border border-neutral-200 rounded-lg p-1.5 space-y-1.5">
+        <label className="flex items-center gap-1.5 text-[11px] font-bold text-neutral-500 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={draft.needsVideoClip}
+            onChange={(e) => setDraft({ ...draft, needsVideoClip: e.target.checked })}
+          />
+          이 장면은 실제 영상 클립이 필요함 (Flow로 생성)
+        </label>
+        {draft.needsVideoClip && (
+          <textarea
+            value={draft.video}
+            onChange={(e) => setDraft({ ...draft, video: e.target.value })}
+            rows={3}
+            placeholder="영상 생성 프롬프트 — 위 장면이미지를 실제 Flow 영상 클립으로 만들 때 쓰는 프롬프트"
+            className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono leading-relaxed"
+          />
+        )}
+      </div>
       <details className="text-[10px]">
         <summary className="cursor-pointer text-neutral-400 font-bold">CLEAN/INFO 이미지 프롬프트 (구버전 이미지 2장 방식 — 지금은 위 "이미지 프롬프트" 하나만 쓰면 됨)</summary>
         <div className="space-y-1.5 mt-1.5">
@@ -676,7 +700,7 @@ export function SceneEditorList({
                 <th className="text-left font-black px-2 py-1.5 w-20">장면이미지</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">영상장면</th>
                 <th className="text-left font-black px-2 py-1.5">이미지 프롬프트</th>
-                <th className="text-left font-black px-2 py-1.5">영상/전환 프롬프트</th>
+                <th className="text-left font-black px-2 py-1.5">무빙/영상 프롬프트</th>
                 <th className="text-left font-black px-2 py-1.5 w-14">관리</th>
               </tr>
             </thead>
@@ -763,11 +787,27 @@ export function SceneEditorList({
                         <span className="text-neutral-300">—</span>
                       )}
                     </td>
+                    {/* 2026-09-13 (2차) 수정 — 무빙(카메라 지시)과 영상(Flow 생성 프롬프트)을
+                        CLEAN/INFO와 같은 방식으로 미니 라벨을 붙여 위아래로 분리해서 보여준다.
+                        영상은 needsVideoClip이 true일 때만(실제 값이 있어도) 보여준다 — 체크
+                        해제된 상태에서 남아있는 옛 video 값이 착오를 일으키지 않도록. */}
                     <td className="px-2 py-1.5">
-                      {s.video ? (
-                        <div className="flex items-start gap-1">
-                          <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-3">{s.video}</p>
-                          <CopyButton text={s.video} />
+                      {s.moving || (s.needsVideoClip && s.video) ? (
+                        <div className="space-y-1">
+                          {s.moving && (
+                            <div className="flex items-start gap-1">
+                              <span className="shrink-0 text-[9px] font-black text-neutral-400 w-9">무빙</span>
+                              <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.moving}</p>
+                              <CopyButton text={s.moving} />
+                            </div>
+                          )}
+                          {s.needsVideoClip && s.video && (
+                            <div className="flex items-start gap-1">
+                              <span className="shrink-0 text-[9px] font-black text-purple-600 w-9">영상</span>
+                              <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.video}</p>
+                              <CopyButton text={s.video} />
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <span className="text-neutral-300">—</span>

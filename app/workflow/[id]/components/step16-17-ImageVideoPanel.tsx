@@ -86,6 +86,14 @@ import { CopyButton, SceneEditorList, PresetPickerModal } from './shared';
 // 등장하는 경우의 프롬프트 작성 순서도, 4번(캐릭터 롤플레이 — 레퍼런스 기반, 외형 재설명 없음)
 // 원칙과 어긋나지 않도록 "캐릭터 외형 묘사" 대신 "이름/역할 태그"로 수정했다(A/B 실측 테스트로
 // 외형 재설명이 불필요함을 확인 완료 — 아래 4번 항목 참고).
+//
+// 2026-09-13 (2차) transitionPrompt/needsVideoClip 병합 필드를 movingPrompt(카메라 무빙,
+// 모든 장면 필수, Flow에는 안 보냄) + needsVideoClip(진짜 boolean) + videoPrompt(needsVideoClip이
+// true인 장면만 의미 있는 실제 Flow 영상 생성 프롬프트) 세 개로 분리(사용자 지시: "영상 / 무빙
+// 이렇게 나눠서 정확하게 분리를 하면 어떨까?" → "완전 분리해서... 무빙은 플로우에서 만들필요는
+// 없으니까 구분을 해야 착오가 없을꺼 같아"). 제미나이가 이 세 필드를 각각 채우도록 [출력 형식]
+// JSON 스키마와 작성 규칙 문구를 갱신했고, registerParsed()도 SceneBlock.moving/needsVideoClip/
+// video로 직접 매핑한다(예전엔 "[영상클립 필요]" 마커를 video 한 필드에 텍스트로 욱여넣었다).
 function formatSec(sec: number): string {
   const total = Math.max(0, Math.round(sec || 0));
   const m = Math.floor(total / 60);
@@ -99,8 +107,10 @@ type RawScene = {
   endSec?: number;
   screenDescription?: string;
   imagePrompt?: string;
-  transitionPrompt?: string;
+  // 2026-09-13 (2차) — 예전 transitionPrompt(무빙+영상 동작 겸용)를 두 필드로 분리.
+  movingPrompt?: string;
   needsVideoClip?: boolean;
+  videoPrompt?: string;
 };
 
 // 텍스트 안에서 최상위 `[...]` JSON 배열 블록을 전부 찾아(따옴표 안의 대괄호는 무시하도록 깊이를
@@ -291,6 +301,11 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
       }));
       return;
     }
+    // 2026-09-13 (2차) 수정 — 예전엔 needsVideoClip/transitionPrompt를 "[영상클립 필요]" 텍스트
+    // 마커로 video 한 필드에 욱여넣었다. 이제 제미나이가 movingPrompt(카메라 무빙, 항상)/
+    // needsVideoClip(진짜 boolean)/videoPrompt(true일 때만) 세 필드를 따로 채워주므로 그대로
+    // SceneBlock.moving/needsVideoClip/video에 매핑한다. needsVideoClip이 false인 장면은 제미나이가
+    // videoPrompt를 채워 보내도 무시하고 video를 빈 문자열로 둔다 — Flow에 보낼 값이 아니므로.
     const blocks: SceneBlock[] = rawScenes.map((s, idx) => ({
       id: `S${String(idx + 1).padStart(2, '0')}`,
       title: s.screenDescription || '',
@@ -305,7 +320,9 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
       imagePrompt: s.imagePrompt || '',
       clean: '',
       info: '',
-      video: [s.needsVideoClip ? '[영상클립 필요]' : '', s.transitionPrompt || ''].filter(Boolean).join(' '),
+      moving: s.movingPrompt || '',
+      needsVideoClip: !!s.needsVideoClip,
+      video: s.needsVideoClip ? s.videoPrompt || '' : '',
       media: [],
     }));
     setParseInfos((cur) => ({ ...cur, [unitId]: `✅ ${blocks.length}개 장면 파싱 완료 — 등록 중...` }));
@@ -473,7 +490,7 @@ SRT 마지막 줄까지 실제로 다 만든 진짜 마지막 응답에서는, �
 [작업 지시]
 1. SRT의 타임코드 줄들을 순서대로 묶어서, 하나의 장면이 대략 6~7초가 되도록 나눈다(아무리 길어도 15초 초과 금지). 문장이 끊기는 자연스러운 호흡 지점(SRT 줄 경계)에서만 나누고, 문장 중간을 억지로 자르지 않는다.
 2. 씬 대부분은 정지 이미지 + 줌/패닝/컷 전환으로 처리한다(이미지는 0크레딧). 대본에 [영상화] 표시가 붙은 지점(콜드오픈, 챕터 전환부 등 후킹이 강한 순간)만 실제 짧은 영상 클립이 필요한 장면으로 표시한다(needsVideoClip: true) — 전체 장면의 15~20% 이내로 제한한다.
-3. transitionPrompt에는 카메라 움직임(줌인/줌아웃/패닝/틸트), 정지 이미지 간 전환 방식, needsVideoClip이 true인 경우엔 그 장면에서 실제로 어떤 동작이 일어나는지(짧은 모션)까지 영어로 구체적으로 쓴다.
+3. movingPrompt에는 카메라 움직임(줌인/줌아웃/패닝/틸트)과 정지 이미지 간 전환 방식을 영어로 구체적으로 쓴다 — 모든 장면에 필수이며, 이 값은 Flow(영상 생성 AI)에는 절대 보내지 않고 렌더링(CapCut/Remotion) 단계에서만 쓰인다. needsVideoClip이 true인 장면만 videoPrompt에 그 장면에서 Flow가 실제로 생성해야 할 짧은 영상 클립의 동작·연출을 영어로 추가로 쓴다 — needsVideoClip이 false인 장면은 videoPrompt를 빈 문자열("")로 둔다.
 
 [수정된 이미지 프롬프트(imagePrompt) 4대 핵심 원칙 — 반드시 지킬 것, 전부 영어로]
 1. 비주얼 톤앤매너 (2026-09-11 화풍 선택 기능 반영 — 현재 선택된 화풍: "${selectedPreset.label}"): "${selectedPreset.promptStyle}"로 통일한다. 인물이 등장하는 컷에서는 모든 캐릭터의 몸 형태가 아래 4번(캐릭터 롤플레이)에서 정의한 정체성을 그대로 따른다 — 정상적인 인체 비율(어깨 넓은 몸통, 상세한 손가락·근육 등)로 그리지 않는다. 이 캐릭터 형태 규칙은 화풍과 무관하게 항상 고정이다.
@@ -482,8 +499,11 @@ SRT 마지막 줄까지 실제로 다 만든 진짜 마지막 응답에서는, �
 4. 캐릭터 롤플레이 명확화 (2026-09-11 캐릭터 선택 기능 반영 — 현재 선택된 캐릭터: "${selectedCharacterPreset.label}", 화풍과 무관하게 항상 고정):
 ${selectedCharacterPreset.description}
 
-[전환 프롬프트(transitionPrompt) 작성 규칙]
-정지 이미지 기반의 카메라 움직임(줌인/아웃, 패닝, 컷 전환)을 영어로 구체적으로 묘사한다. 대본에 [영상화] 표시가 있거나 훅이 강한 지점에만 needsVideoClip: true를 주고 짧은 모션을 적는다(전체의 15% 이내).
+[무빙 프롬프트(movingPrompt) 작성 규칙 — 모든 장면 필수, Flow에는 안 보냄]
+정지 이미지 기반의 카메라 움직임(줌인/아웃, 패닝, 틸트)과 정지 이미지 간 전환 방식을 영어로 구체적으로 묘사한다. 이 값은 나중에 CapCut/Remotion 렌더링 단계에서만 쓰이고 Flow(영상 생성)에는 절대 전달되지 않으므로, 실제 동작(모션)이 아니라 정지 이미지에 대한 카메라·전환 지시만 적는다.
+
+[영상 생성 프롬프트(videoPrompt) 작성 규칙 — needsVideoClip이 true인 장면만]
+대본에 [영상화] 표시가 있거나 훅이 강한 지점(전체의 15~20% 이내)만 needsVideoClip: true로 표시한다. 그 장면에서만 videoPrompt에 Flow가 실제로 생성해야 할 짧은 영상 클립의 동작·연출을 영어로 구체적으로 쓴다. needsVideoClip이 false인 장면은 videoPrompt를 빈 문자열("")로 둔다.
 
 [출력 형식 — 이번 구간에서 새로 만든 장면들만 담은 JSON 배열 하나. 앞뒤 설명·마크다운 코드펜스 없이 순수 JSON 배열만, 이어가기 안내문/완료 표시는 배열 바깥 다음 줄에만.]
 [
@@ -493,8 +513,9 @@ ${selectedCharacterPreset.description}
     "endSec": 9.0,
     "screenDescription": "한국어로 이 장면에서 무슨 일이 일어나는지 직관적 요약",
     "imagePrompt": "영어, Flow AI 이미지 생성용 완성된 프롬프트(캐릭터 묘사 + 직관적 사물 상황극 + 필요시 단어 수준 텍스트 라벨 + 상황에 맞는 배경 포함)",
-    "transitionPrompt": "영어, 카메라 움직임/전환 또는(needsVideoClip이 true일 때) 실제 동작 묘사",
-    "needsVideoClip": false
+    "movingPrompt": "영어, 정지 이미지의 카메라 무빙/전환 지시 — 모든 장면 필수, Flow에는 안 보냄",
+    "needsVideoClip": false,
+    "videoPrompt": "영어, needsVideoClip이 true일 때만 Flow 영상 클립 생성용 프롬프트 — false면 빈 문자열"
   }
 ]
 
