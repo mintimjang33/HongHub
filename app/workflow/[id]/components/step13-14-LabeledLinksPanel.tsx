@@ -46,6 +46,16 @@ function serializeSrtCues(cues: SrtCue[]): string {
   return cues.map((c, i) => `${i + 1}\n${secondsToSrtTime(c.start)} --> ${secondsToSrtTime(c.end)}\n${c.text}`).join('\n\n') + '\n';
 }
 
+type PreviewStyle = {
+  align: 'left' | 'center' | 'right';
+  lines: 1 | 2;
+  fontSize: number;
+  bg: string;
+  color: string;
+};
+
+const DEFAULT_PREVIEW_STYLE: PreviewStyle = { align: 'center', lines: 2, fontSize: 15, bg: '#000000', color: '#ffffff' };
+
 // 콘텐츠(유닛) 하나의 나레이션 또는 자막 중 한 필드만 다루는 조각 — 링크 붙여넣기와 파일 업로드
 // (uploadSceneMedia 재사용) 둘 다 지원, 라벨(예: "원본"/"1.3배속", "SRT"/"수정본")로 여러 후보를
 // 구분한다. NarrationSubtitlePanel이 유닛 하나당 이 조각을 두 번(나레이션/자막) 나란히 띄운다.
@@ -59,6 +69,11 @@ function serializeSrtCues(cues: SrtCue[]): string {
 // SRT(고급) 보기는 미리보기 오른쪽에 고정 너비(w-72, flex-1 아님 — 예전에 flex-1이라 접혀도 빈
 // 공간을 차지하던 문제가 있었다)로 기본 펼쳐서 둔다(사용자 요청: "화면 오른쪽 끝에 자막 원문이
 // 보이게 해줘").
+//
+// 정렬/줄수/글자크기/배경·글자색(previewAlign 등)은 실제 저장 필드가 아니라 미리보기 전용 값이라,
+// 처음엔 컴포넌트 state 기본값으로만 뒀더니 편집창을 닫았다 열 때마다 초기값(중앙/2줄/13px)으로
+// 리셋됐다(사용자 지적: "이 설정값은 왜 저장이 안되???"). 나레이션 선택(previewNarrationUrl)과
+// 똑같이 localStorage에 유닛별로 저장해서 편집창을 다시 열어도 마지막 설정이 유지되게 한다.
 function LabeledFieldSection({
   site,
   unit,
@@ -94,16 +109,53 @@ function LabeledFieldSection({
   const [previewAspect, setPreviewAspect] = useState<'16:9' | '9:16'>('9:16');
   const [previewTime, setPreviewTime] = useState(0);
   const [previewNarrationUrl, setPreviewNarrationUrl] = useState('');
-  const [previewAlign, setPreviewAlign] = useState<'left' | 'center' | 'right'>('center');
-  const [previewLines, setPreviewLines] = useState<1 | 2>(2);
-  const [previewBg, setPreviewBg] = useState('#000000');
-  const [previewColor, setPreviewColor] = useState('#ffffff');
-  const [previewFontSize, setPreviewFontSize] = useState(15);
+  const [previewAlign, setPreviewAlign] = useState<'left' | 'center' | 'right'>(DEFAULT_PREVIEW_STYLE.align);
+  const [previewLines, setPreviewLines] = useState<1 | 2>(DEFAULT_PREVIEW_STYLE.lines);
+  const [previewBg, setPreviewBg] = useState(DEFAULT_PREVIEW_STYLE.bg);
+  const [previewColor, setPreviewColor] = useState(DEFAULT_PREVIEW_STYLE.color);
+  const [previewFontSize, setPreviewFontSize] = useState(DEFAULT_PREVIEW_STYLE.fontSize);
   const [selectedCueIdx, setSelectedCueIdx] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const cues = useMemo(() => parseSrtCues(editText), [editText]);
   const selectedCue = cues[selectedCueIdx];
+
+  // 마지막으로 골랐던 나레이션/스타일을 편집 화면을 다시 열 때마다 기억한다 — 사용자 지적:
+  // "이거 마지막했던걸로 자동 저장하게 해줘~ 자꾸 바뀌고 있어서" (나레이션), "이 설정값은 왜
+  // 저장이 안되???" (정렬/줄수/글자크기/색상). 콘텐츠(유닛)별로 따로 기억하도록 localStorage
+  // 키에 unit.id를 넣는다.
+  const narrationPrefKey = `honghub_preview_narration_${unit.id}`;
+  const stylePrefKey = `honghub_preview_style_${unit.id}`;
+
+  function saveStyleToStorage(next: Partial<PreviewStyle>) {
+    try {
+      const current: PreviewStyle = { align: previewAlign, lines: previewLines, fontSize: previewFontSize, bg: previewBg, color: previewColor };
+      localStorage.setItem(stylePrefKey, JSON.stringify({ ...current, ...next }));
+    } catch {
+      // 저장 실패해도 이번 세션 미리보기 동작에는 지장 없음.
+    }
+  }
+
+  function updatePreviewAlign(v: 'left' | 'center' | 'right') {
+    setPreviewAlign(v);
+    saveStyleToStorage({ align: v });
+  }
+  function updatePreviewLines(v: 1 | 2) {
+    setPreviewLines(v);
+    saveStyleToStorage({ lines: v });
+  }
+  function updatePreviewFontSize(v: number) {
+    setPreviewFontSize(v);
+    saveStyleToStorage({ fontSize: v });
+  }
+  function updatePreviewBg(v: string) {
+    setPreviewBg(v);
+    saveStyleToStorage({ bg: v });
+  }
+  function updatePreviewColor(v: string) {
+    setPreviewColor(v);
+    saveStyleToStorage({ color: v });
+  }
 
   function seekToCue(idx: number) {
     if (idx < 0 || idx >= cues.length) return;
@@ -210,11 +262,6 @@ function LabeledFieldSection({
     await saveItems(items.map((item, i) => (i === idx ? { ...item, label } : item)));
   }
 
-  // 마지막으로 골랐던 나레이션(예: "제미나이 재생성(Puck)")을 편집 화면을 다시 열 때마다 기억한다
-  // — 사용자 지적: "이거 마지막했던걸로 자동 저장하게 해줘~ 자꾸 바뀌고 있어서" (전엔 매번 첫 번째
-  // 항목("원본")으로 초기화됐음). 콘텐츠(유닛)별로 따로 기억하도록 localStorage 키에 unit.id를 넣는다.
-  const narrationPrefKey = `honghub_preview_narration_${unit.id}`;
-
   async function startEdit(idx: number) {
     setEditError('');
     setEditLoading(true);
@@ -222,13 +269,21 @@ function LabeledFieldSection({
     setPreviewTime(0);
     setSelectedCueIdx(0);
     let savedUrl = '';
+    let savedStyle: Partial<PreviewStyle> | null = null;
     try {
       savedUrl = localStorage.getItem(narrationPrefKey) || '';
+      const rawStyle = localStorage.getItem(stylePrefKey);
+      if (rawStyle) savedStyle = JSON.parse(rawStyle);
     } catch {
-      // 프라이빗 모드 등에서 localStorage가 막혀있을 수 있다 — 그냥 기본값으로 진행.
+      // 프라이빗 모드 등에서 localStorage가 막혀있거나 저장된 값이 깨져 있을 수 있다 — 기본값으로 진행.
     }
     const hasSaved = savedUrl && narrationItems.some((n) => n.url === savedUrl);
     setPreviewNarrationUrl(hasSaved ? savedUrl : narrationItems[0]?.url || '');
+    setPreviewAlign(savedStyle?.align ?? DEFAULT_PREVIEW_STYLE.align);
+    setPreviewLines(savedStyle?.lines ?? DEFAULT_PREVIEW_STYLE.lines);
+    setPreviewFontSize(savedStyle?.fontSize ?? DEFAULT_PREVIEW_STYLE.fontSize);
+    setPreviewBg(savedStyle?.bg ?? DEFAULT_PREVIEW_STYLE.bg);
+    setPreviewColor(savedStyle?.color ?? DEFAULT_PREVIEW_STYLE.color);
     try {
       const res = await fetch(items[idx].url);
       if (!res.ok) throw new Error(`파일을 못 불러왔어요 (${res.status})`);
@@ -397,19 +452,19 @@ function LabeledFieldSection({
                         </p>
                         <div className="flex gap-1">
                           <button
-                            onClick={() => setPreviewAlign('left')}
+                            onClick={() => updatePreviewAlign('left')}
                             className={`text-[10px] font-black px-1.5 py-1 rounded ${previewAlign === 'left' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
                           >
                             좌
                           </button>
                           <button
-                            onClick={() => setPreviewAlign('center')}
+                            onClick={() => updatePreviewAlign('center')}
                             className={`text-[10px] font-black px-1.5 py-1 rounded ${previewAlign === 'center' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
                           >
                             중앙
                           </button>
                           <button
-                            onClick={() => setPreviewAlign('right')}
+                            onClick={() => updatePreviewAlign('right')}
                             className={`text-[10px] font-black px-1.5 py-1 rounded ${previewAlign === 'right' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
                           >
                             우
@@ -417,13 +472,13 @@ function LabeledFieldSection({
                         </div>
                         <div className="flex gap-1">
                           <button
-                            onClick={() => setPreviewLines(1)}
+                            onClick={() => updatePreviewLines(1)}
                             className={`text-[10px] font-black px-1.5 py-1 rounded ${previewLines === 1 ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
                           >
                             1줄
                           </button>
                           <button
-                            onClick={() => setPreviewLines(2)}
+                            onClick={() => updatePreviewLines(2)}
                             className={`text-[10px] font-black px-1.5 py-1 rounded ${previewLines === 2 ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
                           >
                             2줄
@@ -436,7 +491,7 @@ function LabeledFieldSection({
                             min={8}
                             max={60}
                             value={previewFontSize}
-                            onChange={(e) => setPreviewFontSize(Number(e.target.value) || previewFontSize)}
+                            onChange={(e) => updatePreviewFontSize(Number(e.target.value) || previewFontSize)}
                             className="w-14 border border-neutral-200 rounded px-1.5 py-1 text-[10px]"
                           />
                           <span className="text-[10px] text-neutral-400">px</span>
@@ -444,11 +499,11 @@ function LabeledFieldSection({
                         <div className="flex gap-2 items-center">
                           <label className="flex items-center gap-1 text-[10px] font-bold text-neutral-500">
                             배경
-                            <input type="color" value={previewBg} onChange={(e) => setPreviewBg(e.target.value)} className="w-6 h-6 border border-neutral-200 rounded" />
+                            <input type="color" value={previewBg} onChange={(e) => updatePreviewBg(e.target.value)} className="w-6 h-6 border border-neutral-200 rounded" />
                           </label>
                           <label className="flex items-center gap-1 text-[10px] font-bold text-neutral-500">
                             글자
-                            <input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} className="w-6 h-6 border border-neutral-200 rounded" />
+                            <input type="color" value={previewColor} onChange={(e) => updatePreviewColor(e.target.value)} className="w-6 h-6 border border-neutral-200 rounded" />
                           </label>
                         </div>
                         {narrationItems.length > 0 ? (
