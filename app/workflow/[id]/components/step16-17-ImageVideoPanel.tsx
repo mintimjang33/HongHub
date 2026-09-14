@@ -94,6 +94,13 @@ import { CopyButton, SceneEditorList, PresetPickerModal } from './shared';
 // 없으니까 구분을 해야 착오가 없을꺼 같아"). 제미나이가 이 세 필드를 각각 채우도록 [출력 형식]
 // JSON 스키마와 작성 규칙 문구를 갱신했고, registerParsed()도 SceneBlock.moving/needsVideoClip/
 // video로 직접 매핑한다(예전엔 "[영상클립 필요]" 마커를 video 한 필드에 텍스트로 욱여넣었다).
+//
+// 2026-09-16 추가 — 12번(나레이션·자막) 화면에 "최종 선택" 체크박스가 생겨서(사용자 요청: "12단계에서
+// 사용자가 최종 자막을 선택하면(체크) => 13단계로 자동 넘어가게되고 그것을 바탕으로 씬을 구분하는
+// 방식으로 앞으로 수정할예정"), 아래 SRT 로딩 useEffect가 무조건 subtitleUrls[0]만 읽던 것을
+// selected:true인 항목을 우선하도록 바꿨다 — 실사고: 코카콜라 유닛에 "자동 생성" 다음 "제미나이
+// 재생성 자막"을 추가했는데도 여기는 계속 첫 항목("자동 생성")을 읽고 있었다. selected가 없으면
+// (과거 데이터, 아직 아무것도 체크 안 한 경우) 여전히 배열의 첫 번째로 fallback한다.
 function formatSec(sec: number): string {
   const total = Math.max(0, Math.round(sec || 0));
   const m = Math.floor(total / 60);
@@ -220,7 +227,10 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   useEffect(() => {
     if (!openUnitId) return;
     const u = units.find((x) => x.id === openUnitId);
-    const url = normalizeLabeledItems(u?.subtitleUrls)[0]?.url;
+    // 2026-09-16 수정 — 무조건 [0](배열의 첫 항목)이 아니라, 12번에서 "최종"으로 체크된
+    // 항목(selected:true)을 우선한다. 위 파일 상단 2026-09-16 주석 참고.
+    const subtitleCandidates = normalizeLabeledItems(u?.subtitleUrls);
+    const url = (subtitleCandidates.find((it) => it.selected) || subtitleCandidates[0])?.url;
     if (!url || fetchedSrtRef.current[openUnitId]) return;
     fetchedSrtRef.current[openUnitId] = true;
     fetch(url)
@@ -434,6 +444,9 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
         {units.map((u) => {
           const scenes = u.scenePrompts ? parseSceneBlocks(u.scenePrompts) : [];
           const subtitleItems = normalizeLabeledItems(u.subtitleUrls);
+          // 2026-09-16 추가 — 12번 "최종 선택" 체크박스와 짝을 맞춘 표시용 값. 실제 SRT 로딩은
+          // 위 useEffect가 하고, 여기서는 안내 문구에 "지금 어떤 자막을 쓰고 있는지"를 보여준다.
+          const finalSubtitleItem = subtitleItems.find((it) => it.selected) || subtitleItems[0];
           const srtText = srtTexts[u.id];
           const srtError = srtErrors[u.id];
           const srtReady = !!srtText;
@@ -460,6 +473,20 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
 
                   {subtitleItems.length === 0 && (
                     <p className="text-[10px] text-red-500 font-bold mb-2">아직 12번에 자막이 없습니다 — 먼저 12번에서 자막을 등록해주세요.</p>
+                  )}
+                  {/* 2026-09-16 추가 — 지금 실제로 어떤 자막 후보를 쓰고 있는지 화면에서 바로 보이게
+                      한다(12번에 후보가 여러 개 있을 때 "어느 게 쓰이는지" 혼동 방지). 12번에서
+                      "최종" 체크를 아무것도 안 했으면 배열 첫 번째로 fallback 중이라는 것도 같이
+                      알린다. */}
+                  {subtitleItems.length > 1 && finalSubtitleItem && (
+                    <p className="text-[10px] text-neutral-400 mb-2">
+                      사용 중인 자막: <span className="font-bold text-neutral-600">{finalSubtitleItem.label || '(라벨 없음)'}</span>
+                      {finalSubtitleItem.selected ? (
+                        <span className="text-emerald-600 font-bold"> · 12번에서 최종 선택됨</span>
+                      ) : (
+                        <span className="text-amber-600 font-bold"> · 12번에서 최종 선택 안 됨(첫 항목으로 대체 중 — 12번에서 "최종" 체크 권장)</span>
+                      )}
+                    </p>
                   )}
                   {subtitleItems.length > 0 && !srtReady && !srtError && (
                     <p className="text-[10px] text-neutral-400 mb-2">자막(SRT) 불러오는 중...</p>
