@@ -68,6 +68,10 @@ type PreviewStyle = {
 
 const DEFAULT_PREVIEW_STYLE: PreviewStyle = { align: 'center', lines: 2, fontSize: 15, bg: '#000000', color: '#ffffff' };
 
+// 원문 SRT 텍스트영역에서 캐럿을 옮길 때(클릭/방향키) 왼쪽 미리보기와 동기화할지 판단하는 데
+// 쓰는 "탐색용" 키 목록 — 일반 타이핑 키는 여기 없어서 문자를 입력할 때마다는 동기화가 안 된다.
+const CARET_NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']);
+
 // 콘텐츠(유닛) 하나의 나레이션 또는 자막 중 한 필드만 다루는 조각 — 링크 붙여넣기와 파일 업로드
 // (uploadSceneMedia 재사용) 둘 다 지원, 라벨(예: "원본"/"1.3배속", "SRT"/"수정본")로 여러 후보를
 // 구분한다. NarrationSubtitlePanel이 유닛 하나당 이 조각을 두 번(나레이션/자막) 나란히 띄운다.
@@ -86,6 +90,14 @@ const DEFAULT_PREVIEW_STYLE: PreviewStyle = { align: 'center', lines: 2, fontSiz
 // 아래에 떨어지지 않고 항상 오른쪽에 붙는다. 왼쪽 칼럼은 미리보기 박스와 같은 고정 폭
 // (width: 480/270)을 줘서 안내 문구 같은 길이가 불확실한 텍스트가 flex item을 옆으로 넓혀버려
 // 오른쪽 패널이 뒤로 밀리는 것도 막는다(사용자 지적: "공간이 너무 남잖아").
+//
+// 2026-09-16 추가 — 지금까지는 왼쪽(미리보기 ‹/›, 재생 추적)→오른쪽(원문 SRT 스크롤) 방향으로만
+// 동기화됐다(사용자 지적: "왼쪽 화면에서 화살표로 화면이 선택된 글자에 따라 오른쪽 글자도 같이
+// 일치해서 보이는데 오른쪽에서 글자를 선택한것은 왼쪽이 연동되서 이동하지는 않아"). 원문 SRT
+// 텍스트영역에서 클릭하거나 방향키로 캐럿을 옮기면(syncSelectedCueFromCaret) 그 위치가 속한
+// 큐를 찾아 seekToCue로 왼쪽 미리보기(+오디오 재생 위치)도 같이 옮기도록 반대 방향 동기화를
+// 추가했다. 문자를 입력할 때마다는 동작하면 안 되므로(캐럿이 계속 오른쪽으로 밀리면서 타이핑
+// 중에 오디오까지 계속 seek되어 방해됨) 클릭과 탐색용 키(CARET_NAV_KEYS)에서만 부른다.
 //
 // 정렬/줄수/글자크기/배경·글자색(previewAlign 등)은 실제 저장 필드가 아니라 미리보기 전용 값이라,
 // 처음엔 컴포넌트 state 기본값으로만 뒀더니 편집창을 닫았다 열 때마다 초기값(중앙/2줄/13px)으로
@@ -196,6 +208,14 @@ function LabeledFieldSection({
     setSelectedCueIdx(idx);
     if (audioRef.current) audioRef.current.currentTime = cues[idx].start;
     setPreviewTime(cues[idx].start);
+  }
+
+  // 오른쪽 "원문 SRT" 텍스트영역에서 캐럿이 옮겨지면(클릭/방향키) 그 위치가 속한 큐를 찾아
+  // seekToCue로 왼쪽 미리보기(+오디오 재생 위치)도 같이 옮긴다 — 위 2026-09-16 주석 참고.
+  function syncSelectedCueFromCaret(el: HTMLTextAreaElement) {
+    const offset = el.selectionStart;
+    const idx = cues.findIndex((c) => offset >= c.textStart && offset < c.textEnd);
+    if (idx !== -1 && idx !== selectedCueIdx) seekToCue(idx);
   }
 
   // 오디오가 "재생 중"일 때만 현재 시각에 맞는 큐로 선택을 자동으로 따라가게 한다. 이걸 일시정지
@@ -615,6 +635,10 @@ function LabeledFieldSection({
                           ref={rawSrtRef}
                           value={editText}
                           onChange={(e) => setEditText(e.target.value)}
+                          onClick={(e) => syncSelectedCueFromCaret(e.currentTarget)}
+                          onKeyUp={(e) => {
+                            if (CARET_NAV_KEYS.has(e.key)) syncSelectedCueFromCaret(e.currentTarget);
+                          }}
                           className="w-full border border-neutral-200 rounded px-2 py-1.5 text-[10px] font-mono bg-white"
                           style={{ height: previewAspect === '16:9' ? 270 : 480 }}
                           placeholder="1&#10;00:00:00,000 --> 00:00:04,000&#10;자막 텍스트"
