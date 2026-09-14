@@ -754,16 +754,17 @@ function parseSceneTimeRange(time: string): [number, number] | null {
   return [start, end];
 }
 
-// 장면 시간대와 겹치는 SRT 줄들의 텍스트를 순서대로 이어붙인다 — 초 단위 경계가 딱 안 맞아도
-// 놓치지 않도록 "자막 줄 시작 < 장면 끝 && 자막 줄 끝 > 장면 시작"으로 느슨하게 겹침을 판정한다.
-function subtitleForSceneTime(time: string, srtLines: SrtLine[]): string {
-  const range = parseSceneTimeRange(time);
-  if (!range || srtLines.length === 0) return '';
-  const [sStart, sEnd] = range;
-  return srtLines
-    .filter((l) => l.start < sEnd && l.end > sStart)
-    .map((l) => l.text)
-    .join(' ');
+// 2026-09-16(2차) 수정 — 처음엔 "장면 기준 행 + 겹치는 SRT 텍스트 이어붙이기"였는데, 사용자가
+// 확인 후 "왼쪽 자막에 다른것들을 맞춘게 아니고 기존 씬에 자막을 맞췄네???"라고 지적 — 원하는
+// 방향은 반대였다: SRT 줄이 기준(행)이 되고, 그 줄의 시간대에 해당하는 장면(이미지/프롬프트 등)을
+// 옆에 붙이는 것(사용자 선택: "SRT 줄 기준(권장)"). subtitleForSceneTime(장면→자막 방향)은 이제
+// 안 쓰여서 제거하고, 초를 "0:00" 형식으로 되돌리는 포맷터만 추가한다(아래 startAddForGap이
+// 자막 구간에 맞는 장면을 새로 추가할 때 draft.time을 채우는 데 씀).
+function formatSecToMMSS(sec: number): string {
+  const total = Math.max(0, Math.round(sec));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 // 6번 장면 프롬프트 편집 UI — 예전엔 전체를 통짜 텍스트로 붙여넣는 방식뿐이었는데, 장면 하나씩
@@ -828,6 +829,13 @@ export function SceneEditorList({
     if (!confirm(`장면 ${scenes.length}개를 전부 삭제할까요? 되돌릴 수 없습니다.`)) return;
     await onSave('');
   }
+  // 2026-09-16(2차) 추가 — SRT 줄 기준 표에서, 아직 장면이 없는 구간("장면 없음" 자리)의
+  // "+ 장면 추가" 버튼이 부른다. 그 구간의 SRT 시작~끝 초를 그대로 draft.time에 채워서, 사람이
+  // 시간을 손으로 다시 재지 않고 바로 이 구간용 장면을 만들 수 있게 한다.
+  function startAddForGap(startSec: number, endSec: number) {
+    setEditingIndex(-1);
+    setDraft({ ...EMPTY_SCENE_DRAFT, id: nextSceneId(scenes), time: `${formatSecToMMSS(startSec)}-${formatSecToMMSS(endSec)}` });
+  }
   // 형식이 안 맞는 예전 자유 텍스트 — 그대로 보여주되 장면 추가는 여전히 가능하게 둔다.
   if (scenes.length === 0 && scenePrompts.trim()) {
     return (
@@ -882,6 +890,57 @@ export function SceneEditorList({
     });
   const previewScenes = filteredWithIndex.map((f) => f.s);
 
+  // 2026-09-16(2차) 추가 — SRT 줄이 표의 기준(행)이 되도록 재구성. 처음엔 "장면 기준 행 + 겹치는
+  // SRT 텍스트 이어붙이기"로 만들었는데, 사용자가 확인 후 "왼쪽 자막에 다른것들을 맞춘게 아니고
+  // 기존 씬에 자막을 맞췄네???"라고 지적 — 반대 방향(SRT가 기준, 장면이 거기 딸려옴)을 원한
+  // 것이었다. 후속 확인: "SRT 줄 기준(권장)" 선택, "자막은 다 보여야해"(한 줄도 생략/축약 금지),
+  // "자막 페이지가 200페이지가 넘으니 그게 기준"(자막 줄 수가 행 개수의 기준), "자막 몇개에 =
+  // 이미지 한씬이 매칭이 될수 있는거지"(여러 자막 줄이 같은 장면에 연속으로 걸리면 그 장면 데이터
+  // 칸을 rowSpan으로 합쳐서 한 번만 보여줌). SRT가 아직 없으면(로딩 중이거나 자막 자체가 없는
+  // 유닛) 예전처럼 장면 하나당 한 행으로 자동 대체한다.
+  const filteredSceneIdxSet = new Set(filteredWithIndex.map((f) => f.idx));
+
+  type RowGroup = { sceneIdx: number | null; lines: SrtLine[] };
+  const rowGroups: RowGroup[] = (() => {
+    if (srtLines.length === 0) {
+      return filteredWithIndex.map(({ idx }) => ({ sceneIdx: idx, lines: [] as SrtLine[] }));
+    }
+    const groups: RowGroup[] = [];
+    for (const line of srtLines) {
+      let matchedIdx: number | null = null;
+      for (let i = 0; i < scenes.length; i++) {
+        const range = parseSceneTimeRange(scenes[i].time);
+        if (range && range[0] < line.end && range[1] > line.start) {
+          matchedIdx = i;
+          break;
+        }
+      }
+      // 장면이 없는(matchedIdx===null) 구간은 항상 보여준다 — 아직 장면을 안 만든 구간을
+      // 그대로 드러내야 "여기 장면이 빠졌다"는 걸 알 수 있다. 캐릭터 탭 필터는 실제로 매칭된
+      // 장면에만 적용한다.
+      const passesFilter =
+        matchedIdx === null || characterTabs.length === 0 || effectiveFilterTab === 'all' || filteredSceneIdxSet.has(matchedIdx);
+      if (!passesFilter) continue;
+      const last = groups[groups.length - 1];
+      if (last && last.sceneIdx === matchedIdx) last.lines.push(line);
+      else groups.push({ sceneIdx: matchedIdx, lines: [line] });
+    }
+    return groups;
+  })();
+
+  type FlatRow = { key: string; line?: SrtLine; sceneIdx: number | null; isFirst: boolean; span: number; group: RowGroup };
+  const flatRows: FlatRow[] = [];
+  rowGroups.forEach((group, gi) => {
+    const span = group.lines.length || 1;
+    if (group.lines.length === 0) {
+      flatRows.push({ key: `${gi}-0`, sceneIdx: group.sceneIdx, isFirst: true, span, group });
+    } else {
+      group.lines.forEach((line, li) => {
+        flatRows.push({ key: `${gi}-${li}`, line, sceneIdx: group.sceneIdx, isFirst: li === 0, span, group });
+      });
+    }
+  });
+
   // 2026-09-07, 사용자 지시로 13번을 스토리보드 표 형태로 재구성: 타임 / 장면이미지 / 이미지
   // 프롬프트 / 영상프롬프트 or 전환프롬프트 4개 열. 수정 중인 행만 SceneDraftForm으로 펼치고,
   // 나머지는 표 한 줄로 스캔하기 쉽게 보여준다. 좁은 패널이라 가로 스크롤로 감싼다.
@@ -921,15 +980,15 @@ export function SceneEditorList({
       {scenes.length > 0 && filteredWithIndex.length === 0 && (
         <p className="text-[11px] text-neutral-300">이 분류엔 해당하는 장면이 없습니다.</p>
       )}
-      {filteredWithIndex.length > 0 && (
+      {flatRows.length > 0 && (
         <div className="overflow-x-auto border border-neutral-100 rounded-lg">
           <table className="w-full text-[11px] border-collapse min-w-[720px]">
             <thead>
               <tr className="bg-neutral-50 text-neutral-400">
-                {/* 2026-09-16 추가 — 사용자 요청: "13단계에서 가장 왼쪽에 srt자막이 순서대로
-                    아래로 나열되어야해". 장면 순서 그대로 위→아래로 나오므로 이 열만 봐도 SRT를
-                    순서대로 읽어 내려가는 것과 같다. */}
-                <th className="text-left font-black px-2 py-1.5 w-40">자막(SRT)</th>
+                {/* 2026-09-16(2차) — 이제 이 열이 표 전체의 행 기준이다: SRT 줄 하나 = 한 행.
+                    같은 장면에 걸리는 연속된 줄들은 오른쪽 장면 칸들을 rowSpan으로 합쳐서
+                    한 번만 보여준다(사용자 확정: "SRT 줄 기준(권장)", "자막은 다 보여야해"). */}
+                <th className="text-left font-black px-2 py-1.5 w-48">자막(SRT)</th>
                 <th className="text-left font-black px-2 py-1.5 w-28">장면</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">타임</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">장면이미지</th>
@@ -940,157 +999,200 @@ export function SceneEditorList({
               </tr>
             </thead>
             <tbody>
-              {filteredWithIndex.map(({ s, idx }, pos) =>
-                editingIndex === idx ? (
-                  <tr key={s.id || idx}>
-                    <td colSpan={8} className="p-1.5 bg-neutral-50">
-                      <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
+              {flatRows.map((row) => {
+                if (row.sceneIdx !== null && editingIndex === row.sceneIdx) {
+                  if (!row.isFirst) return null;
+                  return (
+                    <tr key={row.key}>
+                      <td colSpan={8} className="p-1.5 bg-neutral-50">
+                        <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
+                      </td>
+                    </tr>
+                  );
+                }
+                const s = row.sceneIdx !== null ? scenes[row.sceneIdx] : null;
+                const pos = row.sceneIdx !== null ? filteredWithIndex.findIndex((f) => f.idx === row.sceneIdx) : -1;
+                return (
+                  <tr key={row.key} className="border-t border-neutral-100 align-top">
+                    {/* SRT 줄 하나 = 이 행 하나. 전체를 그대로 보여준다(축약·생략 없음). */}
+                    <td className="px-2 py-1.5">
+                      {row.line ? (
+                        <p className="text-neutral-600 leading-relaxed">{row.line.text}</p>
+                      ) : srtText ? (
+                        <span className="text-neutral-300">(매칭 없음)</span>
+                      ) : (
+                        <span className="text-neutral-300">—</span>
+                      )}
                     </td>
+                    {row.isFirst &&
+                      (s ? (
+                        <>
+                          <td className="px-2 py-1.5" rowSpan={row.span}>
+                            <span className="font-mono text-neutral-400">{s.id}</span>
+                            {s.title && <div className="font-bold truncate max-w-[7rem]">{s.title}</div>}
+                          </td>
+                          <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap" rowSpan={row.span}>
+                            {s.time ? formatTimeWithDuration(s.time) : '—'}
+                          </td>
+                          <td className="px-2 py-1.5" rowSpan={row.span}>
+                            {/* 2026-09-13 (10차) 수정 — 사용자 요청: "이미지나 영상이 없어도 모달
+                                띄어줘 대본,프롬프트,해석 볼수 있게" — 이미지가 아직 없어도 "없음"
+                                자리표시자를 눌러서 대본/프롬프트/해석은 미리 확인할 수 있게, 자리
+                                표시자도 버튼으로 바꿔 항상 모달을 연다. */}
+                            {s.sceneImage ? (
+                              <button type="button" onClick={() => setPreviewIndex(pos)} className="block" title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)">
+                                <img
+                                  src={s.sceneImage}
+                                  alt={s.title}
+                                  className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                                />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewIndex(pos)}
+                                className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
+                                title="클릭하면 대본·프롬프트·해석 보기 (이미지는 아직 없음)"
+                              >
+                                없음
+                              </button>
+                            )}
+                          </td>
+                          {/* 2026-09-13 추가 — 장면영상 열. 장면이미지 열과 완전히 같은 방식(썸네일
+                              클릭 → 모달, 없으면 "없음" 자리표시자) — 실제로 영상 클립을 만든 일부
+                              장면에만 채워진다. */}
+                          <td className="px-2 py-1.5" rowSpan={row.span}>
+                            {s.sceneVideo ? (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewVideoIndex(pos)}
+                                className="relative block"
+                                title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)"
+                              >
+                                <video
+                                  src={s.sceneVideo}
+                                  muted
+                                  playsInline
+                                  preload="metadata"
+                                  className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                                />
+                                <span className="absolute inset-0 flex items-center justify-center text-white text-sm drop-shadow pointer-events-none">▶</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewVideoIndex(pos)}
+                                className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
+                                title="클릭하면 대본·프롬프트·해석 보기 (영상은 아직 없음)"
+                              >
+                                없음
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5" rowSpan={row.span}>
+                            {s.imagePrompt ? (
+                              <div className="flex items-start gap-1">
+                                <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-3">{s.imagePrompt}</p>
+                                <CopyButton text={s.imagePrompt} />
+                              </div>
+                            ) : (s.clean || s.info) ? (
+                              <div className="space-y-1">
+                                {s.clean && (
+                                  <div className="flex items-start gap-1">
+                                    <span className="shrink-0 text-[9px] font-black text-cyan-600 w-9">CLEAN</span>
+                                    <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.clean}</p>
+                                    <CopyButton text={s.clean} />
+                                  </div>
+                                )}
+                                {s.info && (
+                                  <div className="flex items-start gap-1">
+                                    <span className="shrink-0 text-[9px] font-black text-cyan-600 w-9">INFO</span>
+                                    <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.info}</p>
+                                    <CopyButton text={s.info} />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-neutral-300">—</span>
+                            )}
+                          </td>
+                          {/* 2026-09-13 (2차) 수정 — 무빙(카메라 지시)과 영상(Flow 생성 프롬프트)을
+                              CLEAN/INFO와 같은 방식으로 미니 라벨을 붙여 위아래로 분리해서 보여준다.
+                              영상은 needsVideoClip이 true일 때만(실제 값이 있어도) 보여준다 — 체크
+                              해제된 상태에서 남아있는 옛 video 값이 착오를 일으키지 않도록. */}
+                          <td className="px-2 py-1.5" rowSpan={row.span}>
+                            {s.moving || (s.needsVideoClip && s.video) ? (
+                              <div className="space-y-1">
+                                {s.moving && (
+                                  <div className="flex items-start gap-1">
+                                    <span className="shrink-0 text-[9px] font-black text-neutral-400 w-9">무빙</span>
+                                    <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.moving}</p>
+                                    <CopyButton text={s.moving} />
+                                  </div>
+                                )}
+                                {s.needsVideoClip && s.video && (
+                                  <div className="flex items-start gap-1">
+                                    <span className="shrink-0 text-[9px] font-black text-purple-600 w-9">영상</span>
+                                    <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.video}</p>
+                                    <CopyButton text={s.video} />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-neutral-300">—</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5" rowSpan={row.span}>
+                            <div className="flex flex-col gap-1">
+                              <button onClick={() => startEdit(row.sceneIdx as number)} className="text-[10px] font-bold text-blue-600 hover:underline text-left">
+                                수정
+                              </button>
+                              <button onClick={() => removeScene(row.sceneIdx as number)} className="text-[10px] font-bold text-red-500 hover:underline text-left">
+                                삭제
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        // 2026-09-16(2차) 추가 — 이 SRT 구간에 아직 장면이 없다는 뜻. 시간 칸에
+                        // 그 구간의 실제 시작~끝을 보여주고, "+ 장면 추가"로 바로 그 시간이 채워진
+                        // 장면 등록 폼을 연다(startAddForGap).
+                        <>
+                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
+                            (장면 없음)
+                          </td>
+                          <td className="px-2 py-1.5 font-mono text-neutral-400 whitespace-nowrap" rowSpan={row.span}>
+                            {row.group.lines.length > 0
+                              ? `${formatSecToMMSS(row.group.lines[0].start)}-${formatSecToMMSS(row.group.lines[row.group.lines.length - 1].end)}`
+                              : '—'}
+                          </td>
+                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
+                            —
+                          </td>
+                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
+                            —
+                          </td>
+                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
+                            —
+                          </td>
+                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
+                            —
+                          </td>
+                          <td className="px-2 py-1.5" rowSpan={row.span}>
+                            {row.group.lines.length > 0 && (
+                              <button
+                                onClick={() => startAddForGap(row.group.lines[0].start, row.group.lines[row.group.lines.length - 1].end)}
+                                className="text-[10px] font-bold text-blue-600 hover:underline text-left"
+                              >
+                                + 장면 추가
+                              </button>
+                            )}
+                          </td>
+                        </>
+                      ))}
                   </tr>
-                ) : (
-                  <tr key={s.id || idx} className="border-t border-neutral-100 align-top">
-                    {/* 2026-09-16 추가 — 이 장면 시간대와 겹치는 SRT 원문 줄(들)을 그대로 보여준다.
-                        srtText가 아직 없으면(로딩 중/자막 미등록) "—"로 둔다. */}
-                    <td className="px-2 py-1.5">
-                      {srtText ? (
-                        (() => {
-                          const text = subtitleForSceneTime(s.time, srtLines);
-                          return text ? (
-                            <p className="text-neutral-600 leading-relaxed line-clamp-3">{text}</p>
-                          ) : (
-                            <span className="text-neutral-300">(매칭 없음)</span>
-                          );
-                        })()
-                      ) : (
-                        <span className="text-neutral-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <span className="font-mono text-neutral-400">{s.id}</span>
-                      {s.title && <div className="font-bold truncate max-w-[7rem]">{s.title}</div>}
-                    </td>
-                    <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap">{s.time ? formatTimeWithDuration(s.time) : '—'}</td>
-                    <td className="px-2 py-1.5">
-                      {/* 2026-09-13 (10차) 수정 — 사용자 요청: "이미지나 영상이 없어도 모달
-                          띄어줘 대본,프롬프트,해석 볼수 있게" — 이미지가 아직 없어도 "없음"
-                          자리표시자를 눌러서 대본/프롬프트/해석은 미리 확인할 수 있게, 자리
-                          표시자도 버튼으로 바꿔 항상 모달을 연다. */}
-                      {s.sceneImage ? (
-                        <button type="button" onClick={() => setPreviewIndex(pos)} className="block" title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)">
-                          <img
-                            src={s.sceneImage}
-                            alt={s.title}
-                            className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
-                          />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewIndex(pos)}
-                          className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
-                          title="클릭하면 대본·프롬프트·해석 보기 (이미지는 아직 없음)"
-                        >
-                          없음
-                        </button>
-                      )}
-                    </td>
-                    {/* 2026-09-13 추가 — 장면영상 열. 장면이미지 열과 완전히 같은 방식(썸네일
-                        클릭 → 모달, 없으면 "없음" 자리표시자) — 실제로 영상 클립을 만든 일부
-                        장면에만 채워진다. */}
-                    <td className="px-2 py-1.5">
-                      {s.sceneVideo ? (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewVideoIndex(pos)}
-                          className="relative block"
-                          title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)"
-                        >
-                          <video
-                            src={s.sceneVideo}
-                            muted
-                            playsInline
-                            preload="metadata"
-                            className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
-                          />
-                          <span className="absolute inset-0 flex items-center justify-center text-white text-sm drop-shadow pointer-events-none">▶</span>
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setPreviewVideoIndex(pos)}
-                          className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
-                          title="클릭하면 대본·프롬프트·해석 보기 (영상은 아직 없음)"
-                        >
-                          없음
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      {s.imagePrompt ? (
-                        <div className="flex items-start gap-1">
-                          <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-3">{s.imagePrompt}</p>
-                          <CopyButton text={s.imagePrompt} />
-                        </div>
-                      ) : (s.clean || s.info) ? (
-                        <div className="space-y-1">
-                          {s.clean && (
-                            <div className="flex items-start gap-1">
-                              <span className="shrink-0 text-[9px] font-black text-cyan-600 w-9">CLEAN</span>
-                              <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.clean}</p>
-                              <CopyButton text={s.clean} />
-                            </div>
-                          )}
-                          {s.info && (
-                            <div className="flex items-start gap-1">
-                              <span className="shrink-0 text-[9px] font-black text-cyan-600 w-9">INFO</span>
-                              <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.info}</p>
-                              <CopyButton text={s.info} />
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-neutral-300">—</span>
-                      )}
-                    </td>
-                    {/* 2026-09-13 (2차) 수정 — 무빙(카메라 지시)과 영상(Flow 생성 프롬프트)을
-                        CLEAN/INFO와 같은 방식으로 미니 라벨을 붙여 위아래로 분리해서 보여준다.
-                        영상은 needsVideoClip이 true일 때만(실제 값이 있어도) 보여준다 — 체크
-                        해제된 상태에서 남아있는 옛 video 값이 착오를 일으키지 않도록. */}
-                    <td className="px-2 py-1.5">
-                      {s.moving || (s.needsVideoClip && s.video) ? (
-                        <div className="space-y-1">
-                          {s.moving && (
-                            <div className="flex items-start gap-1">
-                              <span className="shrink-0 text-[9px] font-black text-neutral-400 w-9">무빙</span>
-                              <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.moving}</p>
-                              <CopyButton text={s.moving} />
-                            </div>
-                          )}
-                          {s.needsVideoClip && s.video && (
-                            <div className="flex items-start gap-1">
-                              <span className="shrink-0 text-[9px] font-black text-purple-600 w-9">영상</span>
-                              <p className="flex-1 min-w-0 text-neutral-600 leading-relaxed line-clamp-2">{s.video}</p>
-                              <CopyButton text={s.video} />
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-neutral-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex flex-col gap-1">
-                        <button onClick={() => startEdit(idx)} className="text-[10px] font-bold text-blue-600 hover:underline text-left">
-                          수정
-                        </button>
-                        <button onClick={() => removeScene(idx)} className="text-[10px] font-bold text-red-500 hover:underline text-left">
-                          삭제
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              )}
+                );
+              })}
             </tbody>
           </table>
         </div>
