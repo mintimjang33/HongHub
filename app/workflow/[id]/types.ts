@@ -85,10 +85,12 @@ export type ContentUnit = {
   // 콘텐츠 대본 전체에 대해 하나(또는 후보 여러 개) 나오는 거라 유닛에 바로 붙인다. 링크를 직접
   // 붙여넣거나, 파일을 업로드하면(uploadSceneMedia 재사용) 그 URL이 여기 같이 쌓인다.
   // label — 예: "원본"/"1.3배속" 같은 후보 구분용(2026-09-01 추가, 링크만으로는 뭐가 뭔지 구분이 안 돼서).
-  narrationUrls?: { label: string; url: string }[];
+  // 2026-09-16 — selected(LabeledItem 참고) 추가로, 후보가 여러 개일 때 어느 게 "최종"인지 명시할
+  // 수 있다.
+  narrationUrls?: LabeledItem[];
   // 2026-09-01 추가 — 9번(자막) 단계. narrationUrls와 구조·용도가 완전히 같아서(콘텐츠 하나에
   // 라벨 붙은 링크/파일 여러 개) 같은 LabeledLinksPanel 컴포넌트를 재사용한다.
-  subtitleUrls?: { label: string; url: string }[];
+  subtitleUrls?: LabeledItem[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -182,7 +184,15 @@ export type SceneBlock = {
   media: string[];
 };
 
-export type LabeledItem = { label: string; url: string };
+// 2026-09-16 — selected 추가(사용자 요청: "12단계에서 수정한 자막파일에 최종 선택 체크박스를
+// 만들어주고... 이 체크한게 13단계로 넘어가게 되는거야"). narrationUrls/subtitleUrls는 후보가
+// 여러 개(원본/재생성본 등) 쌓일 수 있는데, 지금까지 13번(ImageVideoPanel)이 무조건 배열의 첫
+// 번째 항목만 SRT로 읽어서 — 나중에 추가된 "진짜 최종본"이 있어도 계속 옛 첫 항목을 썼다(실사고:
+// 코카콜라 유닛에 "자동 생성" 다음 "제미나이 재생성 자막"을 추가했는데도 13번은 계속 "자동 생성"을
+// 읽고 있었음). selected:true인 항목이 있으면 그걸 최종으로 쓰고, 없으면(과거 데이터 하위호환)
+// 여전히 배열의 첫 번째로 fallback한다 — step13-14-LabeledLinksPanel.tsx의 체크박스가 이 필드를
+// 켜고, step16-17-ImageVideoPanel.tsx가 이 필드를 읽는다.
+export type LabeledItem = { label: string; url: string; selected?: boolean };
 export type LabeledField = 'narrationUrls' | 'subtitleUrls';
 
 // 2026-09-11 추가 — 13번 화풍 선택 프리셋. 사용자가 같은 씬(약사 스틱맨+무너지는 PHARMACY 네온사인)을
