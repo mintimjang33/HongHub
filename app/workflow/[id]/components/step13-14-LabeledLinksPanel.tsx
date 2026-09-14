@@ -55,10 +55,10 @@ function serializeSrtCues(cues: SrtCue[]): string {
 // 받아서, 편집 중 오디오를 재생하며 16:9/9:16 화면 비율 미리보기 안에 현재 재생 시각에 맞는
 // 자막을 실시간으로 띄운다. 미리보기 화면의 자막 텍스트 자체가 contentEditable이라 그 자리에서
 // 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만 바뀌고 전체 SRT가 다시 합쳐진다. Enter는 커서
-// 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다.
-// 2026-09-15(8차) — "N / 전체" 카운터를 16:9/9:16 버튼 줄 오른쪽 끝(ml-auto)에 뒀더니 눈에 안
-// 띄어서 못 찾겠다는 사용자 지적("페이지가 너무 오른쪽에 있어서 직관적이지 않아") — 검은 미리보기
-// 화면 안쪽 상단 중앙에 배지로 얹는 방식으로 옮겼다.
+// 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다. 원문
+// SRT(고급) 보기는 미리보기 오른쪽에 고정 너비(w-72, flex-1 아님 — 예전에 flex-1이라 접혀도 빈
+// 공간을 차지하던 문제가 있었다)로 기본 펼쳐서 둔다(사용자 요청: "화면 오른쪽 끝에 자막 원문이
+// 보이게 해줘").
 function LabeledFieldSection({
   site,
   unit,
@@ -300,8 +300,8 @@ function LabeledFieldSection({
                   {editLoading && editText === '' ? (
                     <p className="text-[10px] text-neutral-400">불러오는 중...</p>
                   ) : (
-                    <div className="flex flex-col gap-2">
-                      <div className="space-y-1.5">
+                    <div className="flex gap-3 flex-wrap items-start">
+                      <div className="shrink-0 space-y-1.5">
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setPreviewAspect('16:9')}
@@ -486,15 +486,15 @@ function LabeledFieldSection({
                           <p className="text-[9px] text-neutral-400">나레이션이 등록돼야 오디오랑 같이 미리볼 수 있어요</p>
                         )}
                       </div>
-                      <details className="w-64 shrink-0">
+                      <details open className="w-72 shrink-0">
                         <summary className="text-[10px] font-bold text-neutral-400 cursor-pointer select-none mb-1">
                           원문 SRT 직접 보기/수정 (고급)
                         </summary>
                         <textarea
                           value={editText}
                           onChange={(e) => setEditText(e.target.value)}
-                          rows={12}
                           className="w-full border border-neutral-200 rounded px-2 py-1.5 text-[10px] font-mono bg-white"
+                          style={{ height: previewAspect === '16:9' ? 270 : 480 }}
                           placeholder="1&#10;00:00:00,000 --> 00:00:04,000&#10;자막 텍스트"
                         />
                       </details>
