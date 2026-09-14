@@ -337,6 +337,17 @@ function LabeledFieldSection({
     await saveItems(items.map((item, i) => (i === idx ? { ...item, label } : item)));
   }
 
+  // 2026-09-16 추가 — 사용자 요청: "12단계에서 수정한 자막파일에 최종 선택 체크박스를
+  // 만들어주고... 이 체크한게 13단계로 넘어가게 되는거야". 후보(원본/재생성본 등)가 여러 개
+  // 쌓여도 13번(ImageVideoPanel)이 무조건 배열의 첫 번째만 읽던 문제를 고치기 위한 짝 기능 —
+  // 이 목록(나레이션 또는 자막) 안에서 정확히 하나만 "최종"으로 표시한다. 체크하면 그 항목만
+  // selected:true, 나머지는 전부 false로 내려가고(단일 선택), 체크를 풀면 그 항목만 false가
+  // 된다(전부 선택 해제된 상태도 허용 — 그러면 13번은 예전처럼 첫 번째로 fallback한다).
+  async function setFinalSelection(idx: number, checked: boolean) {
+    const next = items.map((item, i) => (i === idx ? { ...item, selected: checked } : checked ? { ...item, selected: false } : item));
+    await saveItems(next);
+  }
+
   async function startEdit(idx: number) {
     setEditError('');
     setEditLoading(true);
@@ -412,6 +423,23 @@ function LabeledFieldSection({
                   {item.url}
                 </a>
                 <CopyButton text={item.url} />
+                {/* 2026-09-16 추가 — 최종 선택 체크박스(위 setFinalSelection 주석 참고). title로
+                    이 체크가 다음 단계에서 실제로 쓰인다는 걸 명시해서, 그냥 표시용 체크가 아니라
+                    실제 동작이 있다는 걸 알 수 있게 한다. */}
+                <label
+                  className={`shrink-0 flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded cursor-pointer ${
+                    item.selected ? 'text-emerald-700 bg-emerald-50' : 'text-neutral-400'
+                  }`}
+                  title="최종 선택 — 체크한 항목이 다음 단계(13번 등)에서 사용됩니다"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!item.selected}
+                    onChange={(e) => setFinalSelection(idx, e.target.checked)}
+                    className="w-3.5 h-3.5"
+                  />
+                  최종
+                </label>
                 {textEditable && (
                   <button
                     onClick={() => (editingIdx === idx ? cancelEdit() : startEdit(idx))}
