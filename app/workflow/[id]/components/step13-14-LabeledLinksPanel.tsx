@@ -8,6 +8,12 @@ import { CopyButton } from './shared';
 // 콘텐츠(유닛) 하나의 나레이션 또는 자막 중 한 필드만 다루는 조각 — 링크 붙여넣기와 파일 업로드
 // (uploadSceneMedia 재사용) 둘 다 지원, 라벨(예: "원본"/"1.3배속", "SRT"/"수정본")로 여러 후보를
 // 구분한다. NarrationSubtitlePanel이 유닛 하나당 이 조각을 두 번(나레이션/자막) 나란히 띄운다.
+//
+// 2026-09-15 추가 — textEditable(자막 섹션에서만 true로 넘김): 외부 프로그램(Subtitle Edit 등)
+// 없이도 화면에서 바로 SRT 텍스트를 고칠 수 있게 "편집" 버튼을 추가했다(사용자 요청: "12단계에
+// srt 편집기를 구현 못하냐고"). 파일 내용을 그대로 fetch해서 textarea에 띄우고, 저장하면 그
+// 텍스트를 새 파일로 업로드해서 같은 항목의 url만 교체한다(라벨 유지) — 별도 항목을 추가하는
+// 게 아니라 "그 자리에서 고치는" 동작이라 저장 시 원래 있던 항목을 대체한다.
 function LabeledFieldSection({
   site,
   unit,
@@ -17,6 +23,7 @@ function LabeledFieldSection({
   linkPlaceholder,
   fileAccept,
   uploadLabel,
+  textEditable,
 }: {
   site: Site;
   unit: ContentUnit;
@@ -26,6 +33,7 @@ function LabeledFieldSection({
   linkPlaceholder: string;
   fileAccept: string;
   uploadLabel: string;
+  textEditable?: boolean;
 }) {
   const items = normalizeLabeledItems(unit[fieldKey]);
   const [linkDraft, setLinkDraft] = useState('');
@@ -33,6 +41,10 @@ function LabeledFieldSection({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState('');
 
   async function saveItems(newItems: LabeledItem[]) {
     setSaving(true);
@@ -81,26 +93,104 @@ function LabeledFieldSection({
     await saveItems(items.map((item, i) => (i === idx ? { ...item, label } : item)));
   }
 
+  async function startEdit(idx: number) {
+    setEditError('');
+    setEditLoading(true);
+    setEditingIdx(idx);
+    try {
+      const res = await fetch(items[idx].url);
+      if (!res.ok) throw new Error(`파일을 못 불러왔어요 (${res.status})`);
+      setEditText(await res.text());
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  function cancelEdit() {
+    setEditingIdx(null);
+    setEditText('');
+    setEditError('');
+  }
+
+  async function saveEdit(idx: number) {
+    setEditLoading(true);
+    setEditError('');
+    try {
+      const blob = new Blob([editText], { type: 'text/plain' });
+      const name = `${items[idx].label || 'subtitle'}.srt`;
+      const file = new File([blob], name, { type: 'text/plain' });
+      const url = await uploadSceneMedia(file);
+      await saveItems(items.map((item, i) => (i === idx ? { ...item, url } : item)));
+      setEditingIdx(null);
+      setEditText('');
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-1.5">
       <div className="text-[10px] font-black text-neutral-400">{heading}</div>
       {items.length > 0 && (
         <div className="space-y-1">
           {items.map((item, idx) => (
-            <div key={idx} className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1">
-              <input
-                defaultValue={item.label}
-                onBlur={(e) => e.target.value !== item.label && relabelItem(idx, e.target.value)}
-                placeholder="라벨(예: 원본, 1.3배속)"
-                className="w-28 shrink-0 border border-neutral-200 rounded px-1.5 py-1 text-[10px] font-bold bg-white"
-              />
-              <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
-                {item.url}
-              </a>
-              <CopyButton text={item.url} />
-              <button onClick={() => removeItem(idx)} title="삭제" className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500">
-                ✕
-              </button>
+            <div key={idx} className="space-y-1">
+              <div className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1">
+                <input
+                  defaultValue={item.label}
+                  onBlur={(e) => e.target.value !== item.label && relabelItem(idx, e.target.value)}
+                  placeholder="라벨(예: 원본, 1.3배속)"
+                  className="w-28 shrink-0 border border-neutral-200 rounded px-1.5 py-1 text-[10px] font-bold bg-white"
+                />
+                <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
+                  {item.url}
+                </a>
+                <CopyButton text={item.url} />
+                {textEditable && (
+                  <button
+                    onClick={() => (editingIdx === idx ? cancelEdit() : startEdit(idx))}
+                    title="편집"
+                    className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-blue-600"
+                  >
+                    ✏️
+                  </button>
+                )}
+                <button onClick={() => removeItem(idx)} title="삭제" className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500">
+                  ✕
+                </button>
+              </div>
+              {textEditable && editingIdx === idx && (
+                <div className="border border-blue-200 rounded-lg p-2 bg-blue-50/30 space-y-1.5">
+                  {editLoading && editText === '' ? (
+                    <p className="text-[10px] text-neutral-400">불러오는 중...</p>
+                  ) : (
+                    <textarea
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      rows={14}
+                      className="w-full border border-neutral-200 rounded px-2 py-1.5 text-[11px] font-mono bg-white"
+                      placeholder="1&#10;00:00:00,000 --> 00:00:04,000&#10;자막 텍스트"
+                    />
+                  )}
+                  {editError && <p className="text-[10px] text-red-500 font-bold">{editError}</p>}
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => saveEdit(idx)}
+                      disabled={editLoading}
+                      className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                    >
+                      {editLoading ? '저장 중...' : '저장 (새 파일로 교체)'}
+                    </button>
+                    <button onClick={cancelEdit} className="text-[11px] font-bold px-3 py-1.5 rounded-lg border border-neutral-200">
+                      취소
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -218,6 +308,7 @@ export function NarrationSubtitlePanel({ site, onRefresh }: { site: Site; onRefr
                     linkPlaceholder="자막 링크 붙여넣기"
                     fileAccept=".srt,.vtt,.ass,.ssa,.txt"
                     uploadLabel="+ 자막 파일 업로드"
+                    textEditable
                   />
                 </div>
               )}
