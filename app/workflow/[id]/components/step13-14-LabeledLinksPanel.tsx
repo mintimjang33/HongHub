@@ -77,12 +77,15 @@ const DEFAULT_PREVIEW_STYLE: PreviewStyle = { align: 'center', lines: 2, fontSiz
 // 받아서, 편집 중 오디오를 재생하며 16:9/9:16 화면 비율 미리보기 안에 현재 재생 시각에 맞는
 // 자막을 실시간으로 띄운다. 미리보기 화면의 자막 텍스트 자체가 contentEditable이라 그 자리에서
 // 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만 바뀌고 전체 SRT가 다시 합쳐진다. Enter는 커서
-// 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다. 원문
-// SRT(고급) 보기는 미리보기 오른쪽에 고정 너비(w-72)로 기본 펼쳐서 둔다(사용자 요청: "화면
-// 오른쪽 끝에 자막 원문이 보이게 해줘"). 바깥 컨테이너는 flex-wrap 없이 overflow-x-auto만 줘서
-// 컨테이너 폭이 좁아도 줄바꿈으로 아래에 떨어지지 않고 항상 오른쪽에 붙는다. 왼쪽 칼럼은 미리보기
-// 박스와 같은 고정 폭(width: 480/270)을 줘서 안내 문구 같은 길이가 불확실한 텍스트가 flex item을
-// 옆으로 넓혀버려 오른쪽 패널이 뒤로 밀리는 것도 막는다(사용자 지적: "공간이 너무 남잖아").
+// 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다. 반대로
+// "다음 자막 내용 당겨와 합치기" 버튼(mergeWithNextCue)은 다음 자막의 텍스트를 현재 자막 뒤에
+// 붙이고 시간 구간도 합친다(사용자 질문: "다음장면에 있는것을 앞으로 당겨와서 붙일때는 어떻게
+// 하면되?" — Enter로 나누는 것의 반대 동작이 없어서 추가). 원문 SRT(고급) 보기는 미리보기
+// 오른쪽에 고정 너비(w-72)로 기본 펼쳐서 둔다(사용자 요청: "화면 오른쪽 끝에 자막 원문이 보이게
+// 해줘"). 바깥 컨테이너는 flex-wrap 없이 overflow-x-auto만 줘서 컨테이너 폭이 좁아도 줄바꿈으로
+// 아래에 떨어지지 않고 항상 오른쪽에 붙는다. 왼쪽 칼럼은 미리보기 박스와 같은 고정 폭
+// (width: 480/270)을 줘서 안내 문구 같은 길이가 불확실한 텍스트가 flex item을 옆으로 넓혀버려
+// 오른쪽 패널이 뒤로 밀리는 것도 막는다(사용자 지적: "공간이 너무 남잖아").
 //
 // 정렬/줄수/글자크기/배경·글자색(previewAlign 등)은 실제 저장 필드가 아니라 미리보기 전용 값이라,
 // 처음엔 컴포넌트 state 기본값으로만 뒀더니 편집창을 닫았다 열 때마다 초기값(중앙/2줄/13px)으로
@@ -245,6 +248,25 @@ function LabeledFieldSection({
     // textStart/textEnd는 곧바로 serializeSrtCues → setEditText로 다시 파싱되면서 버려지는
     // 임시 값이라 실제 위치는 안 맞아도 되지만, 타입상 채워는 둬야 한다.
     nextCues.splice(selectedCueIdx + 1, 0, { start: splitAt, end: cue.end, text: after, textStart: cue.textStart, textEnd: cue.textEnd });
+    setEditText(serializeSrtCues(nextCues));
+  }
+
+  // Enter로 자막을 나누는 것의 반대 — 다음 자막의 내용을 현재 자막 뒤로 당겨와 하나로 합친다.
+  // 시간 구간도 현재 시작 ~ 다음 끝으로 합쳐진다(사용자 질문: "다음장면에 있는것을 앞으로
+  // 당겨와서 붙일때는 어떻게 하면되?").
+  function mergeWithNextCue() {
+    if (selectedCueIdx >= cues.length - 1) return;
+    const current = cues[selectedCueIdx];
+    const next = cues[selectedCueIdx + 1];
+    const merged: SrtCue = {
+      start: current.start,
+      end: next.end,
+      text: `${current.text} ${next.text}`.trim(),
+      textStart: current.textStart,
+      textEnd: next.textEnd,
+    };
+    const nextCues = [...cues];
+    nextCues.splice(selectedCueIdx, 2, merged);
     setEditText(serializeSrtCues(nextCues));
   }
 
@@ -483,6 +505,13 @@ function LabeledFieldSection({
                           화면 속 자막을 직접 클릭해서 고치세요 — 다른 곳 클릭하면 저장됩니다. <b>Enter</b>는 커서 뒷부분을 다음 화면으로 넘기고,{' '}
                           <b>Shift+Enter</b>는 같은 화면 안에서 줄바꿈만 합니다.
                         </p>
+                        <button
+                          onClick={mergeWithNextCue}
+                          disabled={selectedCueIdx >= cues.length - 1}
+                          className="text-[10px] font-bold text-blue-600 hover:underline disabled:opacity-30 disabled:no-underline disabled:cursor-not-allowed text-left"
+                        >
+                          ▸ 다음 자막 내용 당겨와 합치기
+                        </button>
                         <div className="flex gap-1">
                           <button
                             onClick={() => updatePreviewAlign('left')}
