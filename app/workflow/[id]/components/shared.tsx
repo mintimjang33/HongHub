@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SceneBlock, Site, Step } from '../types';
 import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById } from '../utils';
 
@@ -717,6 +717,55 @@ function classifyScene(imagePrompt: string, tabs: { label: string; keywords: str
   }, []);
 }
 
+// 2026-09-16 추가 — 사용자 요청: "13단계에서 가장 왼쪽에 srt자막이 순서대로 아래로 나열되어야해".
+// 12번에서 만든 SRT 원문(초 단위 타임코드)을 {start,end,text}로 파싱한다 — 아래 표의 맨 왼쪽 열이
+// 이 배열을 보고 각 장면 시간대에 해당하는 실제 나레이션 문장을 찾아 보여준다. step13-14-
+// LabeledLinksPanel.tsx의 parseSrtCues와 파싱 로직은 같지만(파일이 달라 공용 유틸로 뽑지 않고
+// 이 화면에 맞게 별도로 둠 — 여긴 편집 위치(textStart/textEnd)가 필요 없이 텍스트만 필요하다),
+// 여기서는 텍스트만 필요해서 훨씬 단순하다.
+type SrtLine = { start: number; end: number; text: string };
+function parseSrtLines(srt: string): SrtLine[] {
+  if (!srt) return [];
+  const toSec = (t: string) => {
+    const m = t.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
+    if (!m) return 0;
+    return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10) + parseInt(m[4], 10) / 1000;
+  };
+  return srt
+    .split(/\r?\n\r?\n+/)
+    .map((block) => {
+      const rows = block.split(/\r?\n/).filter((l) => l.trim());
+      const timeLine = rows.find((l) => l.includes('-->'));
+      if (!timeLine) return null;
+      const [startStr, endStr] = timeLine.split('-->');
+      const text = rows.slice(rows.indexOf(timeLine) + 1).join(' ').trim();
+      if (!startStr || !endStr || !text) return null;
+      return { start: toSec(startStr), end: toSec(endStr), text };
+    })
+    .filter((l): l is SrtLine => l !== null);
+}
+
+// 장면의 time 문자열("0:00-0:04", formatTimeWithDuration이 읽는 것과 같은 형식)을 초 단위로 변환.
+function parseSceneTimeRange(time: string): [number, number] | null {
+  const m = time.match(/^(\d+):(\d+)\s*[-~]\s*(\d+):(\d+)$/);
+  if (!m) return null;
+  const start = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  const end = parseInt(m[3], 10) * 60 + parseInt(m[4], 10);
+  return [start, end];
+}
+
+// 장면 시간대와 겹치는 SRT 줄들의 텍스트를 순서대로 이어붙인다 — 초 단위 경계가 딱 안 맞아도
+// 놓치지 않도록 "자막 줄 시작 < 장면 끝 && 자막 줄 끝 > 장면 시작"으로 느슨하게 겹침을 판정한다.
+function subtitleForSceneTime(time: string, srtLines: SrtLine[]): string {
+  const range = parseSceneTimeRange(time);
+  if (!range || srtLines.length === 0) return '';
+  const [sStart, sEnd] = range;
+  return srtLines
+    .filter((l) => l.start < sEnd && l.end > sStart)
+    .map((l) => l.text)
+    .join(' ');
+}
+
 // 6번 장면 프롬프트 편집 UI — 예전엔 전체를 통짜 텍스트로 붙여넣는 방식뿐이었는데, 장면 하나씩
 // 추가/수정/삭제할 수 있게 바꿨다. 저장 시엔 여전히 scenePrompts 문자열 전체를 부모에 돌려준다
 // (백엔드/파싱 로직은 그대로 두고 편집 UX만 바꾼 것).
@@ -725,6 +774,7 @@ export function SceneEditorList({
   onSave,
   saving,
   characterTabs = [],
+  srtText = '',
 }: {
   scenePrompts: string;
   onSave: (text: string) => void | Promise<void>;
@@ -732,8 +782,13 @@ export function SceneEditorList({
   // 2026-09-12 추가 — 현재 선택된 캐릭터 프리셋의 tabs(CharacterStylePreset.tabs). 비어있으면
   // (탭 분류가 필요 없는 프리셋, 예: 포동이/식빵맨) 탭 바 자체를 안 보여준다.
   characterTabs?: { label: string; keywords: string[] }[];
+  // 2026-09-16 추가 — 12번에서 최종 선택된 자막의 원문(ImageVideoPanel이 이미 fetch해서 갖고
+  // 있는 srtText를 그대로 넘겨줌). 비어있으면(아직 안 불러왔거나 자막 자체가 없음) 맨 왼쪽 열이
+  // 그냥 "—"로 표시된다.
+  srtText?: string;
 }) {
   const scenes = parseSceneBlocks(scenePrompts);
+  const srtLines = useMemo(() => parseSrtLines(srtText), [srtText]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 장면 추가 중
   const [draft, setDraft] = useState<SceneBlock>(EMPTY_SCENE_DRAFT);
   // 2026-09-10 추가 — 장면이미지 썸네일을 클릭하면 이 인덱스로 SceneImageModal을 연다. null=닫힘.
@@ -871,6 +926,10 @@ export function SceneEditorList({
           <table className="w-full text-[11px] border-collapse min-w-[720px]">
             <thead>
               <tr className="bg-neutral-50 text-neutral-400">
+                {/* 2026-09-16 추가 — 사용자 요청: "13단계에서 가장 왼쪽에 srt자막이 순서대로
+                    아래로 나열되어야해". 장면 순서 그대로 위→아래로 나오므로 이 열만 봐도 SRT를
+                    순서대로 읽어 내려가는 것과 같다. */}
+                <th className="text-left font-black px-2 py-1.5 w-40">자막(SRT)</th>
                 <th className="text-left font-black px-2 py-1.5 w-28">장면</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">타임</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">장면이미지</th>
@@ -884,12 +943,28 @@ export function SceneEditorList({
               {filteredWithIndex.map(({ s, idx }, pos) =>
                 editingIndex === idx ? (
                   <tr key={s.id || idx}>
-                    <td colSpan={7} className="p-1.5 bg-neutral-50">
+                    <td colSpan={8} className="p-1.5 bg-neutral-50">
                       <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
                     </td>
                   </tr>
                 ) : (
                   <tr key={s.id || idx} className="border-t border-neutral-100 align-top">
+                    {/* 2026-09-16 추가 — 이 장면 시간대와 겹치는 SRT 원문 줄(들)을 그대로 보여준다.
+                        srtText가 아직 없으면(로딩 중/자막 미등록) "—"로 둔다. */}
+                    <td className="px-2 py-1.5">
+                      {srtText ? (
+                        (() => {
+                          const text = subtitleForSceneTime(s.time, srtLines);
+                          return text ? (
+                            <p className="text-neutral-600 leading-relaxed line-clamp-3">{text}</p>
+                          ) : (
+                            <span className="text-neutral-300">(매칭 없음)</span>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-neutral-300">—</span>
+                      )}
+                    </td>
                     <td className="px-2 py-1.5">
                       <span className="font-mono text-neutral-400">{s.id}</span>
                       {s.title && <div className="font-bold truncate max-w-[7rem]">{s.title}</div>}
