@@ -1,9 +1,35 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Site, ContentUnit, LabeledItem, LabeledField } from '../types';
 import { normalizeLabeledItems, uploadSceneMedia } from '../utils';
 import { CopyButton } from './shared';
+
+// SRT 타임코드("00:00:04,000")를 초 단위 숫자로 변환.
+function srtTimeToSeconds(t: string): number {
+  const m = t.trim().match(/(\d+):(\d+):(\d+)[,.](\d+)/);
+  if (!m) return 0;
+  return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10) + parseInt(m[4], 10) / 1000;
+}
+
+type SrtCue = { start: number; end: number; text: string };
+
+// SRT 텍스트를 { 시작초, 끝초, 자막텍스트 } 배열로 파싱 — 미리보기에서 현재 재생 시각에 맞는
+// 자막 한 줄을 찾는 용도. 형식이 깨져 있으면(타임코드 줄이 없는 블록 등) 그 블록만 건너뛴다.
+function parseSrtCues(text: string): SrtCue[] {
+  return text
+    .split(/\r?\n\r?\n+/)
+    .map((block) => {
+      const lines = block.split(/\r?\n/).filter((l) => l.trim());
+      const timeLine = lines.find((l) => l.includes('-->'));
+      if (!timeLine) return null;
+      const [startStr, endStr] = timeLine.split('-->');
+      const textLines = lines.slice(lines.indexOf(timeLine) + 1);
+      if (!startStr || !endStr) return null;
+      return { start: srtTimeToSeconds(startStr), end: srtTimeToSeconds(endStr), text: textLines.join('\n') };
+    })
+    .filter((c): c is SrtCue => c !== null);
+}
 
 // 콘텐츠(유닛) 하나의 나레이션 또는 자막 중 한 필드만 다루는 조각 — 링크 붙여넣기와 파일 업로드
 // (uploadSceneMedia 재사용) 둘 다 지원, 라벨(예: "원본"/"1.3배속", "SRT"/"수정본")로 여러 후보를
@@ -14,6 +40,12 @@ import { CopyButton } from './shared';
 // srt 편집기를 구현 못하냐고"). 파일 내용을 그대로 fetch해서 textarea에 띄우고, 저장하면 그
 // 텍스트를 새 파일로 업로드해서 같은 항목의 url만 교체한다(라벨 유지) — 별도 항목을 추가하는
 // 게 아니라 "그 자리에서 고치는" 동작이라 저장 시 원래 있던 항목을 대체한다.
+// 같은 유닛의 나레이션 목록을 같이 받아서, 편집 중 오디오를 재생하며 16:9/9:16 화면 비율
+// 미리보기 안에 현재 재생 시각에 맞는 자막 한 줄을 실시간으로 띄운다(사용자 요청: "16:9 나
+// 9:16 화면에서 보면서 편집을 할수있었으면 해") — 정렬/줄수/배경색/글자색도 미리보기에서
+// 바로 바꿔볼 수 있다(사용자 요청: "왼쪽정열,우측정열,가운데정열 / 글자줄 1줄,2줄 / 배경색상 /
+// 글자색상"). 이 스타일 컨트롤은 지금은 미리보기 전용이다 — 저장은 자막 텍스트만 하고, 이
+// 스타일 값 자체를 DB에 저장하거나 실제 렌더링(캡션 프리셋)에 반영하지는 않는다.
 function LabeledFieldSection({
   site,
   unit,
@@ -36,6 +68,7 @@ function LabeledFieldSection({
   textEditable?: boolean;
 }) {
   const items = normalizeLabeledItems(unit[fieldKey]);
+  const narrationItems = normalizeLabeledItems(unit.narrationUrls);
   const [linkDraft, setLinkDraft] = useState('');
   const [linkLabelDraft, setLinkLabelDraft] = useState('');
   const [saving, setSaving] = useState(false);
@@ -45,6 +78,16 @@ function LabeledFieldSection({
   const [editText, setEditText] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState('');
+  const [previewAspect, setPreviewAspect] = useState<'16:9' | '9:16'>('9:16');
+  const [previewTime, setPreviewTime] = useState(0);
+  const [previewNarrationUrl, setPreviewNarrationUrl] = useState('');
+  const [previewAlign, setPreviewAlign] = useState<'left' | 'center' | 'right'>('center');
+  const [previewLines, setPreviewLines] = useState<1 | 2>(2);
+  const [previewBg, setPreviewBg] = useState('#000000');
+  const [previewColor, setPreviewColor] = useState('#ffffff');
+
+  const cues = useMemo(() => parseSrtCues(editText), [editText]);
+  const activeCue = useMemo(() => cues.find((c) => previewTime >= c.start && previewTime <= c.end), [cues, previewTime]);
 
   async function saveItems(newItems: LabeledItem[]) {
     setSaving(true);
@@ -97,6 +140,8 @@ function LabeledFieldSection({
     setEditError('');
     setEditLoading(true);
     setEditingIdx(idx);
+    setPreviewTime(0);
+    setPreviewNarrationUrl(narrationItems[0]?.url || '');
     try {
       const res = await fetch(items[idx].url);
       if (!res.ok) throw new Error(`파일을 못 불러왔어요 (${res.status})`);
@@ -164,17 +209,128 @@ function LabeledFieldSection({
                 </button>
               </div>
               {textEditable && editingIdx === idx && (
-                <div className="border border-blue-200 rounded-lg p-2 bg-blue-50/30 space-y-1.5">
+                <div className="border border-blue-200 rounded-lg p-2 bg-blue-50/30 space-y-2">
                   {editLoading && editText === '' ? (
                     <p className="text-[10px] text-neutral-400">불러오는 중...</p>
                   ) : (
-                    <textarea
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                      rows={14}
-                      className="w-full border border-neutral-200 rounded px-2 py-1.5 text-[11px] font-mono bg-white"
-                      placeholder="1&#10;00:00:00,000 --> 00:00:04,000&#10;자막 텍스트"
-                    />
+                    <div className="flex gap-3 flex-wrap">
+                      <div className="shrink-0 space-y-1.5">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setPreviewAspect('16:9')}
+                            className={`text-[10px] font-black px-2 py-1 rounded ${previewAspect === '16:9' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
+                          >
+                            16:9
+                          </button>
+                          <button
+                            onClick={() => setPreviewAspect('9:16')}
+                            className={`text-[10px] font-black px-2 py-1 rounded ${previewAspect === '9:16' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
+                          >
+                            9:16
+                          </button>
+                        </div>
+                        <div
+                          className="bg-neutral-900 rounded-lg overflow-hidden flex items-end relative"
+                          style={{
+                            width: previewAspect === '16:9' ? 220 : 124,
+                            height: previewAspect === '16:9' ? 124 : 220,
+                            justifyContent: previewAlign === 'left' ? 'flex-start' : previewAlign === 'right' ? 'flex-end' : 'center',
+                          }}
+                        >
+                          <p
+                            className="text-[11px] font-bold px-2 pb-3 leading-snug whitespace-pre-wrap overflow-hidden"
+                            style={{
+                              textAlign: previewAlign,
+                              color: previewColor,
+                              backgroundColor: previewBg,
+                              display: '-webkit-box',
+                              WebkitLineClamp: previewLines,
+                              WebkitBoxOrient: 'vertical',
+                              maxWidth: '100%',
+                            }}
+                          >
+                            {activeCue?.text || ''}
+                          </p>
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setPreviewAlign('left')}
+                            className={`text-[10px] font-black px-1.5 py-1 rounded ${previewAlign === 'left' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
+                          >
+                            좌
+                          </button>
+                          <button
+                            onClick={() => setPreviewAlign('center')}
+                            className={`text-[10px] font-black px-1.5 py-1 rounded ${previewAlign === 'center' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
+                          >
+                            중앙
+                          </button>
+                          <button
+                            onClick={() => setPreviewAlign('right')}
+                            className={`text-[10px] font-black px-1.5 py-1 rounded ${previewAlign === 'right' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
+                          >
+                            우
+                          </button>
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setPreviewLines(1)}
+                            className={`text-[10px] font-black px-1.5 py-1 rounded ${previewLines === 1 ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
+                          >
+                            1줄
+                          </button>
+                          <button
+                            onClick={() => setPreviewLines(2)}
+                            className={`text-[10px] font-black px-1.5 py-1 rounded ${previewLines === 2 ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
+                          >
+                            2줄
+                          </button>
+                        </div>
+                        <div className="flex gap-2 items-center">
+                          <label className="flex items-center gap-1 text-[10px] font-bold text-neutral-500">
+                            배경
+                            <input type="color" value={previewBg} onChange={(e) => setPreviewBg(e.target.value)} className="w-6 h-6 border border-neutral-200 rounded" />
+                          </label>
+                          <label className="flex items-center gap-1 text-[10px] font-bold text-neutral-500">
+                            글자
+                            <input type="color" value={previewColor} onChange={(e) => setPreviewColor(e.target.value)} className="w-6 h-6 border border-neutral-200 rounded" />
+                          </label>
+                        </div>
+                        {narrationItems.length > 0 ? (
+                          <div className="space-y-1">
+                            {narrationItems.length > 1 && (
+                              <select
+                                value={previewNarrationUrl}
+                                onChange={(e) => setPreviewNarrationUrl(e.target.value)}
+                                className="w-full border border-neutral-200 rounded px-1 py-1 text-[10px]"
+                              >
+                                {narrationItems.map((n, i) => (
+                                  <option key={i} value={n.url}>
+                                    {n.label || `나레이션 ${i + 1}`}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                            <audio
+                              key={previewNarrationUrl}
+                              src={previewNarrationUrl}
+                              controls
+                              onTimeUpdate={(e) => setPreviewTime(e.currentTarget.currentTime)}
+                              style={{ width: previewAspect === '16:9' ? 220 : 124 }}
+                            />
+                          </div>
+                        ) : (
+                          <p className="text-[9px] text-neutral-400">나레이션이 등록돼야 오디오랑 같이 미리볼 수 있어요</p>
+                        )}
+                      </div>
+                      <textarea
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        rows={14}
+                        className="flex-1 min-w-[220px] border border-neutral-200 rounded px-2 py-1.5 text-[11px] font-mono bg-white"
+                        placeholder="1&#10;00:00:00,000 --> 00:00:04,000&#10;자막 텍스트"
+                      />
+                    </div>
                   )}
                   {editError && <p className="text-[10px] text-red-500 font-bold">{editError}</p>}
                   <div className="flex gap-1.5">
