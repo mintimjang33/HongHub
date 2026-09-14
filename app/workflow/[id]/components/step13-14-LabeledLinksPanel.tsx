@@ -56,10 +56,10 @@ function serializeSrtCues(cues: SrtCue[]): string {
 // 자막을 실시간으로 띄운다. 미리보기 화면의 자막 텍스트 자체가 contentEditable이라 그 자리에서
 // 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만 바뀌고 전체 SRT가 다시 합쳐진다. Enter는 커서
 // 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다.
-// 2026-09-15(6차) — 미리보기에서 고를 나레이션(예: "제미나이 재생성(Puck)")이 편집 화면을 다시
-// 열 때마다 첫 번째 항목("원본")으로 초기화되던 걸 고쳤다(사용자 지적: "이거 마지막했던걸로
-// 자동 저장하게 해줘~ 자꾸 바뀌고 있어서"). 콘텐츠(유닛)별로 localStorage에 마지막 선택을 저장해
-// 다음에 편집을 열 때 그대로 이어간다.
+// 2026-09-15(7차) — ‹/› 버튼으로 수동 이동해도 화면이 안 바뀌는 버그 수정(사용자 지적: "버튼을
+// 눌러도 다음화면으로 안가"). 원인은 onAudioTimeUpdate가 일시정지 상태에서도 계속 돌아서, 버튼
+// 클릭 직후 currentTime 대입이 일으키는 비동기 timeupdate 이벤트가 방금 바뀐 selectedCueIdx를
+// 즉시 원래 값으로 되돌리는 경쟁 상태였다 — 재생 중일 때만 자동 추적하도록 좁혀서 해결.
 function LabeledFieldSection({
   site,
   unit,
@@ -113,11 +113,14 @@ function LabeledFieldSection({
     setPreviewTime(cues[idx].start);
   }
 
-  // 오디오가 재생되면서 현재 시각에 맞는 큐로 선택을 자동으로 따라가게 한다 — 사용자가 재생만
-  // 해도 화면 미리보기 캡션이 알아서 넘어간다. prev/next 버튼으로 수동 이동한 직후에는 오디오
-  // 위치가 그 큐 시작점으로 맞춰지므로 자연스럽게 이어진다.
+  // 오디오가 "재생 중"일 때만 현재 시각에 맞는 큐로 선택을 자동으로 따라가게 한다. 이걸 일시정지
+  // 상태에서도 무조건 돌리면, ‹/› 버튼으로 수동 이동시키자마자 오디오의 currentTime 대입이 비동기로
+  // timeupdate 이벤트를 발생시켜 방금 바꾼 selectedCueIdx를 즉시 원래 값으로 되돌려버리는 경쟁
+  // 상태가 생긴다(실제로는 바뀌었다가 같은 렌더 사이클 안에서 도로 원상복구됐던 것). 재생 중일
+  // 때만 자동 추적하도록 좁혀서 이 충돌을 없앤다.
   function onAudioTimeUpdate(t: number) {
     setPreviewTime(t);
+    if (audioRef.current?.paused) return;
     const idx = cues.findIndex((c) => t >= c.start && t <= c.end);
     if (idx !== -1 && idx !== selectedCueIdx) setSelectedCueIdx(idx);
   }
