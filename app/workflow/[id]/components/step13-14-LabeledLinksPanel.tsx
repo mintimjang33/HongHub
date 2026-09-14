@@ -55,14 +55,11 @@ function serializeSrtCues(cues: SrtCue[]): string {
 // srt 편집기를 구현 못하냐고"). 나레이션 목록을 같이 받아서, 편집 중 오디오를 재생하며 16:9/9:16
 // 화면 비율 미리보기 안에 현재 재생 시각에 맞는 자막을 실시간으로 띄운다. 미리보기 화면의 자막
 // 텍스트 자체가 contentEditable이라 그 자리에서 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만
-// 바뀌고 전체 SRT가 다시 합쳐진다. 이전/다음 자막 버튼으로 오디오 없이도 큐 단위 이동 가능,
-// 오디오 재생 시 현재 시각의 큐로 자동 이동.
-// 2026-09-15(4차) — 배경색 있는 편집 요소를 block/-webkit-box로 만들었더니 2줄일 때도 배경이
-// 한 덩어리 사각형으로 뭉쳐 나왔다(사용자 지적: "텍스트 뒤에가 보통 저렇게 한뭉텅이로 나오나?
-// 텍스트가 2줄이면 2줄로 표현되지 않아?"). 실제 자막처럼 줄마다 독립된 배경이 나오게 하려면
-// 배경이 있는 요소가 순수 inline이어야 한다 — 정렬/줄바꿈 폭은 바깥 block div가 담당하고, 안쪽
-// contentEditable span은 display:inline + box-decoration-break:clone으로 바꿔서 각 줄이 따로
-// 배경 박스를 갖게 했다.
+// 바뀌고 전체 SRT가 다시 합쳐진다.
+// 2026-09-15(5차) — Enter를 누르면 커서 뒷부분을 다음 자막 화면으로 분리하고(시간은 원래 구간을
+// 글자수 비율로 나눠 배정), Shift+Enter는 같은 화면 안에서 줄바꿈만 하도록 구분했다(사용자 요청:
+// "이 글씨 한줄이 다음화면으로 넘어가려면 어떻게 해야해?" / "현재는 엔터를 치면 1줄이 2줄로 되는
+// 방식이잖아" / "시프트 엔터는 줄바꿈이고 엔터는 다음화면으로 이동").
 function LabeledFieldSection({
   site,
   unit,
@@ -130,6 +127,37 @@ function LabeledFieldSection({
   function updateSelectedCueText(newText: string) {
     if (!cues[selectedCueIdx]) return;
     const nextCues = cues.map((c, i) => (i === selectedCueIdx ? { ...c, text: newText } : c));
+    setEditText(serializeSrtCues(nextCues));
+  }
+
+  // contentEditable 안에서 커서가 있는 문자 위치를 텍스트 오프셋으로 계산한다(중첩 노드가 있어도
+  // 안전하도록 Range.toString() 길이로 계산하는 표준적인 방법).
+  function getCaretOffset(el: HTMLElement): number {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.focusNode) return el.textContent?.length ?? 0;
+    const range = sel.getRangeAt(0).cloneRange();
+    range.selectNodeContents(el);
+    range.setEnd(sel.focusNode, sel.focusOffset);
+    return range.toString().length;
+  }
+
+  // 엔터를 누르면 같은 화면 안에서 줄바꿈하는 대신, 커서 위치에서 자막을 둘로 쪼개 뒷부분을
+  // 다음 자막 화면으로 넘긴다. 새 큐의 시간은 원래 큐의 구간을 글자수 비율로 나눠서 대략적으로
+  // 배정한다 — 실제 발화 속도와 정확히 안 맞을 수 있으니 필요하면 원문 SRT(고급)에서 타임코드를
+  // 손으로 다듬을 것.
+  function splitSelectedCueAtCaret(el: HTMLElement) {
+    const cue = cues[selectedCueIdx];
+    if (!cue) return;
+    const offset = getCaretOffset(el);
+    const full = el.textContent || '';
+    const before = full.slice(0, offset).trim();
+    const after = full.slice(offset).trim();
+    if (!after) return; // 커서가 맨 끝이면 나눌 게 없다
+    const totalLen = before.length + after.length || 1;
+    const splitAt = cue.start + (cue.end - cue.start) * (before.length / totalLen);
+    const nextCues = [...cues];
+    nextCues[selectedCueIdx] = { ...cue, end: splitAt, text: before };
+    nextCues.splice(selectedCueIdx + 1, 0, { start: splitAt, end: cue.end, text: after });
     setEditText(serializeSrtCues(nextCues));
   }
 
@@ -321,10 +349,17 @@ function LabeledFieldSection({
                             }}
                           >
                             <span
-                              key={selectedCueIdx}
+                              key={`${selectedCueIdx}-${cues.length}`}
                               contentEditable
                               suppressContentEditableWarning
                               onBlur={(e) => updateSelectedCueText(e.currentTarget.textContent || '')}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  splitSelectedCueAtCaret(e.currentTarget);
+                                }
+                                // Shift+Enter는 기본 동작(줄바꿈 삽입)을 그대로 둔다.
+                              }}
                               className="font-bold leading-snug outline-none focus:ring-2 focus:ring-blue-400"
                               style={{
                                 display: 'inline',
@@ -342,7 +377,10 @@ function LabeledFieldSection({
                             </span>
                           </div>
                         </div>
-                        <p className="text-[9px] text-neutral-400">화면 속 자막을 직접 클릭해서 고치세요 — 다른 곳 클릭하면 저장됩니다.</p>
+                        <p className="text-[9px] text-neutral-400">
+                          화면 속 자막을 직접 클릭해서 고치세요 — 다른 곳 클릭하면 저장됩니다. <b>Enter</b>는 커서 뒷부분을 다음 화면으로 넘기고,{' '}
+                          <b>Shift+Enter</b>는 같은 화면 안에서 줄바꿈만 합니다.
+                        </p>
                         <div className="flex gap-1">
                           <button
                             onClick={() => setPreviewAlign('left')}
