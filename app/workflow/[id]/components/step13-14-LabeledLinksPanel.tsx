@@ -53,19 +53,16 @@ function serializeSrtCues(cues: SrtCue[]): string {
 // 2026-09-15 추가 — textEditable(자막 섹션에서만 true로 넘김): 외부 프로그램(Subtitle Edit 등)
 // 없이도 화면에서 바로 SRT 텍스트를 고칠 수 있게 "편집" 버튼을 추가했다(사용자 요청: "12단계에
 // srt 편집기를 구현 못하냐고"). 나레이션 목록을 같이 받아서, 편집 중 오디오를 재생하며 16:9/9:16
-// 화면 비율 미리보기 안에 현재 재생 시각에 맞는 자막을 실시간으로 띄운다(사용자 요청: "16:9 나
-// 9:16 화면에서 보면서 편집을 할수있었으면 해"). 배경색은 프레임 전체가 아니라 자막 텍스트 자체에
-// fit-content 너비로 붙는다(실제 자막 스타일과 동일하게 줄 너비만큼만 색칠 — 사용자 지적: "보통
-// 이렇게 나오지 않자나 텍스트 뒤에만 색칠이 있지"). 글자 크기 슬라이더도 추가.
-// 2026-09-15(2차) — 미리보기 화면의 자막 텍스트 자체를 contentEditable로 만들어 그 자리에서
-// 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만 텍스트가 바뀌고 전체 SRT가 다시 합쳐지도록
-// 했다(사용자 지적: "편집을 화면에서 하는게 아니네?? 화면에서 편집을 할수있게 해줘"). 이전/다음
-// 자막 버튼으로 오디오 재생 없이도 큐 단위로 넘나들 수 있고, 오디오를 재생하면 현재 시각에 맞는
-// 큐로 자동 이동한다.
-// 2026-09-15(3차) — 미리보기와 원문 SRT 영역을 좌우 flex로 나눴더니, 원문 영역을 <details>로
-// 접어도 flex-1이 남은 가로 공간을 계속 차지해서 미리보기 옆에 거대한 빈 공간이 남았다(사용자
-// 지적: "이게 크게한거야??? / 오른쪽이 다 비었는데?"). 좌우 2열 대신 위아래 1열로 바꾸고(미리보기
-// 위, 접힌 원문 SRT 아래), 미리보기 자체도 더 키웠다(400/225 -> 480/270).
+// 화면 비율 미리보기 안에 현재 재생 시각에 맞는 자막을 실시간으로 띄운다. 미리보기 화면의 자막
+// 텍스트 자체가 contentEditable이라 그 자리에서 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만
+// 바뀌고 전체 SRT가 다시 합쳐진다. 이전/다음 자막 버튼으로 오디오 없이도 큐 단위 이동 가능,
+// 오디오 재생 시 현재 시각의 큐로 자동 이동.
+// 2026-09-15(4차) — 배경색 있는 편집 요소를 block/-webkit-box로 만들었더니 2줄일 때도 배경이
+// 한 덩어리 사각형으로 뭉쳐 나왔다(사용자 지적: "텍스트 뒤에가 보통 저렇게 한뭉텅이로 나오나?
+// 텍스트가 2줄이면 2줄로 표현되지 않아?"). 실제 자막처럼 줄마다 독립된 배경이 나오게 하려면
+// 배경이 있는 요소가 순수 inline이어야 한다 — 정렬/줄바꿈 폭은 바깥 block div가 담당하고, 안쪽
+// contentEditable span은 display:inline + box-decoration-break:clone으로 바꿔서 각 줄이 따로
+// 배경 박스를 갖게 했다.
 function LabeledFieldSection({
   site,
   unit,
@@ -283,11 +280,10 @@ function LabeledFieldSection({
                           )}
                         </div>
                         <div
-                          className="bg-neutral-900 rounded-lg overflow-hidden flex items-end relative"
+                          className="bg-neutral-900 rounded-lg overflow-hidden flex flex-col justify-end relative"
                           style={{
                             width: previewAspect === '16:9' ? 480 : 270,
                             height: previewAspect === '16:9' ? 270 : 480,
-                            justifyContent: previewAlign === 'left' ? 'flex-start' : previewAlign === 'right' ? 'flex-end' : 'center',
                           }}
                         >
                           {cues.length > 1 && (
@@ -310,30 +306,41 @@ function LabeledFieldSection({
                               </button>
                             </>
                           )}
-                          <p
-                            key={selectedCueIdx}
-                            contentEditable
-                            suppressContentEditableWarning
-                            onBlur={(e) => updateSelectedCueText(e.currentTarget.textContent || '')}
-                            className="font-bold leading-snug whitespace-pre-wrap overflow-hidden mb-3 outline-none focus:ring-2 focus:ring-blue-400"
+                          {/* 줄마다 배경이 따로 붙는 실제 자막 느낌을 내려면 배경이 있는 요소가
+                              inline이어야 한다(block/-webkit-box는 여러 줄을 하나의 사각형으로
+                              뭉쳐버림). 바깥 div로 정렬/줄바꿈 폭을 잡고, 실제 편집 가능한 span은
+                              inline + box-decoration-break: clone으로 줄마다 독립된 배경 박스가
+                              나오게 한다. */}
+                          <div
+                            className="px-2 pb-3"
                             style={{
                               textAlign: previewAlign,
-                              color: previewColor,
-                              backgroundColor: previewBg,
-                              fontSize: previewFontSize,
-                              display: '-webkit-box',
-                              WebkitLineClamp: previewLines,
-                              WebkitBoxOrient: 'vertical',
-                              width: 'fit-content',
-                              maxWidth: 'calc(100% - 16px)',
-                              padding: '2px 6px',
-                              borderRadius: 3,
-                              minWidth: 20,
-                              cursor: 'text',
+                              maxWidth: previewLines === 1 ? '92%' : '70%',
+                              marginLeft: previewAlign === 'right' ? 'auto' : previewAlign === 'center' ? 'auto' : undefined,
+                              marginRight: previewAlign === 'left' ? 'auto' : previewAlign === 'center' ? 'auto' : undefined,
                             }}
                           >
-                            {selectedCue?.text || ''}
-                          </p>
+                            <span
+                              key={selectedCueIdx}
+                              contentEditable
+                              suppressContentEditableWarning
+                              onBlur={(e) => updateSelectedCueText(e.currentTarget.textContent || '')}
+                              className="font-bold leading-snug outline-none focus:ring-2 focus:ring-blue-400"
+                              style={{
+                                display: 'inline',
+                                color: previewColor,
+                                backgroundColor: previewBg,
+                                fontSize: previewFontSize,
+                                padding: '2px 6px',
+                                borderRadius: 3,
+                                boxDecorationBreak: 'clone',
+                                WebkitBoxDecorationBreak: 'clone',
+                                cursor: 'text',
+                              }}
+                            >
+                              {selectedCue?.text || ''}
+                            </span>
+                          </div>
                         </div>
                         <p className="text-[9px] text-neutral-400">화면 속 자막을 직접 클릭해서 고치세요 — 다른 곳 클릭하면 저장됩니다.</p>
                         <div className="flex gap-1">
@@ -373,14 +380,14 @@ function LabeledFieldSection({
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px] font-bold text-neutral-500 shrink-0">글자크기</span>
                           <input
-                            type="range"
-                            min={10}
-                            max={28}
+                            type="number"
+                            min={8}
+                            max={60}
                             value={previewFontSize}
-                            onChange={(e) => setPreviewFontSize(Number(e.target.value))}
-                            className="flex-1"
+                            onChange={(e) => setPreviewFontSize(Number(e.target.value) || previewFontSize)}
+                            className="w-14 border border-neutral-200 rounded px-1.5 py-1 text-[10px]"
                           />
-                          <span className="text-[10px] text-neutral-400 w-6 shrink-0">{previewFontSize}</span>
+                          <span className="text-[10px] text-neutral-400">px</span>
                         </div>
                         <div className="flex gap-2 items-center">
                           <label className="flex items-center gap-1 text-[10px] font-bold text-neutral-500">
