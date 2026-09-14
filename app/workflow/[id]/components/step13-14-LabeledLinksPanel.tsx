@@ -80,9 +80,9 @@ const DEFAULT_PREVIEW_STYLE: PreviewStyle = { align: 'center', lines: 2, fontSiz
 // 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다. 원문
 // SRT(고급) 보기는 미리보기 오른쪽에 고정 너비(w-72)로 기본 펼쳐서 둔다(사용자 요청: "화면
 // 오른쪽 끝에 자막 원문이 보이게 해줘"). 바깥 컨테이너는 flex-wrap 없이 overflow-x-auto만 줘서
-// 컨테이너 폭이 좁아도 줄바꿈으로 아래에 떨어지지 않고 항상 오른쪽에 붙는다(사용자 지적: 좁은
-// 화면에서 flex-wrap 때문에 원문 SRT 패널이 미리보기 밑으로 내려가버렸다 — "왜 오른쪽으로
-// 못보내는거야???"). 폭이 부족하면 가로 스크롤로 처리한다.
+// 컨테이너 폭이 좁아도 줄바꿈으로 아래에 떨어지지 않고 항상 오른쪽에 붙는다. 왼쪽 칼럼은 미리보기
+// 박스와 같은 고정 폭(width: 480/270)을 줘서 안내 문구 같은 길이가 불확실한 텍스트가 flex item을
+// 옆으로 넓혀버려 오른쪽 패널이 뒤로 밀리는 것도 막는다(사용자 지적: "공간이 너무 남잖아").
 //
 // 정렬/줄수/글자크기/배경·글자색(previewAlign 등)은 실제 저장 필드가 아니라 미리보기 전용 값이라,
 // 처음엔 컴포넌트 state 기본값으로만 뒀더니 편집창을 닫았다 열 때마다 초기값(중앙/2줄/13px)으로
@@ -389,7 +389,7 @@ function LabeledFieldSection({
                     <p className="text-[10px] text-neutral-400">불러오는 중...</p>
                   ) : (
                     <div className="flex gap-3 items-start overflow-x-auto">
-                      <div className="shrink-0 space-y-1.5">
+                      <div className="shrink-0 space-y-1.5" style={{ width: previewAspect === '16:9' ? 480 : 270 }}>
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setPreviewAspect('16:9')}
@@ -575,7 +575,11 @@ function LabeledFieldSection({
                         )}
                       </div>
                       <details open className="w-72 shrink-0">
-                        <summary className="text-[10px] font-bold text-neutral-400 cursor-pointer select-none mb-1">
+                        {/* 왼쪽 미리보기 칼럼은 "16:9/9:16" 버튼 줄(높이) + space-y-1.5 간격(6px)만큼
+                            내려간 곳에서 박스가 시작한다. summary 한 줄만으로는 그 높이가 안 맞아서
+                            원문 SRT 박스 상단이 미리보기 박스 상단보다 위에 떠 있었다(사용자 지적:
+                            "라인좀 맞춰주고") — summary에 같은 높이(h-7)+간격(mb-1.5)을 줘서 맞춘다. */}
+                        <summary className="h-7 flex items-center text-[10px] font-bold text-neutral-400 cursor-pointer select-none mb-1.5">
                           원문 SRT 직접 보기/수정 (고급)
                         </summary>
                         <textarea
