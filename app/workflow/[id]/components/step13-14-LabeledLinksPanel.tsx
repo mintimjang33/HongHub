@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Site, ContentUnit, LabeledItem, LabeledField } from '../types';
 import { normalizeLabeledItems, uploadSceneMedia } from '../utils';
 import { CopyButton } from './shared';
@@ -12,23 +12,35 @@ function srtTimeToSeconds(t: string): number {
   return parseInt(m[1], 10) * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10) + parseInt(m[4], 10) / 1000;
 }
 
-type SrtCue = { start: number; end: number; text: string };
+type SrtCue = { start: number; end: number; text: string; textStart: number; textEnd: number };
 
-// SRT 텍스트를 { 시작초, 끝초, 자막텍스트 } 배열로 파싱 — 미리보기에서 현재 재생 시각에 맞는
-// 자막 한 줄을 찾는 용도. 형식이 깨져 있으면(타임코드 줄이 없는 블록 등) 그 블록만 건너뛴다.
+// SRT 텍스트를 { 시작초, 끝초, 자막텍스트, 원문 안에서의 글자 위치 } 배열로 파싱 — 미리보기에서
+// 현재 재생 시각에 맞는 자막 한 줄을 찾는 용도이자, textStart/textEnd는 오른쪽 "원문 SRT" 패널을
+// 현재 선택된 큐 위치로 자동 스크롤시키는 데 쓴다. 형식이 깨져 있으면(타임코드 줄이 없는 블록 등)
+// 그 블록만 건너뛴다.
 function parseSrtCues(text: string): SrtCue[] {
-  return text
-    .split(/\r?\n\r?\n+/)
-    .map((block) => {
-      const lines = block.split(/\r?\n/).filter((l) => l.trim());
-      const timeLine = lines.find((l) => l.includes('-->'));
-      if (!timeLine) return null;
-      const [startStr, endStr] = timeLine.split('-->');
-      const textLines = lines.slice(lines.indexOf(timeLine) + 1);
-      if (!startStr || !endStr) return null;
-      return { start: srtTimeToSeconds(startStr), end: srtTimeToSeconds(endStr), text: textLines.join('\n') };
-    })
-    .filter((c): c is SrtCue => c !== null);
+  const sepRegex = /\r?\n\r?\n+/g;
+  const blocks: { start: number; end: number }[] = [];
+  let blockStart = 0;
+  let m: RegExpExecArray | null;
+  while ((m = sepRegex.exec(text))) {
+    blocks.push({ start: blockStart, end: m.index });
+    blockStart = m.index + m[0].length;
+  }
+  blocks.push({ start: blockStart, end: text.length });
+
+  const cues: SrtCue[] = [];
+  for (const { start, end } of blocks) {
+    const block = text.slice(start, end);
+    const lines = block.split(/\r?\n/).filter((l) => l.trim());
+    const timeLine = lines.find((l) => l.includes('-->'));
+    if (!timeLine) continue;
+    const [startStr, endStr] = timeLine.split('-->');
+    const textLines = lines.slice(lines.indexOf(timeLine) + 1);
+    if (!startStr || !endStr) continue;
+    cues.push({ start: srtTimeToSeconds(startStr), end: srtTimeToSeconds(endStr), text: textLines.join('\n'), textStart: start, textEnd: end });
+  }
+  return cues;
 }
 
 function secondsToSrtTime(t: number): string {
@@ -116,9 +128,26 @@ function LabeledFieldSection({
   const [previewFontSize, setPreviewFontSize] = useState(DEFAULT_PREVIEW_STYLE.fontSize);
   const [selectedCueIdx, setSelectedCueIdx] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const rawSrtRef = useRef<HTMLTextAreaElement>(null);
 
   const cues = useMemo(() => parseSrtCues(editText), [editText]);
   const selectedCue = cues[selectedCueIdx];
+
+  // 왼쪽 미리보기에서 자막을 넘기면(‹/› 버튼, 재생 중 자동 추적) 오른쪽 "원문 SRT" 패널도 같은
+  // 자막 위치로 스크롤을 맞춘다 — 줄바꿈 개수로 대략적인 세로 위치를 계산해서 스크롤만 이동시키고
+  // 포커스는 뺏지 않는다(포커스를 뺏으면 화면 자막을 편집 중일 때 방해가 된다). editText 자체가
+  // 바뀔 때(타이핑 중)는 재스크롤하지 않도록 selectedCueIdx/editingIdx에만 의존시킨다.
+  useEffect(() => {
+    const ta = rawSrtRef.current;
+    if (!ta || !selectedCue) return;
+    const before = editText.slice(0, selectedCue.textStart);
+    const lineIndex = (before.match(/\n/g) || []).length;
+    const style = window.getComputedStyle(ta);
+    const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2 || 16;
+    const target = lineIndex * lineHeight - ta.clientHeight / 2 + lineHeight;
+    ta.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCueIdx, editingIdx]);
 
   // 마지막으로 골랐던 나레이션/스타일을 편집 화면을 다시 열 때마다 기억한다 — 사용자 지적:
   // "이거 마지막했던걸로 자동 저장하게 해줘~ 자꾸 바뀌고 있어서" (나레이션), "이 설정값은 왜
@@ -546,6 +575,7 @@ function LabeledFieldSection({
                           원문 SRT 직접 보기/수정 (고급)
                         </summary>
                         <textarea
+                          ref={rawSrtRef}
                           value={editText}
                           onChange={(e) => setEditText(e.target.value)}
                           className="w-full border border-neutral-200 rounded px-2 py-1.5 text-[10px] font-mono bg-white"
