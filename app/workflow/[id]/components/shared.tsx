@@ -129,20 +129,31 @@ export function PresetPickerModal({
 // 그대로 쓰지 않고 별도로 만든 이유는, 장면은 캐릭터와 달리 여러 개를 순서대로 이어 보는
 // 용도가 필요하기 때문 — 이미지 아래에 장면 설명(제목/타임)을 같이 보여주고, 좌우 화살표
 // (또는 방향키)로 이전/다음 장면까지 모달을 안 닫고 바로 넘겨볼 수 있게 했다.
+// 2026-09-16(5차) 추가 — 사용자 요청: "모달에 자막번호와 번호별 자막도 표시가 되어야 함".
+// 씬 이미지/영상 모달은 지금까지 그 씬의 title/script/note만 보여줬는데, 한 씬이 SRT 줄
+// 여러 개에 걸쳐 있을 수 있어서(SceneEditorList의 rowSpan 그룹) 정확히 "몇 번 자막들"이
+// 이 씬에 묶여 있는지 모달만 보고는 알 수 없었다. SceneEditorList가 rowGroups에서 이미 계산해
+// 둔 자막 줄 정보(줄 번호 + 원문 텍스트)를 씬과 같은 순서의 배열로 모달에 넘겨서, 여기서
+// "#번호 텍스트" 목록으로 그대로 보여준다.
+type ModalSubLine = { lineIdx: number; text: string };
+
 export function SceneImageModal({
   scenes,
   index,
   onClose,
   onNavigate,
+  lineGroups,
 }: {
   scenes: SceneBlock[];
   index: number;
   onClose: () => void;
   onNavigate: (idx: number) => void;
+  lineGroups?: ModalSubLine[][];
 }) {
   const scene = scenes[index];
   const hasPrev = index > 0;
   const hasNext = index < scenes.length - 1;
+  const lines = lineGroups?.[index] || [];
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -209,6 +220,18 @@ export function SceneImageModal({
         </div>
         <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
           {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
+          {/* 2026-09-16(5차) 추가 — 이 씬에 묶인 SRT 자막 줄 번호 + 각 번호의 원문 텍스트.
+              13번 표에서 rowSpan으로 합쳐 보이던 줄들을 모달에서도 그대로 확인할 수 있게
+              한다(사용자 요청: "모달에 자막번호와 번호별 자막도 표시가 되어야 함"). */}
+          {lines.length > 0 && (
+            <div className="space-y-0.5">
+              {lines.map((l) => (
+                <p key={l.lineIdx} className="text-white/50 text-[10px] leading-relaxed">
+                  <span className="font-mono text-white/30">#{l.lineIdx + 1}</span> {l.text}
+                </p>
+              ))}
+            </div>
+          )}
           <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
           {/* 2026-09-13 (8차) 추가 — 사용자 지적: "지금 스샷에 있는 문구와 대본은 전혀 다른
               느낌" — title(장면 요약)만 보이고 실제 나레이션(대본)은 안 보여서, 화면 문구와
@@ -254,15 +277,18 @@ export function SceneVideoModal({
   index,
   onClose,
   onNavigate,
+  lineGroups,
 }: {
   scenes: SceneBlock[];
   index: number;
   onClose: () => void;
   onNavigate: (idx: number) => void;
+  lineGroups?: ModalSubLine[][];
 }) {
   const scene = scenes[index];
   const hasPrev = index > 0;
   const hasNext = index < scenes.length - 1;
+  const lines = lineGroups?.[index] || [];
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -326,6 +352,15 @@ export function SceneVideoModal({
         </div>
         <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
           {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
+          {lines.length > 0 && (
+            <div className="space-y-0.5">
+              {lines.map((l) => (
+                <p key={l.lineIdx} className="text-white/50 text-[10px] leading-relaxed">
+                  <span className="font-mono text-white/30">#{l.lineIdx + 1}</span> {l.text}
+                </p>
+              ))}
+            </div>
+          )}
           <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
           {scene.script && (
             <p className="text-white/70 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
@@ -994,6 +1029,17 @@ export function SceneEditorList({
     return groups;
   })();
 
+  // 2026-09-16(5차) 추가 — 원본 씬 인덱스 → 그 씬에 묶인 자막 줄들(줄 번호+텍스트) 매핑.
+  // 모달은 previewScenes(필터링된 배열) 순서로 열리므로, previewScenes와 같은 순서의
+  // 배열로 다시 뽑아서 SceneImageModal/SceneVideoModal에 그대로 넘긴다.
+  const linesBySceneIdx = new Map<number, LineEntry[]>();
+  rowGroups.forEach((group) => {
+    if (group.sceneIdx !== null) linesBySceneIdx.set(group.sceneIdx, group.lines);
+  });
+  const previewLineGroups: ModalSubLine[][] = filteredWithIndex.map(({ idx }) =>
+    (linesBySceneIdx.get(idx) || []).map((e) => ({ lineIdx: e.lineIdx, text: e.line.text }))
+  );
+
   type FlatRow = { key: string; entry?: LineEntry; sceneIdx: number | null; isFirst: boolean; span: number; group: RowGroup };
   const flatRows: FlatRow[] = [];
   rowGroups.forEach((group, gi) => {
@@ -1324,10 +1370,10 @@ export function SceneEditorList({
         </button>
       )}
       {previewIndex !== null && (
-        <SceneImageModal scenes={previewScenes} index={previewIndex} onClose={() => setPreviewIndex(null)} onNavigate={setPreviewIndex} />
+        <SceneImageModal scenes={previewScenes} index={previewIndex} onClose={() => setPreviewIndex(null)} onNavigate={setPreviewIndex} lineGroups={previewLineGroups} />
       )}
       {previewVideoIndex !== null && (
-        <SceneVideoModal scenes={previewScenes} index={previewVideoIndex} onClose={() => setPreviewVideoIndex(null)} onNavigate={setPreviewVideoIndex} />
+        <SceneVideoModal scenes={previewScenes} index={previewVideoIndex} onClose={() => setPreviewVideoIndex(null)} onNavigate={setPreviewVideoIndex} lineGroups={previewLineGroups} />
       )}
     </div>
   );
