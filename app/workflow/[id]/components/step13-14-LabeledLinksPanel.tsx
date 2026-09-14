@@ -56,10 +56,9 @@ function serializeSrtCues(cues: SrtCue[]): string {
 // 자막을 실시간으로 띄운다. 미리보기 화면의 자막 텍스트 자체가 contentEditable이라 그 자리에서
 // 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만 바뀌고 전체 SRT가 다시 합쳐진다. Enter는 커서
 // 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다.
-// 2026-09-15(7차) — ‹/› 버튼으로 수동 이동해도 화면이 안 바뀌는 버그 수정(사용자 지적: "버튼을
-// 눌러도 다음화면으로 안가"). 원인은 onAudioTimeUpdate가 일시정지 상태에서도 계속 돌아서, 버튼
-// 클릭 직후 currentTime 대입이 일으키는 비동기 timeupdate 이벤트가 방금 바뀐 selectedCueIdx를
-// 즉시 원래 값으로 되돌리는 경쟁 상태였다 — 재생 중일 때만 자동 추적하도록 좁혀서 해결.
+// 2026-09-15(8차) — "N / 전체" 카운터를 16:9/9:16 버튼 줄 오른쪽 끝(ml-auto)에 뒀더니 눈에 안
+// 띄어서 못 찾겠다는 사용자 지적("페이지가 너무 오른쪽에 있어서 직관적이지 않아") — 검은 미리보기
+// 화면 안쪽 상단 중앙에 배지로 얹는 방식으로 옮겼다.
 function LabeledFieldSection({
   site,
   unit,
@@ -316,11 +315,6 @@ function LabeledFieldSection({
                           >
                             9:16
                           </button>
-                          {cues.length > 0 && (
-                            <span className="text-[10px] text-neutral-400 ml-auto">
-                              {selectedCueIdx + 1} / {cues.length}
-                            </span>
-                          )}
                         </div>
                         <div
                           className="bg-neutral-900 rounded-lg overflow-hidden flex flex-col justify-end relative"
@@ -329,6 +323,11 @@ function LabeledFieldSection({
                             height: previewAspect === '16:9' ? 270 : 480,
                           }}
                         >
+                          {cues.length > 0 && (
+                            <span className="absolute top-2 left-1/2 -translate-x-1/2 text-[11px] font-bold text-white bg-black/60 rounded-full px-2 py-0.5">
+                              {selectedCueIdx + 1} / {cues.length}
+                            </span>
+                          )}
                           {cues.length > 1 && (
                             <>
                               <button
