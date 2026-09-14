@@ -78,9 +78,11 @@ const DEFAULT_PREVIEW_STYLE: PreviewStyle = { align: 'center', lines: 2, fontSiz
 // 자막을 실시간으로 띄운다. 미리보기 화면의 자막 텍스트 자체가 contentEditable이라 그 자리에서
 // 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만 바뀌고 전체 SRT가 다시 합쳐진다. Enter는 커서
 // 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다. 원문
-// SRT(고급) 보기는 미리보기 오른쪽에 고정 너비(w-72, flex-1 아님 — 예전에 flex-1이라 접혀도 빈
-// 공간을 차지하던 문제가 있었다)로 기본 펼쳐서 둔다(사용자 요청: "화면 오른쪽 끝에 자막 원문이
-// 보이게 해줘").
+// SRT(고급) 보기는 미리보기 오른쪽에 고정 너비(w-72)로 기본 펼쳐서 둔다(사용자 요청: "화면
+// 오른쪽 끝에 자막 원문이 보이게 해줘"). 바깥 컨테이너는 flex-wrap 없이 overflow-x-auto만 줘서
+// 컨테이너 폭이 좁아도 줄바꿈으로 아래에 떨어지지 않고 항상 오른쪽에 붙는다(사용자 지적: 좁은
+// 화면에서 flex-wrap 때문에 원문 SRT 패널이 미리보기 밑으로 내려가버렸다 — "왜 오른쪽으로
+// 못보내는거야???"). 폭이 부족하면 가로 스크롤로 처리한다.
 //
 // 정렬/줄수/글자크기/배경·글자색(previewAlign 등)은 실제 저장 필드가 아니라 미리보기 전용 값이라,
 // 처음엔 컴포넌트 state 기본값으로만 뒀더니 편집창을 닫았다 열 때마다 초기값(중앙/2줄/13px)으로
@@ -386,7 +388,7 @@ function LabeledFieldSection({
                   {editLoading && editText === '' ? (
                     <p className="text-[10px] text-neutral-400">불러오는 중...</p>
                   ) : (
-                    <div className="flex gap-3 flex-wrap items-start">
+                    <div className="flex gap-3 items-start overflow-x-auto">
                       <div className="shrink-0 space-y-1.5">
                         <div className="flex items-center gap-2">
                           <button
