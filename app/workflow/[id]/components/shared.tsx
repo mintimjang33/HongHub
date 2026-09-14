@@ -880,12 +880,24 @@ export function SceneEditorList({
     }
     setSelectedLines(new Set());
   }
-  // 여러 자막 줄에 걸친 장면 하나를 다시 개별 줄(장면 없음)로 풀어준다 — "결합"의 반대. 이미지/
-  // 프롬프트 등 그 장면에 채운 내용은 사라지므로 확인을 받는다. 풀어놓은 뒤엔 원하는 하위 구간만
-  // 다시 체크해서 mergeSelectedIntoScene으로 더 정확한 경계로 다시 묶을 수 있다.
-  async function splitScene(idx: number) {
-    if (!confirm(`${scenes[idx].id} 장면을 풀어서 다시 자막 줄들로 되돌릴까요? 이 장면에 채운 이미지·프롬프트 등은 사라집니다.`)) return;
-    await onSave(serializeSceneBlocks(scenes.filter((_, i) => i !== idx)));
+  // 2026-09-16(4차) 수정 — 사용자 지적: "자막을 분리하는건 맞지만 이미지 프롬프트 같은건
+  // 사라지면 안되~ 사용자가 삭젤 한게 아니잖아". 원래는 장면을 통째로 지워서 "장면 없음"으로
+  // 되돌렸는데, 그러면 사용자가 지운 적 없는 이미지·프롬프트가 같이 사라져버린다. 대신 이 장면을
+  // "묶여있던 자막 줄 개수"만큼 쪼개서, 각 조각이 원래 장면의 이미지·프롬프트·무빙·영상 등을
+  // 그대로 복사해서 갖게 하고 시간만 그 줄 하나의 실제 구간으로 좁힌다 — 데이터는 하나도 안
+  // 사라지고 조각마다 복제된다. 나중에 특정 조각만 이미지가 안 맞으면 그 조각만 "수정"으로 따로
+  // 고치면 된다.
+  async function splitScene(idx: number, lineRanges: { start: number; end: number }[]) {
+    if (lineRanges.length <= 1) return;
+    const scene = scenes[idx];
+    if (!confirm(`${scene.id} 장면을 자막 줄 ${lineRanges.length}개로 나눌까요? 이미지·프롬프트 등은 각 조각에 그대로 복사되어 유지됩니다(사라지지 않음) — 나중에 조각별로 다시 다르게 고칠 수 있습니다.`)) return;
+    const pieces: SceneBlock[] = lineRanges.map((r, i) => ({
+      ...scene,
+      id: i === 0 ? scene.id : `${scene.id}-${i + 1}`,
+      time: `${formatSecToMMSS(r.start)}-${formatSecToMMSS(r.end)}`,
+    }));
+    const merged = scenes.flatMap((s, i) => (i === idx ? pieces : [s]));
+    await onSave(serializeSceneBlocks(sortScenesById(merged)));
   }
   // 형식이 안 맞는 예전 자유 텍스트 — 그대로 보여주되 장면 추가는 여전히 가능하게 둔다.
   if (scenes.length === 0 && scenePrompts.trim()) {
@@ -1238,7 +1250,15 @@ export function SceneEditorList({
                                   때만 "분리"를 보여준다(1줄짜리는 분리해도 삭제와 같은 뜻이라
                                   굳이 따로 안 보여줌). splitScene 주석 참고. */}
                               {row.span > 1 && (
-                                <button onClick={() => splitScene(row.sceneIdx as number)} className="text-[10px] font-bold text-amber-600 hover:underline text-left">
+                                <button
+                                  onClick={() =>
+                                    splitScene(
+                                      row.sceneIdx as number,
+                                      row.group.lines.map((e) => ({ start: e.line.start, end: e.line.end }))
+                                    )
+                                  }
+                                  className="text-[10px] font-bold text-amber-600 hover:underline text-left"
+                                >
                                   분리
                                 </button>
                               )}
