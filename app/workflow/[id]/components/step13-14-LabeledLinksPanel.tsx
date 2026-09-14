@@ -51,15 +51,15 @@ function serializeSrtCues(cues: SrtCue[]): string {
 // 구분한다. NarrationSubtitlePanel이 유닛 하나당 이 조각을 두 번(나레이션/자막) 나란히 띄운다.
 //
 // 2026-09-15 추가 — textEditable(자막 섹션에서만 true로 넘김): 외부 프로그램(Subtitle Edit 등)
-// 없이도 화면에서 바로 SRT 텍스트를 고칠 수 있게 "편집" 버튼을 추가했다(사용자 요청: "12단계에
-// srt 편집기를 구현 못하냐고"). 나레이션 목록을 같이 받아서, 편집 중 오디오를 재생하며 16:9/9:16
-// 화면 비율 미리보기 안에 현재 재생 시각에 맞는 자막을 실시간으로 띄운다. 미리보기 화면의 자막
-// 텍스트 자체가 contentEditable이라 그 자리에서 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만
-// 바뀌고 전체 SRT가 다시 합쳐진다.
-// 2026-09-15(5차) — Enter를 누르면 커서 뒷부분을 다음 자막 화면으로 분리하고(시간은 원래 구간을
-// 글자수 비율로 나눠 배정), Shift+Enter는 같은 화면 안에서 줄바꿈만 하도록 구분했다(사용자 요청:
-// "이 글씨 한줄이 다음화면으로 넘어가려면 어떻게 해야해?" / "현재는 엔터를 치면 1줄이 2줄로 되는
-// 방식이잖아" / "시프트 엔터는 줄바꿈이고 엔터는 다음화면으로 이동").
+// 없이도 화면에서 바로 SRT 텍스트를 고칠 수 있게 "편집" 버튼을 추가했다. 나레이션 목록을 같이
+// 받아서, 편집 중 오디오를 재생하며 16:9/9:16 화면 비율 미리보기 안에 현재 재생 시각에 맞는
+// 자막을 실시간으로 띄운다. 미리보기 화면의 자막 텍스트 자체가 contentEditable이라 그 자리에서
+// 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만 바뀌고 전체 SRT가 다시 합쳐진다. Enter는 커서
+// 뒷부분을 다음 자막 화면으로 분리하고, Shift+Enter는 같은 화면 안에서 줄바꿈만 한다.
+// 2026-09-15(6차) — 미리보기에서 고를 나레이션(예: "제미나이 재생성(Puck)")이 편집 화면을 다시
+// 열 때마다 첫 번째 항목("원본")으로 초기화되던 걸 고쳤다(사용자 지적: "이거 마지막했던걸로
+// 자동 저장하게 해줘~ 자꾸 바뀌고 있어서"). 콘텐츠(유닛)별로 localStorage에 마지막 선택을 저장해
+// 다음에 편집을 열 때 그대로 이어간다.
 function LabeledFieldSection({
   site,
   unit,
@@ -208,13 +208,25 @@ function LabeledFieldSection({
     await saveItems(items.map((item, i) => (i === idx ? { ...item, label } : item)));
   }
 
+  // 마지막으로 골랐던 나레이션(예: "제미나이 재생성(Puck)")을 편집 화면을 다시 열 때마다 기억한다
+  // — 사용자 지적: "이거 마지막했던걸로 자동 저장하게 해줘~ 자꾸 바뀌고 있어서" (전엔 매번 첫 번째
+  // 항목("원본")으로 초기화됐음). 콘텐츠(유닛)별로 따로 기억하도록 localStorage 키에 unit.id를 넣는다.
+  const narrationPrefKey = `honghub_preview_narration_${unit.id}`;
+
   async function startEdit(idx: number) {
     setEditError('');
     setEditLoading(true);
     setEditingIdx(idx);
     setPreviewTime(0);
     setSelectedCueIdx(0);
-    setPreviewNarrationUrl(narrationItems[0]?.url || '');
+    let savedUrl = '';
+    try {
+      savedUrl = localStorage.getItem(narrationPrefKey) || '';
+    } catch {
+      // 프라이빗 모드 등에서 localStorage가 막혀있을 수 있다 — 그냥 기본값으로 진행.
+    }
+    const hasSaved = savedUrl && narrationItems.some((n) => n.url === savedUrl);
+    setPreviewNarrationUrl(hasSaved ? savedUrl : narrationItems[0]?.url || '');
     try {
       const res = await fetch(items[idx].url);
       if (!res.ok) throw new Error(`파일을 못 불러왔어요 (${res.status})`);
@@ -442,7 +454,14 @@ function LabeledFieldSection({
                             {narrationItems.length > 1 && (
                               <select
                                 value={previewNarrationUrl}
-                                onChange={(e) => setPreviewNarrationUrl(e.target.value)}
+                                onChange={(e) => {
+                                  setPreviewNarrationUrl(e.target.value);
+                                  try {
+                                    localStorage.setItem(narrationPrefKey, e.target.value);
+                                  } catch {
+                                    // 저장 실패해도 이번 세션 미리보기 동작에는 지장 없음.
+                                  }
+                                }}
                                 className="w-full border border-neutral-200 rounded px-1 py-1 text-[10px]"
                               >
                                 {narrationItems.map((n, i) => (
