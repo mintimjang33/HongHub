@@ -57,13 +57,15 @@ function serializeSrtCues(cues: SrtCue[]): string {
 // 9:16 화면에서 보면서 편집을 할수있었으면 해"). 배경색은 프레임 전체가 아니라 자막 텍스트 자체에
 // fit-content 너비로 붙는다(실제 자막 스타일과 동일하게 줄 너비만큼만 색칠 — 사용자 지적: "보통
 // 이렇게 나오지 않자나 텍스트 뒤에만 색칠이 있지"). 글자 크기 슬라이더도 추가.
-// 2026-09-15(2차) — 처음엔 오른쪽 원문 SRT textarea에서 타임코드까지 손으로 맞춰 고치는 방식이었는데,
-// 사용자가 "편집을 화면에서 하는게 아니네?? 화면에서 편집을 할수있게 해줘"라고 지적 — 미리보기
-// 화면의 자막 텍스트 자체를 contentEditable로 만들어 그 자리에서 클릭해 고치면(포커스 아웃 시 저장)
-// 그 큐 하나만 텍스트가 바뀌고 전체 SRT가 다시 합쳐지도록 바꿨다. 이전/다음 자막 버튼으로 오디오
-// 재생 없이도 큐 단위로 넘나들 수 있게 했고, 오디오를 재생하면 현재 시각에 맞는 큐로 자동 이동한다.
-// 원문 textarea는 <details>로 접어서 기본은 숨기고 "고급" 용도로만 남겼다(사용자 요청: "오른쪽을
-// 줄이고 화면을 더 크게" — 미리보기 프레임을 220/124px에서 400/225px로 키우고 텍스트 영역은 축소).
+// 2026-09-15(2차) — 미리보기 화면의 자막 텍스트 자체를 contentEditable로 만들어 그 자리에서
+// 클릭해 고치면(포커스 아웃 시 저장) 그 큐 하나만 텍스트가 바뀌고 전체 SRT가 다시 합쳐지도록
+// 했다(사용자 지적: "편집을 화면에서 하는게 아니네?? 화면에서 편집을 할수있게 해줘"). 이전/다음
+// 자막 버튼으로 오디오 재생 없이도 큐 단위로 넘나들 수 있고, 오디오를 재생하면 현재 시각에 맞는
+// 큐로 자동 이동한다.
+// 2026-09-15(3차) — 미리보기와 원문 SRT 영역을 좌우 flex로 나눴더니, 원문 영역을 <details>로
+// 접어도 flex-1이 남은 가로 공간을 계속 차지해서 미리보기 옆에 거대한 빈 공간이 남았다(사용자
+// 지적: "이게 크게한거야??? / 오른쪽이 다 비었는데?"). 좌우 2열 대신 위아래 1열로 바꾸고(미리보기
+// 위, 접힌 원문 SRT 아래), 미리보기 자체도 더 키웠다(400/225 -> 480/270).
 function LabeledFieldSection({
   site,
   unit,
@@ -259,8 +261,8 @@ function LabeledFieldSection({
                   {editLoading && editText === '' ? (
                     <p className="text-[10px] text-neutral-400">불러오는 중...</p>
                   ) : (
-                    <div className="flex gap-3 flex-wrap">
-                      <div className="shrink-0 space-y-1.5">
+                    <div className="flex flex-col gap-2">
+                      <div className="space-y-1.5">
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setPreviewAspect('16:9')}
@@ -283,8 +285,8 @@ function LabeledFieldSection({
                         <div
                           className="bg-neutral-900 rounded-lg overflow-hidden flex items-end relative"
                           style={{
-                            width: previewAspect === '16:9' ? 400 : 225,
-                            height: previewAspect === '16:9' ? 225 : 400,
+                            width: previewAspect === '16:9' ? 480 : 270,
+                            height: previewAspect === '16:9' ? 270 : 480,
                             justifyContent: previewAlign === 'left' ? 'flex-start' : previewAlign === 'right' ? 'flex-end' : 'center',
                           }}
                         >
@@ -411,14 +413,14 @@ function LabeledFieldSection({
                               src={previewNarrationUrl}
                               controls
                               onTimeUpdate={(e) => onAudioTimeUpdate(e.currentTarget.currentTime)}
-                              style={{ width: previewAspect === '16:9' ? 400 : 225 }}
+                              style={{ width: previewAspect === '16:9' ? 480 : 270 }}
                             />
                           </div>
                         ) : (
                           <p className="text-[9px] text-neutral-400">나레이션이 등록돼야 오디오랑 같이 미리볼 수 있어요</p>
                         )}
                       </div>
-                      <details className="flex-1 min-w-[160px] max-w-[260px]">
+                      <details className="w-64 shrink-0">
                         <summary className="text-[10px] font-bold text-neutral-400 cursor-pointer select-none mb-1">
                           원문 SRT 직접 보기/수정 (고급)
                         </summary>
