@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { Site, ContentUnit, LabeledItem, LabeledField } from '../types';
 import { normalizeLabeledItems, uploadSceneMedia } from '../utils';
 import { CopyButton } from './shared';
@@ -31,22 +31,39 @@ function parseSrtCues(text: string): SrtCue[] {
     .filter((c): c is SrtCue => c !== null);
 }
 
+function secondsToSrtTime(t: number): string {
+  const clamped = Math.max(0, t);
+  const h = Math.floor(clamped / 3600);
+  const m = Math.floor((clamped % 3600) / 60);
+  const s = Math.floor(clamped % 60);
+  const ms = Math.round((clamped - Math.floor(clamped)) * 1000);
+  const pad = (n: number, len: number) => String(n).padStart(len, '0');
+  return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`;
+}
+
+// 미리보기 화면에서 직접 고친 큐 배열을 다시 표준 SRT 텍스트로 합친다(번호는 1부터 다시 매김).
+function serializeSrtCues(cues: SrtCue[]): string {
+  return cues.map((c, i) => `${i + 1}\n${secondsToSrtTime(c.start)} --> ${secondsToSrtTime(c.end)}\n${c.text}`).join('\n\n') + '\n';
+}
+
 // 콘텐츠(유닛) 하나의 나레이션 또는 자막 중 한 필드만 다루는 조각 — 링크 붙여넣기와 파일 업로드
 // (uploadSceneMedia 재사용) 둘 다 지원, 라벨(예: "원본"/"1.3배속", "SRT"/"수정본")로 여러 후보를
 // 구분한다. NarrationSubtitlePanel이 유닛 하나당 이 조각을 두 번(나레이션/자막) 나란히 띄운다.
 //
 // 2026-09-15 추가 — textEditable(자막 섹션에서만 true로 넘김): 외부 프로그램(Subtitle Edit 등)
 // 없이도 화면에서 바로 SRT 텍스트를 고칠 수 있게 "편집" 버튼을 추가했다(사용자 요청: "12단계에
-// srt 편집기를 구현 못하냐고"). 파일 내용을 그대로 fetch해서 textarea에 띄우고, 저장하면 그
-// 텍스트를 새 파일로 업로드해서 같은 항목의 url만 교체한다(라벨 유지) — 별도 항목을 추가하는
-// 게 아니라 "그 자리에서 고치는" 동작이라 저장 시 원래 있던 항목을 대체한다.
-// narrationUnit(같은 유닛의 나레이션 목록)을 같이 받아서, 편집 중 오디오를 재생하며 16:9/9:16
-// 화면 비율 미리보기 안에 현재 재생 시각에 맞는 자막 한 줄을 실시간으로 띄운다(사용자 요청:
-// "16:9 나 9:16 화면에서 보면서 편집을 할수있었으면 해") — 실제 렌더링될 화면 느낌 그대로 자막
-// 타이밍·줄바꿈을 확인하면서 고칠 수 있다. 배경색은 프레임 전체가 아니라 자막 텍스트 자체에
-// fit-content 너비로 붙는다(실제 자막 스타일과 동일하게 줄 너비만큼만 색칠 — 2026-09-15 사용자
-// 지적: "보통 이렇게 나오지 않자나 텍스트 뒤에만 색칠이 있지" — 처음엔 프레임 전체 너비로 깔려서
-// 고쳤다). 글자 크기 슬라이더(10~28px)도 같이 추가했다.
+// srt 편집기를 구현 못하냐고"). 나레이션 목록을 같이 받아서, 편집 중 오디오를 재생하며 16:9/9:16
+// 화면 비율 미리보기 안에 현재 재생 시각에 맞는 자막을 실시간으로 띄운다(사용자 요청: "16:9 나
+// 9:16 화면에서 보면서 편집을 할수있었으면 해"). 배경색은 프레임 전체가 아니라 자막 텍스트 자체에
+// fit-content 너비로 붙는다(실제 자막 스타일과 동일하게 줄 너비만큼만 색칠 — 사용자 지적: "보통
+// 이렇게 나오지 않자나 텍스트 뒤에만 색칠이 있지"). 글자 크기 슬라이더도 추가.
+// 2026-09-15(2차) — 처음엔 오른쪽 원문 SRT textarea에서 타임코드까지 손으로 맞춰 고치는 방식이었는데,
+// 사용자가 "편집을 화면에서 하는게 아니네?? 화면에서 편집을 할수있게 해줘"라고 지적 — 미리보기
+// 화면의 자막 텍스트 자체를 contentEditable로 만들어 그 자리에서 클릭해 고치면(포커스 아웃 시 저장)
+// 그 큐 하나만 텍스트가 바뀌고 전체 SRT가 다시 합쳐지도록 바꿨다. 이전/다음 자막 버튼으로 오디오
+// 재생 없이도 큐 단위로 넘나들 수 있게 했고, 오디오를 재생하면 현재 시각에 맞는 큐로 자동 이동한다.
+// 원문 textarea는 <details>로 접어서 기본은 숨기고 "고급" 용도로만 남겼다(사용자 요청: "오른쪽을
+// 줄이고 화면을 더 크게" — 미리보기 프레임을 220/124px에서 400/225px로 키우고 텍스트 영역은 축소).
 function LabeledFieldSection({
   site,
   unit,
@@ -87,9 +104,35 @@ function LabeledFieldSection({
   const [previewBg, setPreviewBg] = useState('#000000');
   const [previewColor, setPreviewColor] = useState('#ffffff');
   const [previewFontSize, setPreviewFontSize] = useState(15);
+  const [selectedCueIdx, setSelectedCueIdx] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
 
   const cues = useMemo(() => parseSrtCues(editText), [editText]);
-  const activeCue = useMemo(() => cues.find((c) => previewTime >= c.start && previewTime <= c.end), [cues, previewTime]);
+  const selectedCue = cues[selectedCueIdx];
+
+  function seekToCue(idx: number) {
+    if (idx < 0 || idx >= cues.length) return;
+    setSelectedCueIdx(idx);
+    if (audioRef.current) audioRef.current.currentTime = cues[idx].start;
+    setPreviewTime(cues[idx].start);
+  }
+
+  // 오디오가 재생되면서 현재 시각에 맞는 큐로 선택을 자동으로 따라가게 한다 — 사용자가 재생만
+  // 해도 화면 미리보기 캡션이 알아서 넘어간다. prev/next 버튼으로 수동 이동한 직후에는 오디오
+  // 위치가 그 큐 시작점으로 맞춰지므로 자연스럽게 이어진다.
+  function onAudioTimeUpdate(t: number) {
+    setPreviewTime(t);
+    const idx = cues.findIndex((c) => t >= c.start && t <= c.end);
+    if (idx !== -1 && idx !== selectedCueIdx) setSelectedCueIdx(idx);
+  }
+
+  // 미리보기 화면 안의 캡션 텍스트를 직접 클릭해서 고치면(contentEditable), 그 큐 하나만 텍스트를
+  // 바꾼 뒤 전체를 다시 표준 SRT로 합쳐서 editText에 반영한다.
+  function updateSelectedCueText(newText: string) {
+    if (!cues[selectedCueIdx]) return;
+    const nextCues = cues.map((c, i) => (i === selectedCueIdx ? { ...c, text: newText } : c));
+    setEditText(serializeSrtCues(nextCues));
+  }
 
   async function saveItems(newItems: LabeledItem[]) {
     setSaving(true);
@@ -143,6 +186,7 @@ function LabeledFieldSection({
     setEditLoading(true);
     setEditingIdx(idx);
     setPreviewTime(0);
+    setSelectedCueIdx(0);
     setPreviewNarrationUrl(narrationItems[0]?.url || '');
     try {
       const res = await fetch(items[idx].url);
@@ -217,7 +261,7 @@ function LabeledFieldSection({
                   ) : (
                     <div className="flex gap-3 flex-wrap">
                       <div className="shrink-0 space-y-1.5">
-                        <div className="flex gap-1">
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={() => setPreviewAspect('16:9')}
                             className={`text-[10px] font-black px-2 py-1 rounded ${previewAspect === '16:9' ? 'bg-black text-white' : 'bg-white border border-neutral-200'}`}
@@ -230,17 +274,46 @@ function LabeledFieldSection({
                           >
                             9:16
                           </button>
+                          {cues.length > 0 && (
+                            <span className="text-[10px] text-neutral-400 ml-auto">
+                              {selectedCueIdx + 1} / {cues.length}
+                            </span>
+                          )}
                         </div>
                         <div
                           className="bg-neutral-900 rounded-lg overflow-hidden flex items-end relative"
                           style={{
-                            width: previewAspect === '16:9' ? 220 : 124,
-                            height: previewAspect === '16:9' ? 124 : 220,
+                            width: previewAspect === '16:9' ? 400 : 225,
+                            height: previewAspect === '16:9' ? 225 : 400,
                             justifyContent: previewAlign === 'left' ? 'flex-start' : previewAlign === 'right' ? 'flex-end' : 'center',
                           }}
                         >
+                          {cues.length > 1 && (
+                            <>
+                              <button
+                                onClick={() => seekToCue(selectedCueIdx - 1)}
+                                disabled={selectedCueIdx <= 0}
+                                title="이전 자막"
+                                className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/50 text-white text-[11px] font-black disabled:opacity-20"
+                              >
+                                ‹
+                              </button>
+                              <button
+                                onClick={() => seekToCue(selectedCueIdx + 1)}
+                                disabled={selectedCueIdx >= cues.length - 1}
+                                title="다음 자막"
+                                className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-black/50 text-white text-[11px] font-black disabled:opacity-20"
+                              >
+                                ›
+                              </button>
+                            </>
+                          )}
                           <p
-                            className="font-bold leading-snug whitespace-pre-wrap overflow-hidden mb-3"
+                            key={selectedCueIdx}
+                            contentEditable
+                            suppressContentEditableWarning
+                            onBlur={(e) => updateSelectedCueText(e.currentTarget.textContent || '')}
+                            className="font-bold leading-snug whitespace-pre-wrap overflow-hidden mb-3 outline-none focus:ring-2 focus:ring-blue-400"
                             style={{
                               textAlign: previewAlign,
                               color: previewColor,
@@ -253,11 +326,14 @@ function LabeledFieldSection({
                               maxWidth: 'calc(100% - 16px)',
                               padding: '2px 6px',
                               borderRadius: 3,
+                              minWidth: 20,
+                              cursor: 'text',
                             }}
                           >
-                            {activeCue?.text || ''}
+                            {selectedCue?.text || ''}
                           </p>
                         </div>
+                        <p className="text-[9px] text-neutral-400">화면 속 자막을 직접 클릭해서 고치세요 — 다른 곳 클릭하면 저장됩니다.</p>
                         <div className="flex gap-1">
                           <button
                             onClick={() => setPreviewAlign('left')}
@@ -330,24 +406,30 @@ function LabeledFieldSection({
                               </select>
                             )}
                             <audio
+                              ref={audioRef}
                               key={previewNarrationUrl}
                               src={previewNarrationUrl}
                               controls
-                              onTimeUpdate={(e) => setPreviewTime(e.currentTarget.currentTime)}
-                              style={{ width: previewAspect === '16:9' ? 220 : 124 }}
+                              onTimeUpdate={(e) => onAudioTimeUpdate(e.currentTarget.currentTime)}
+                              style={{ width: previewAspect === '16:9' ? 400 : 225 }}
                             />
                           </div>
                         ) : (
                           <p className="text-[9px] text-neutral-400">나레이션이 등록돼야 오디오랑 같이 미리볼 수 있어요</p>
                         )}
                       </div>
-                      <textarea
-                        value={editText}
-                        onChange={(e) => setEditText(e.target.value)}
-                        rows={14}
-                        className="flex-1 min-w-[220px] border border-neutral-200 rounded px-2 py-1.5 text-[11px] font-mono bg-white"
-                        placeholder="1&#10;00:00:00,000 --> 00:00:04,000&#10;자막 텍스트"
-                      />
+                      <details className="flex-1 min-w-[160px] max-w-[260px]">
+                        <summary className="text-[10px] font-bold text-neutral-400 cursor-pointer select-none mb-1">
+                          원문 SRT 직접 보기/수정 (고급)
+                        </summary>
+                        <textarea
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          rows={12}
+                          className="w-full border border-neutral-200 rounded px-2 py-1.5 text-[10px] font-mono bg-white"
+                          placeholder="1&#10;00:00:00,000 --> 00:00:04,000&#10;자막 텍스트"
+                        />
+                      </details>
                     </div>
                   )}
                   {editError && <p className="text-[10px] text-red-500 font-bold">{editError}</p>}
