@@ -240,7 +240,9 @@ function LabeledFieldSection({
     const splitAt = cue.start + (cue.end - cue.start) * (before.length / totalLen);
     const nextCues = [...cues];
     nextCues[selectedCueIdx] = { ...cue, end: splitAt, text: before };
-    nextCues.splice(selectedCueIdx + 1, 0, { start: splitAt, end: cue.end, text: after });
+    // textStart/textEnd는 곧바로 serializeSrtCues → setEditText로 다시 파싱되면서 버려지는
+    // 임시 값이라 실제 위치는 안 맞아도 되지만, 타입상 채워는 둬야 한다.
+    nextCues.splice(selectedCueIdx + 1, 0, { start: splitAt, end: cue.end, text: after, textStart: cue.textStart, textEnd: cue.textEnd });
     setEditText(serializeSrtCues(nextCues));
   }
 
