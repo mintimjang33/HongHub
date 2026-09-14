@@ -798,6 +798,10 @@ export function SceneEditorList({
   const [previewVideoIndex, setPreviewVideoIndex] = useState<number | null>(null);
   // 2026-09-12 추가 — 탭 필터 상태. 'all' | 'none' | 'multi' | 탭 인덱스(문자열).
   const [filterTab, setFilterTab] = useState<string>('all');
+  // 2026-09-16(3차) 추가 — 사용자 요청: "srt자막 각 라인 선택해서 결합,분리 할수있게(묶음=
+  // 씬으로)". srtLines 배열 안에서의 원래 위치(0-based)로 선택 상태를 기억한다 — 필터/그룹핑이
+  // 바뀌어도 "그 자막 줄" 자체의 식별자는 변하지 않아서 안전하다.
+  const [selectedLines, setSelectedLines] = useState<Set<number>>(new Set());
 
   function startEdit(idx: number) {
     setEditingIndex(idx);
@@ -835,6 +839,53 @@ export function SceneEditorList({
   function startAddForGap(startSec: number, endSec: number) {
     setEditingIndex(-1);
     setDraft({ ...EMPTY_SCENE_DRAFT, id: nextSceneId(scenes), time: `${formatSecToMMSS(startSec)}-${formatSecToMMSS(endSec)}` });
+  }
+
+  // 2026-09-16(3차) 추가 — 체크박스로 고른 자막 줄들의 시작~끝을 하나의 씬 시간대로 묶는다.
+  // 그 구간에 이미 장면이 하나 걸쳐 있으면 그 장면의 기존 데이터(이미지/프롬프트 등)를 유지한
+  // 채 시간만 넓히거나 좁히고(수정 폼이 열려서 사람이 검토 후 저장), 걸쳐 있는 장면이 없으면
+  // 새 장면을 만든다. 이미 서로 다른 장면 2개 이상이 선택 구간에 걸쳐 있으면(여러 장면을 한
+  // 번에 합치는 경우) 데이터가 조용히 사라질 위험이 있어, 먼저 "분리"로 풀어달라고 안내하고
+  // 멈춘다 — 자동으로 아무 걸 지우지 않는다.
+  function toggleLineSelected(lineIdx: number) {
+    setSelectedLines((cur) => {
+      const next = new Set(cur);
+      if (next.has(lineIdx)) next.delete(lineIdx);
+      else next.add(lineIdx);
+      return next;
+    });
+  }
+  function mergeSelectedIntoScene() {
+    if (selectedLines.size === 0) return;
+    const selectedArr = srtLines.filter((_, i) => selectedLines.has(i));
+    if (selectedArr.length === 0) return;
+    const rangeStart = Math.min(...selectedArr.map((l) => l.start));
+    const rangeEnd = Math.max(...selectedArr.map((l) => l.end));
+    const overlappingIdxs: number[] = [];
+    scenes.forEach((sc, i) => {
+      const r = parseSceneTimeRange(sc.time);
+      if (r && r[0] < rangeEnd && r[1] > rangeStart) overlappingIdxs.push(i);
+    });
+    if (overlappingIdxs.length >= 2) {
+      alert('선택한 구간에 이미 장면이 2개 이상 걸쳐 있습니다 — 먼저 "분리"로 풀어준 뒤 다시 묶어주세요(데이터 유실 방지).');
+      return;
+    }
+    if (overlappingIdxs.length === 1) {
+      const keepIdx = overlappingIdxs[0];
+      setEditingIndex(keepIdx);
+      setDraft({ ...scenes[keepIdx], time: `${formatSecToMMSS(rangeStart)}-${formatSecToMMSS(rangeEnd)}` });
+    } else {
+      setEditingIndex(-1);
+      setDraft({ ...EMPTY_SCENE_DRAFT, id: nextSceneId(scenes), time: `${formatSecToMMSS(rangeStart)}-${formatSecToMMSS(rangeEnd)}` });
+    }
+    setSelectedLines(new Set());
+  }
+  // 여러 자막 줄에 걸친 장면 하나를 다시 개별 줄(장면 없음)로 풀어준다 — "결합"의 반대. 이미지/
+  // 프롬프트 등 그 장면에 채운 내용은 사라지므로 확인을 받는다. 풀어놓은 뒤엔 원하는 하위 구간만
+  // 다시 체크해서 mergeSelectedIntoScene으로 더 정확한 경계로 다시 묶을 수 있다.
+  async function splitScene(idx: number) {
+    if (!confirm(`${scenes[idx].id} 장면을 풀어서 다시 자막 줄들로 되돌릴까요? 이 장면에 채운 이미지·프롬프트 등은 사라집니다.`)) return;
+    await onSave(serializeSceneBlocks(scenes.filter((_, i) => i !== idx)));
   }
   // 형식이 안 맞는 예전 자유 텍스트 — 그대로 보여주되 장면 추가는 여전히 가능하게 둔다.
   if (scenes.length === 0 && scenePrompts.trim()) {
@@ -900,13 +951,16 @@ export function SceneEditorList({
   // 유닛) 예전처럼 장면 하나당 한 행으로 자동 대체한다.
   const filteredSceneIdxSet = new Set(filteredWithIndex.map((f) => f.idx));
 
-  type RowGroup = { sceneIdx: number | null; lines: SrtLine[] };
+  // 2026-09-16(3차) 수정 — 체크박스/번호가 srtLines 배열 안의 원래 위치(lineIdx)를 안정적으로
+  // 참조해야 해서, 각 줄을 SrtLine 그대로가 아니라 {line, lineIdx} 쌍으로 들고 다닌다.
+  type LineEntry = { line: SrtLine; lineIdx: number };
+  type RowGroup = { sceneIdx: number | null; lines: LineEntry[] };
   const rowGroups: RowGroup[] = (() => {
     if (srtLines.length === 0) {
-      return filteredWithIndex.map(({ idx }) => ({ sceneIdx: idx, lines: [] as SrtLine[] }));
+      return filteredWithIndex.map(({ idx }) => ({ sceneIdx: idx, lines: [] as LineEntry[] }));
     }
     const groups: RowGroup[] = [];
-    for (const line of srtLines) {
+    srtLines.forEach((line, lineIdx) => {
       let matchedIdx: number | null = null;
       for (let i = 0; i < scenes.length; i++) {
         const range = parseSceneTimeRange(scenes[i].time);
@@ -920,23 +974,23 @@ export function SceneEditorList({
       // 장면에만 적용한다.
       const passesFilter =
         matchedIdx === null || characterTabs.length === 0 || effectiveFilterTab === 'all' || filteredSceneIdxSet.has(matchedIdx);
-      if (!passesFilter) continue;
+      if (!passesFilter) return;
       const last = groups[groups.length - 1];
-      if (last && last.sceneIdx === matchedIdx) last.lines.push(line);
-      else groups.push({ sceneIdx: matchedIdx, lines: [line] });
-    }
+      if (last && last.sceneIdx === matchedIdx) last.lines.push({ line, lineIdx });
+      else groups.push({ sceneIdx: matchedIdx, lines: [{ line, lineIdx }] });
+    });
     return groups;
   })();
 
-  type FlatRow = { key: string; line?: SrtLine; sceneIdx: number | null; isFirst: boolean; span: number; group: RowGroup };
+  type FlatRow = { key: string; entry?: LineEntry; sceneIdx: number | null; isFirst: boolean; span: number; group: RowGroup };
   const flatRows: FlatRow[] = [];
   rowGroups.forEach((group, gi) => {
     const span = group.lines.length || 1;
     if (group.lines.length === 0) {
       flatRows.push({ key: `${gi}-0`, sceneIdx: group.sceneIdx, isFirst: true, span, group });
     } else {
-      group.lines.forEach((line, li) => {
-        flatRows.push({ key: `${gi}-${li}`, line, sceneIdx: group.sceneIdx, isFirst: li === 0, span, group });
+      group.lines.forEach((entry, li) => {
+        flatRows.push({ key: `${gi}-${li}`, entry, sceneIdx: group.sceneIdx, isFirst: li === 0, span, group });
       });
     }
   });
@@ -980,15 +1034,32 @@ export function SceneEditorList({
       {scenes.length > 0 && filteredWithIndex.length === 0 && (
         <p className="text-[11px] text-neutral-300">이 분류엔 해당하는 장면이 없습니다.</p>
       )}
+      {/* 2026-09-16(3차) 추가 — 체크박스로 자막 줄을 고르면 여기 액션 바가 뜬다. "묶어서 씬
+          만들기"는 위 mergeSelectedIntoScene 참고. */}
+      {selectedLines.size > 0 && (
+        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1.5">
+          <span className="text-[10px] font-black text-blue-700">{selectedLines.size}줄 선택됨</span>
+          <button onClick={mergeSelectedIntoScene} className="text-[10px] font-black text-blue-700 hover:underline">
+            ▸ 묶어서 씬 만들기
+          </button>
+          <button onClick={() => setSelectedLines(new Set())} className="text-[10px] font-bold text-neutral-400 hover:underline">
+            선택 해제
+          </button>
+        </div>
+      )}
       {flatRows.length > 0 && (
         <div className="overflow-x-auto border border-neutral-100 rounded-lg">
           <table className="w-full text-[11px] border-collapse min-w-[720px]">
             <thead>
               <tr className="bg-neutral-50 text-neutral-400">
+                {/* 2026-09-16(3차) 추가 — 확인용 번호 + 결합/분리용 체크박스(사용자 요청:
+                    "srt자막 라인에 넘버링이 있으면 좋겠어 확인용", "각 라인 선택해서 결합,
+                    분리 할수있게"). */}
+                <th className="text-left font-black px-2 py-1.5 w-12">#</th>
                 {/* 2026-09-16(2차) — 이제 이 열이 표 전체의 행 기준이다: SRT 줄 하나 = 한 행.
                     같은 장면에 걸리는 연속된 줄들은 오른쪽 장면 칸들을 rowSpan으로 합쳐서
                     한 번만 보여준다(사용자 확정: "SRT 줄 기준(권장)", "자막은 다 보여야해"). */}
-                <th className="text-left font-black px-2 py-1.5 w-48">자막(SRT)</th>
+                <th className="text-left font-black px-2 py-1.5 w-44">자막(SRT)</th>
                 <th className="text-left font-black px-2 py-1.5 w-28">장면</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">타임</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">장면이미지</th>
@@ -1004,7 +1075,7 @@ export function SceneEditorList({
                   if (!row.isFirst) return null;
                   return (
                     <tr key={row.key}>
-                      <td colSpan={8} className="p-1.5 bg-neutral-50">
+                      <td colSpan={9} className="p-1.5 bg-neutral-50">
                         <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
                       </td>
                     </tr>
@@ -1014,10 +1085,26 @@ export function SceneEditorList({
                 const pos = row.sceneIdx !== null ? filteredWithIndex.findIndex((f) => f.idx === row.sceneIdx) : -1;
                 return (
                   <tr key={row.key} className="border-t border-neutral-100 align-top">
+                    {/* 2026-09-16(3차) 추가 — 확인용 번호 + 결합/분리용 체크박스. entry가 없으면
+                        (이 표가 SRT 없이 장면 기준으로 fallback 중일 때) 체크 자체를 숨긴다 —
+                        결합/분리는 실제 자막 줄이 있어야만 의미가 있다. */}
+                    <td className="px-2 py-1.5">
+                      {row.entry && (
+                        <label className="flex items-center gap-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedLines.has(row.entry.lineIdx)}
+                            onChange={() => row.entry && toggleLineSelected(row.entry.lineIdx)}
+                            className="w-3.5 h-3.5"
+                          />
+                          <span className="text-neutral-400 font-mono">{row.entry.lineIdx + 1}</span>
+                        </label>
+                      )}
+                    </td>
                     {/* SRT 줄 하나 = 이 행 하나. 전체를 그대로 보여준다(축약·생략 없음). */}
                     <td className="px-2 py-1.5">
-                      {row.line ? (
-                        <p className="text-neutral-600 leading-relaxed">{row.line.text}</p>
+                      {row.entry ? (
+                        <p className="text-neutral-600 leading-relaxed">{row.entry.line.text}</p>
                       ) : srtText ? (
                         <span className="text-neutral-300">(매칭 없음)</span>
                       ) : (
@@ -1147,6 +1234,14 @@ export function SceneEditorList({
                               <button onClick={() => startEdit(row.sceneIdx as number)} className="text-[10px] font-bold text-blue-600 hover:underline text-left">
                                 수정
                               </button>
+                              {/* 2026-09-16(3차) 추가 — 이 장면이 자막 줄 2개 이상에 걸쳐 있을
+                                  때만 "분리"를 보여준다(1줄짜리는 분리해도 삭제와 같은 뜻이라
+                                  굳이 따로 안 보여줌). splitScene 주석 참고. */}
+                              {row.span > 1 && (
+                                <button onClick={() => splitScene(row.sceneIdx as number)} className="text-[10px] font-bold text-amber-600 hover:underline text-left">
+                                  분리
+                                </button>
+                              )}
                               <button onClick={() => removeScene(row.sceneIdx as number)} className="text-[10px] font-bold text-red-500 hover:underline text-left">
                                 삭제
                               </button>
@@ -1163,7 +1258,7 @@ export function SceneEditorList({
                           </td>
                           <td className="px-2 py-1.5 font-mono text-neutral-400 whitespace-nowrap" rowSpan={row.span}>
                             {row.group.lines.length > 0
-                              ? `${formatSecToMMSS(row.group.lines[0].start)}-${formatSecToMMSS(row.group.lines[row.group.lines.length - 1].end)}`
+                              ? `${formatSecToMMSS(row.group.lines[0].line.start)}-${formatSecToMMSS(row.group.lines[row.group.lines.length - 1].line.end)}`
                               : '—'}
                           </td>
                           <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
@@ -1181,7 +1276,7 @@ export function SceneEditorList({
                           <td className="px-2 py-1.5" rowSpan={row.span}>
                             {row.group.lines.length > 0 && (
                               <button
-                                onClick={() => startAddForGap(row.group.lines[0].start, row.group.lines[row.group.lines.length - 1].end)}
+                                onClick={() => startAddForGap(row.group.lines[0].line.start, row.group.lines[row.group.lines.length - 1].line.end)}
                                 className="text-[10px] font-bold text-blue-600 hover:underline text-left"
                               >
                                 + 장면 추가
