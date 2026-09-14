@@ -100,7 +100,9 @@ import { CopyButton, SceneEditorList, PresetPickerModal } from './shared';
 // 방식으로 앞으로 수정할예정"), 아래 SRT 로딩 useEffect가 무조건 subtitleUrls[0]만 읽던 것을
 // selected:true인 항목을 우선하도록 바꿨다 — 실사고: 코카콜라 유닛에 "자동 생성" 다음 "제미나이
 // 재생성 자막"을 추가했는데도 여기는 계속 첫 항목("자동 생성")을 읽고 있었다. selected가 없으면
-// (과거 데이터, 아직 아무것도 체크 안 한 경우) 여전히 배열의 첫 번째로 fallback한다.
+// (과거 데이터, 아직 아무것도 체크 안 한 경우) 여전히 배열의 첫 번째로 fallback한다. 또한 이렇게
+// 로드된 srtText를 SceneEditorList에도 그대로 넘겨서, 13번 표 맨 왼쪽 열에 장면별 SRT 원문을
+// 순서대로 보여준다(사용자 요청: "13단계에서 가장 왼쪽에 srt자막이 순서대로 아래로 나열되어야해").
 function formatSec(sec: number): string {
   const total = Math.max(0, Math.round(sec || 0));
   const m = Math.floor(total / 60);
@@ -603,6 +605,7 @@ ${srtText || '(자막 없음)'}`}
                     saving={saving}
                     onSave={(text) => save(u.id, text)}
                     characterTabs={selectedCharacterPreset.tabs || []}
+                    srtText={srtText || ''}
                   />
                 </div>
               )}
