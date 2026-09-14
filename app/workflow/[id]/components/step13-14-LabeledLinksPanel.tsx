@@ -40,12 +40,13 @@ function parseSrtCues(text: string): SrtCue[] {
 // srt 편집기를 구현 못하냐고"). 파일 내용을 그대로 fetch해서 textarea에 띄우고, 저장하면 그
 // 텍스트를 새 파일로 업로드해서 같은 항목의 url만 교체한다(라벨 유지) — 별도 항목을 추가하는
 // 게 아니라 "그 자리에서 고치는" 동작이라 저장 시 원래 있던 항목을 대체한다.
-// 같은 유닛의 나레이션 목록을 같이 받아서, 편집 중 오디오를 재생하며 16:9/9:16 화면 비율
-// 미리보기 안에 현재 재생 시각에 맞는 자막 한 줄을 실시간으로 띄운다(사용자 요청: "16:9 나
-// 9:16 화면에서 보면서 편집을 할수있었으면 해") — 정렬/줄수/배경색/글자색도 미리보기에서
-// 바로 바꿔볼 수 있다(사용자 요청: "왼쪽정열,우측정열,가운데정열 / 글자줄 1줄,2줄 / 배경색상 /
-// 글자색상"). 이 스타일 컨트롤은 지금은 미리보기 전용이다 — 저장은 자막 텍스트만 하고, 이
-// 스타일 값 자체를 DB에 저장하거나 실제 렌더링(캡션 프리셋)에 반영하지는 않는다.
+// narrationUnit(같은 유닛의 나레이션 목록)을 같이 받아서, 편집 중 오디오를 재생하며 16:9/9:16
+// 화면 비율 미리보기 안에 현재 재생 시각에 맞는 자막 한 줄을 실시간으로 띄운다(사용자 요청:
+// "16:9 나 9:16 화면에서 보면서 편집을 할수있었으면 해") — 실제 렌더링될 화면 느낌 그대로 자막
+// 타이밍·줄바꿈을 확인하면서 고칠 수 있다. 배경색은 프레임 전체가 아니라 자막 텍스트 자체에
+// fit-content 너비로 붙는다(실제 자막 스타일과 동일하게 줄 너비만큼만 색칠 — 2026-09-15 사용자
+// 지적: "보통 이렇게 나오지 않자나 텍스트 뒤에만 색칠이 있지" — 처음엔 프레임 전체 너비로 깔려서
+// 고쳤다). 글자 크기 슬라이더(10~28px)도 같이 추가했다.
 function LabeledFieldSection({
   site,
   unit,
@@ -85,6 +86,7 @@ function LabeledFieldSection({
   const [previewLines, setPreviewLines] = useState<1 | 2>(2);
   const [previewBg, setPreviewBg] = useState('#000000');
   const [previewColor, setPreviewColor] = useState('#ffffff');
+  const [previewFontSize, setPreviewFontSize] = useState(15);
 
   const cues = useMemo(() => parseSrtCues(editText), [editText]);
   const activeCue = useMemo(() => cues.find((c) => previewTime >= c.start && previewTime <= c.end), [cues, previewTime]);
@@ -238,15 +240,19 @@ function LabeledFieldSection({
                           }}
                         >
                           <p
-                            className="text-[11px] font-bold px-2 pb-3 leading-snug whitespace-pre-wrap overflow-hidden"
+                            className="font-bold leading-snug whitespace-pre-wrap overflow-hidden mb-3"
                             style={{
                               textAlign: previewAlign,
                               color: previewColor,
                               backgroundColor: previewBg,
+                              fontSize: previewFontSize,
                               display: '-webkit-box',
                               WebkitLineClamp: previewLines,
                               WebkitBoxOrient: 'vertical',
-                              maxWidth: '100%',
+                              width: 'fit-content',
+                              maxWidth: 'calc(100% - 16px)',
+                              padding: '2px 6px',
+                              borderRadius: 3,
                             }}
                           >
                             {activeCue?.text || ''}
@@ -285,6 +291,18 @@ function LabeledFieldSection({
                           >
                             2줄
                           </button>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-neutral-500 shrink-0">글자크기</span>
+                          <input
+                            type="range"
+                            min={10}
+                            max={28}
+                            value={previewFontSize}
+                            onChange={(e) => setPreviewFontSize(Number(e.target.value))}
+                            className="flex-1"
+                          />
+                          <span className="text-[10px] text-neutral-400 w-6 shrink-0">{previewFontSize}</span>
                         </div>
                         <div className="flex gap-2 items-center">
                           <label className="flex items-center gap-1 text-[10px] font-bold text-neutral-500">
@@ -392,7 +410,9 @@ function LabeledFieldSection({
   );
 }
 
-// 13번(나레이션(TTS) & 자막생성) 전용 — 예전엔 나레이션·자막을 각자 콘텐츠 목록을 통째로 훑는
+// 나레이션(TTS) & 자막생성 단계 전용(2026-09-15 — 파일명은 예전 번호 체계의 "13-14"가 남아있지만,
+// 현재 워크플로우 문서 기준 번호는 12번이다. 정확한 단계 번호는 파이프라인마다 다를 수 있으니
+// 항상 그 파이프라인의 workflow_content를 먼저 확인할 것). 예전엔 나레이션·자막을 각자 콘텐츠 목록을 통째로 훑는
 // 별개 아코디언 두 개로 보여줘서, 콘텐츠 하나의 나레이션·자막을 같이 보려면 두 목록을 각각 펼쳐
 // 찾아야 했다(2026-09-09, 사용자 지적: "1번컨텐츠를 열면 함께 확인할수 있도록" — 13·14번을 워크플로우
 // 단계에서 하나로 합친 것과 같은 맥락으로, 실제 화면도 콘텐츠 단위로 먼저 묶고 그 안에 나레이션·
