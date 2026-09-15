@@ -19,6 +19,7 @@ import {
   isScriptStep,
   isImageVideoStep,
   isNarrationStep,
+  isRenderStep,
 } from '../utils';
 import { ChannelPanel } from './step01-ChannelPanel';
 import { MaterialPanel } from './step02-MaterialPanel';
@@ -33,6 +34,7 @@ import { PlanningDocPanel } from './step10-PlanningDocPanel';
 import { ScriptWritingPanel } from './step11-ScriptWritingPanel';
 import { NarrationSubtitlePanel } from './step13-14-LabeledLinksPanel';
 import { ImageVideoPanel } from './step16-17-ImageVideoPanel';
+import { RenderPanel } from './step14-RenderPanel';
 import { StepDocSection } from './shared';
 
 export function FlowChart({
@@ -158,6 +160,7 @@ export function FlowChart({
           {isScriptStep(active) && <ScriptWritingPanel site={site} onRefresh={onRefreshSite} />}
           {isImageVideoStep(active) && <ImageVideoPanel site={site} onRefresh={onRefreshSite} />}
           {isNarrationStep(active) && <NarrationSubtitlePanel site={site} onRefresh={onRefreshSite} />}
+          {isRenderStep(active) && <RenderPanel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
