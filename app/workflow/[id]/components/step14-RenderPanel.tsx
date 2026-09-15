@@ -136,6 +136,7 @@ export function RenderPanel({ site, onRefresh }: { site: Site; onRefresh: () => 
                       characterTabs={selectedCharacterPreset.tabs || []}
                       srtText={srtText || ''}
                       mergeMediaColumn
+                      captionStyle={u.captionStyle}
                     />
                   </div>
                 </div>
