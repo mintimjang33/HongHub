@@ -201,7 +201,7 @@ export function SceneImageModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-black rounded-xl overflow-hidden w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
           {/* 2026-09-16(7차) 수정 — 사용자 요청: "상단에 넘버를 자막번호, 씬번호로 =>
               # 1 / 전체, S01 / 전체". 자막 줄 번호(#)와 씬 번호(S01)를 각자 따로 보여준다 —
@@ -264,7 +264,7 @@ export function SceneImageModal({
               검은 배경 박스, 화면 하단 중앙)로 지금 이 줄의 자막을 이미지/영상 위에 실제
               캡션처럼 얹어 보여준다. */}
           {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[96%] text-center pointer-events-none">
               <span
                 className="font-bold text-white inline-block"
                 style={{
@@ -274,6 +274,7 @@ export function SceneImageModal({
                   fontSize: CAPTION_FONT_SIZE,
                   boxDecorationBreak: 'clone',
                   WebkitBoxDecorationBreak: 'clone',
+                  whiteSpace: 'pre-line',
                 }}
               >
                 {entry.text}
@@ -366,7 +367,7 @@ export function SceneVideoModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-black rounded-xl overflow-hidden w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
           <div className="flex items-center gap-2">
             <span className="text-white/50 text-[11px] font-mono px-1">
@@ -419,7 +420,7 @@ export function SceneVideoModal({
             </button>
           )}
           {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[96%] text-center pointer-events-none">
               <span
                 className="font-bold text-white inline-block"
                 style={{
@@ -429,6 +430,7 @@ export function SceneVideoModal({
                   fontSize: CAPTION_FONT_SIZE,
                   boxDecorationBreak: 'clone',
                   WebkitBoxDecorationBreak: 'clone',
+                  whiteSpace: 'pre-line',
                 }}
               >
                 {entry.text}
@@ -1490,9 +1492,6 @@ export function SceneEditorList({
                               —
                             </td>
                           )}
-                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
-                            —
-                          </td>
                           <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
                             —
                           </td>
