@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { SceneBlock, Site, Step, CaptionStyle } from '../types';
+import type { SceneBlock, Site, Step } from '../types';
 import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById } from '../utils';
 
 // 2026-09-13 (4차) 추가 — 사용자 요청: "13단계에서 모달을 띄웠을 때 선택한 이미지를 다운받을
@@ -35,13 +35,7 @@ function formatTimeWithDuration(time: string): string {
 // 코드 기본값(DEFAULT_PREVIEW_STYLE.fontSize=15)이 아니라 유닛별로 사용자가 직접 조절해서
 // localStorage에 저장해둔 값이라, 실제로 이 콘텐츠에서 쓰던 크기는 13이었다 — 코드 기본값이
 // 아니라 사용자가 실제로 보고 있던 값에 맞춘다.
-// 2026-09-16(15차) 수정 — 사용자 지적: "로컬에 저장되면 다른곳에서 보면 또 다르게
-// 나오는데?? 그러면 안되지" — 정렬/줄수/글자크기/배경·글자색이 브라우저 localStorage에만
-// 저장돼 기기마다 다르게 보이던 문제. 이제 이 값들을 유닛(ContentUnit.captionStyle, types.ts)에
-// 저장해서 12번 편집기와 13/14번 미리보기가 항상 같은 값을 공유한다 — 여기 하드코딩 상수 대신
-// 각 씬이 속한 유닛의 captionStyle을 props로 받아 쓰고, 아직 저장된 적 없는(과거 데이터)
-// 유닛은 이 기본값으로 대체한다.
-const DEFAULT_CAPTION_STYLE: CaptionStyle = { align: 'center', lines: 2, fontSize: 13, bg: '#000000', color: '#ffffff' };
+const CAPTION_FONT_SIZE = 13;
 
 async function downloadFile(url: string, filename: string) {
   try {
@@ -162,6 +156,149 @@ export function PresetPickerModal({
 // null로 채운 항목을 씬 개수만큼 만들어 예전과 같은 "씬 기준 넘기기"로 그대로 대체한다.
 type ModalNavItem = { lineIdx: number | null; text: string; sceneIdx: number | null; start: number | null; end: number | null };
 
+// 2026-09-16(17차) 추가 — 사용자 요청: "14단계에서 모달을 띄우면 트랙번호 설정, 시간설정,
+// 위치설정을 할수 있게". 확인 결과 "시간"은 클립 재생 구간(트리밍)이 아니라 현재 길이를
+// 참고로 보여주는 용도(트리밍은 명시적으로 원치 않음)이고, "트랙번호"는 실제로 다른 트랙으로
+// 옮기고 싶다는 뜻이었다("위치만 정확하게 셋팅하고 싶은거야 — 숏컷 셋팅파일에다가"). app/api/
+// render-position이 실제 .mlt 파일을 읽고/고쳐서 이 값을 돌려준다 — 여기서 같은 모양을 다시
+// 선언하는 이유는 서버 전용 라우트 파일을 프런트엔드에서 import할 수 없기 때문.
+type ClipPosition = { file: string; positionMs: number; durationMs: number; trackNumber: number };
+
+// 밀리초를 "분:초.밀리초"(예: "0:11.000")로 표시 — mlt가 실제로 쓰는 밀리초 정밀도를 그대로
+// 보여줘야 한다(사용자 지적: "0:06 이렇게만 나오지만 좀더 디테일하게 나와야 할꺼 같아").
+function msToClock(ms: number): string {
+  const total = Math.max(0, Math.round(ms));
+  const m = Math.floor(total / 60000);
+  const s = Math.floor((total % 60000) / 1000);
+  const millis = total % 1000;
+  return `${m}:${String(s).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
+}
+
+// "0:11.000" / "0:11" / "11.5"(초만) 등 여러 표기를 밀리초로 변환. 형식이 안 맞으면 null.
+function clockToMs(clock: string): number | null {
+  const trimmed = clock.trim();
+  let m = trimmed.match(/^(\d+):(\d{1,2})(?:[.,](\d{1,3}))?$/);
+  if (m) {
+    const min = parseInt(m[1], 10);
+    const s = parseInt(m[2], 10);
+    const ms = m[3] ? parseInt(m[3].padEnd(3, '0').slice(0, 3), 10) : 0;
+    return (min * 60 + s) * 1000 + ms;
+  }
+  m = trimmed.match(/^(\d+)(?:[.,](\d{1,3}))?$/);
+  if (m) {
+    const s = parseInt(m[1], 10);
+    const ms = m[2] ? parseInt(m[2].padEnd(3, '0').slice(0, 3), 10) : 0;
+    return s * 1000 + ms;
+  }
+  return null;
+}
+
+// SceneVideoModal 안에 임베드되는 트랙/위치 입력 필드 — 자체 입력 상태(draft)를 가지므로 별도
+// 컴포넌트로 뺐다. info(현재 서버에 저장된 값)가 바뀌면(파일이 바뀌거나 저장 후 갱신되면) 입력칸도
+// 그 값으로 다시 맞춘다.
+function ClipControlFields({
+  info,
+  totalTracks,
+  onSetPosition,
+  onSetTrack,
+}: {
+  info: ClipPosition;
+  totalTracks: number;
+  onSetPosition: (file: string, positionMs: number) => Promise<void>;
+  onSetTrack: (file: string, trackNumber: number) => Promise<void>;
+}) {
+  const [posDraft, setPosDraft] = useState(msToClock(info.positionMs));
+  const [trackDraft, setTrackDraft] = useState(String(info.trackNumber));
+  const [savingPos, setSavingPos] = useState(false);
+  const [savingTrack, setSavingTrack] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    setPosDraft(msToClock(info.positionMs));
+    setTrackDraft(String(info.trackNumber));
+  }, [info.file, info.positionMs, info.trackNumber]);
+
+  async function applyPosition() {
+    const ms = clockToMs(posDraft);
+    if (ms === null) {
+      setErr('시간 형식이 올바르지 않습니다. 예: 0:11.000');
+      return;
+    }
+    setErr('');
+    setSavingPos(true);
+    try {
+      await onSetPosition(info.file, ms);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingPos(false);
+    }
+  }
+
+  async function applyTrack() {
+    const n = parseInt(trackDraft, 10);
+    if (!Number.isFinite(n) || n < 1 || n > totalTracks) {
+      setErr(`트랙 번호는 1~${totalTracks} 사이여야 합니다.`);
+      return;
+    }
+    setErr('');
+    setSavingTrack(true);
+    try {
+      await onSetTrack(info.file, n);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingTrack(false);
+    }
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[10px] text-neutral-400 font-mono">
+        클립: {info.file} · 길이 {msToClock(info.durationMs)}(참고용 — 구간 자르기는 지원하지 않음)
+      </p>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-bold text-neutral-400 w-16 shrink-0">트랙 번호</span>
+        <input
+          value={trackDraft}
+          onChange={(e) => setTrackDraft(e.target.value)}
+          className="w-14 border border-neutral-700 bg-neutral-800 rounded-lg px-1.5 py-1 text-[11px] font-mono text-white"
+        />
+        <span className="text-[10px] text-neutral-500">/ {totalTracks}</span>
+        <button onClick={applyTrack} disabled={savingTrack} className="text-[10px] font-black text-blue-400 hover:underline disabled:opacity-40">
+          {savingTrack ? '적용 중...' : '적용'}
+        </button>
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-bold text-neutral-400 w-16 shrink-0">타임라인 위치</span>
+        <input
+          value={posDraft}
+          onChange={(e) => setPosDraft(e.target.value)}
+          placeholder="0:11.000"
+          className="w-28 border border-neutral-700 bg-neutral-800 rounded-lg px-1.5 py-1 text-[11px] font-mono text-white"
+        />
+        <button onClick={applyPosition} disabled={savingPos} className="text-[10px] font-black text-blue-400 hover:underline disabled:opacity-40">
+          {savingPos ? '적용 중...' : '적용'}
+        </button>
+      </div>
+      {err && <p className="text-[10px] text-red-400 font-bold">{err}</p>}
+    </div>
+  );
+}
+
+// SceneVideoModal에 넘기는 렌더링(.mlt) 클립 제어 묶음 — enabled는 14번(mergeMediaColumn)
+// 컨텍스트에서만 true (13번에서는 이 패널 자체가 안 보임).
+export type ClipControl = {
+  enabled: boolean;
+  mltUrl: string;
+  loading: boolean;
+  error: string;
+  totalTracks: number;
+  info: ClipPosition | null;
+  onSetPosition: (file: string, positionMs: number) => Promise<void>;
+  onSetTrack: (file: string, trackNumber: number) => Promise<void>;
+};
+
 export function SceneImageModal({
   scenes,
   navItems,
@@ -170,7 +307,6 @@ export function SceneImageModal({
   onNavigate,
   totalLines,
   totalScenes,
-  captionStyle,
 }: {
   scenes: SceneBlock[];
   navItems: ModalNavItem[];
@@ -179,7 +315,6 @@ export function SceneImageModal({
   onNavigate: (idx: number) => void;
   totalLines: number;
   totalScenes: number;
-  captionStyle?: CaptionStyle;
 }) {
   const entry = navItems[index];
   const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
@@ -209,7 +344,7 @@ export function SceneImageModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-black rounded-xl overflow-hidden w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
           {/* 2026-09-16(7차) 수정 — 사용자 요청: "상단에 넘버를 자막번호, 씬번호로 =>
               # 1 / 전체, S01 / 전체". 자막 줄 번호(#)와 씬 번호(S01)를 각자 따로 보여준다 —
@@ -271,33 +406,23 @@ export function SceneImageModal({
               보여줘". step13-14-LabeledLinksPanel.tsx의 캡션 미리보기와 같은 스타일(흰 글씨 +
               검은 배경 박스, 화면 하단 중앙)로 지금 이 줄의 자막을 이미지/영상 위에 실제
               캡션처럼 얹어 보여준다. */}
-          {entry.text && (() => {
-            const style = captionStyle || DEFAULT_CAPTION_STYLE;
-            return (
-              <div
-                className="absolute bottom-4 inset-x-3 pointer-events-none flex"
-                style={{ justifyContent: style.align === 'left' ? 'flex-start' : style.align === 'right' ? 'flex-end' : 'center' }}
+          {entry.text && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+              <span
+                className="font-bold text-white inline-block"
+                style={{
+                  backgroundColor: '#000000',
+                  padding: '4px 10px',
+                  borderRadius: 3,
+                  fontSize: CAPTION_FONT_SIZE,
+                  boxDecorationBreak: 'clone',
+                  WebkitBoxDecorationBreak: 'clone',
+                }}
               >
-                <span
-                  className="font-bold inline-block"
-                  style={{
-                    maxWidth: style.lines === 1 ? '96%' : '75%',
-                    textAlign: style.align,
-                    color: style.color,
-                    backgroundColor: style.bg,
-                    padding: '4px 10px',
-                    borderRadius: 3,
-                    fontSize: style.fontSize,
-                    boxDecorationBreak: 'clone',
-                    WebkitBoxDecorationBreak: 'clone',
-                    whiteSpace: 'pre-line',
-                  }}
-                >
-                  {entry.text}
-                </span>
-              </div>
-            );
-          })()}
+                {entry.text}
+              </span>
+            </div>
+          )}
         </div>
         <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
           {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
@@ -350,7 +475,7 @@ export function SceneVideoModal({
   onNavigate,
   totalLines,
   totalScenes,
-  captionStyle,
+  clipControl,
 }: {
   scenes: SceneBlock[];
   navItems: ModalNavItem[];
@@ -359,7 +484,9 @@ export function SceneVideoModal({
   onNavigate: (idx: number) => void;
   totalLines: number;
   totalScenes: number;
-  captionStyle?: CaptionStyle;
+  // 2026-09-16(17차) 추가 — 14번(RenderPanel)에서만 넘어온다. 13번 호출부는 이 prop 자체를
+  // 안 넘기므로 패널이 안 보인다.
+  clipControl?: ClipControl;
 }) {
   const entry = navItems[index];
   const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
@@ -386,7 +513,7 @@ export function SceneVideoModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-black rounded-xl overflow-hidden w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
           <div className="flex items-center gap-2">
             <span className="text-white/50 text-[11px] font-mono px-1">
@@ -438,33 +565,23 @@ export function SceneVideoModal({
               ›
             </button>
           )}
-          {entry.text && (() => {
-            const style = captionStyle || DEFAULT_CAPTION_STYLE;
-            return (
-              <div
-                className="absolute bottom-4 inset-x-3 pointer-events-none flex"
-                style={{ justifyContent: style.align === 'left' ? 'flex-start' : style.align === 'right' ? 'flex-end' : 'center' }}
+          {entry.text && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+              <span
+                className="font-bold text-white inline-block"
+                style={{
+                  backgroundColor: '#000000',
+                  padding: '4px 10px',
+                  borderRadius: 3,
+                  fontSize: CAPTION_FONT_SIZE,
+                  boxDecorationBreak: 'clone',
+                  WebkitBoxDecorationBreak: 'clone',
+                }}
               >
-                <span
-                  className="font-bold inline-block"
-                  style={{
-                    maxWidth: style.lines === 1 ? '96%' : '75%',
-                    textAlign: style.align,
-                    color: style.color,
-                    backgroundColor: style.bg,
-                    padding: '4px 10px',
-                    borderRadius: 3,
-                    fontSize: style.fontSize,
-                    boxDecorationBreak: 'clone',
-                    WebkitBoxDecorationBreak: 'clone',
-                    whiteSpace: 'pre-line',
-                  }}
-                >
-                  {entry.text}
-                </span>
-              </div>
-            );
-          })()}
+                {entry.text}
+              </span>
+            </div>
+          )}
         </div>
         <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
           {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
@@ -490,188 +607,32 @@ export function SceneVideoModal({
               <CopyButton text={scene.video} />
             </div>
           )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// 2026-09-16(16차) 추가 — 사용자 지적: "14번에서 모달을 띄우면 13단계와 다르게 있는곳의 영상이나
-// 이미지만 가져와서 쭉 이어져야 하는데~~ 9번 자막장면부터 영상이 없다고 나와~~ 바로 이미지를
-// 이어서 불러와야 하는건데~~". 14번(mergeMediaColumn) 표의 썸네일 열은 이미 "영상 있으면 영상,
-// 없으면 이미지"로 합쳐서 보여주는데, 정작 그 썸네일을 눌러서 여는 모달은 SceneImageModal 아니면
-// SceneVideoModal 둘 중 하나로 고정되고 ‹/›로 다음 자막 줄로 넘어가도 모달 "종류"는 안 바뀌었다
-// — 예: 영상이 있는 장면에서 SceneVideoModal을 열고 ›로 다음 장면(영상은 없고 이미지만 있는
-// 장면)으로 넘어가면, scene.sceneVideo가 비어있으니 그 장면에 실제로 이미지가 있어도 무시하고
-// "이 장면엔 아직 영상이 없습니다"만 보여줬다. 이 모달은 SceneImageModal/SceneVideoModal과 거의
-// 같은 구조지만, 렌더링할 때마다(=자막 줄이 바뀔 때마다) 그 장면에 영상이 있으면 영상을, 없으면
-// 이미지를, 둘 다 없으면 자리표시자를 보여주도록 매번 다시 판단한다 — 13번(mergeMediaColumn
-// 기본값 false)의 SceneImageModal/SceneVideoModal은 이 문제와 무관하므로 그대로 둔다(거기는
-// 애초에 "이 씬이 영상까지 필요한지"를 이미지/영상 모달을 분리해서 보여주는 게 의도된 동작).
-export function SceneMergedModal({
-  scenes,
-  navItems,
-  index,
-  onClose,
-  onNavigate,
-  totalLines,
-  totalScenes,
-  captionStyle,
-}: {
-  scenes: SceneBlock[];
-  navItems: ModalNavItem[];
-  index: number;
-  onClose: () => void;
-  onNavigate: (idx: number) => void;
-  totalLines: number;
-  totalScenes: number;
-  captionStyle?: CaptionStyle;
-}) {
-  const entry = navItems[index];
-  const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
-  const hasPrev = index > 0;
-  const hasNext = index < navItems.length - 1;
-  const hasVideo = !!scene?.sceneVideo;
-  const hasImage = !!scene?.sceneImage;
-
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'ArrowRight' && index < navItems.length - 1) onNavigate(index + 1);
-      else if (e.key === 'ArrowLeft' && index > 0) onNavigate(index - 1);
-      else if (e.key === 'Escape') onClose();
-    }
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [index, navItems.length, onNavigate, onClose]);
-
-  if (!entry) return null;
-
-  const timeLabel = scene?.time
-    ? formatTimeWithDuration(scene.time)
-    : entry.start !== null && entry.end !== null
-      ? formatTimeWithDuration(`${formatSecToMMSS(entry.start)}-${formatSecToMMSS(entry.end)}`)
-      : '';
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-black rounded-xl overflow-hidden w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
-          <div className="flex items-center gap-2">
-            <span className="text-white/50 text-[11px] font-mono px-1">
-              # {entry.lineIdx !== null ? entry.lineIdx + 1 : '—'} / {totalLines}
-            </span>
-            <span className="text-white/50 text-[11px] font-mono px-1">
-              {scene ? scene.id : '—'} / {totalScenes}
-            </span>
-          </div>
-          <div className="flex items-center gap-1">
-            {hasVideo && (
-              <button
-                onClick={() => downloadFile(scene!.sceneVideo, `${scene!.id}.mp4`)}
-                className="text-white/70 hover:text-white text-xs font-black px-2 py-1"
-              >
-                ⬇ 다운로드
-              </button>
-            )}
-            {!hasVideo && hasImage && (
-              <button
-                onClick={() => downloadFile(scene!.sceneImage, `${scene!.id}.jpg`)}
-                className="text-white/70 hover:text-white text-xs font-black px-2 py-1"
-              >
-                ⬇ 다운로드
-              </button>
-            )}
-            <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
-              ✕ 닫기
-            </button>
-          </div>
-        </div>
-        <div className="relative flex items-center justify-center bg-black min-h-[45vh]">
-          {hasPrev && (
-            <button
-              type="button"
-              onClick={() => onNavigate(index - 1)}
-              className="absolute left-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
-              aria-label="이전 자막"
-            >
-              ‹
-            </button>
-          )}
-          {hasVideo ? (
-            <video src={scene!.sceneVideo} controls autoPlay className="max-w-full max-h-[70vh]" />
-          ) : hasImage ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={scene!.sceneImage} alt={scene!.title || scene!.id} className="max-w-full max-h-[70vh] object-contain" />
-          ) : (
-            <div className="text-neutral-500 text-xs py-24 text-center px-6">
-              {scene ? '이 장면엔 아직 이미지·영상이 없습니다' : '이 자막 구간엔 아직 등록된 장면이 없습니다'}
-            </div>
-          )}
-          {hasNext && (
-            <button
-              type="button"
-              onClick={() => onNavigate(index + 1)}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
-              aria-label="다음 자막"
-            >
-              ›
-            </button>
-          )}
-          {entry.text && (() => {
-            const style = captionStyle || DEFAULT_CAPTION_STYLE;
-            return (
-              <div
-                className="absolute bottom-4 inset-x-3 pointer-events-none flex"
-                style={{ justifyContent: style.align === 'left' ? 'flex-start' : style.align === 'right' ? 'flex-end' : 'center' }}
-              >
-                <span
-                  className="font-bold inline-block"
-                  style={{
-                    maxWidth: style.lines === 1 ? '96%' : '75%',
-                    textAlign: style.align,
-                    color: style.color,
-                    backgroundColor: style.bg,
-                    padding: '4px 10px',
-                    borderRadius: 3,
-                    fontSize: style.fontSize,
-                    boxDecorationBreak: 'clone',
-                    WebkitBoxDecorationBreak: 'clone',
-                    whiteSpace: 'pre-line',
-                  }}
-                >
-                  {entry.text}
-                </span>
-              </div>
-            );
-          })()}
-        </div>
-        <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
-          {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
-          {entry.text && (
-            <p className="text-white text-[11px] font-bold leading-relaxed">
-              # {entry.lineIdx !== null ? entry.lineIdx + 1 : ''} {entry.text}
-            </p>
-          )}
-          {scene && <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>}
-          {scene?.note && (
-            <p className="text-amber-200/80 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
-              💡 {scene.note}
-            </p>
-          )}
-          {hasVideo && scene?.video && (
-            <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
-              <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
-                {scene.video}
-              </p>
-              <CopyButton text={scene.video} />
-            </div>
-          )}
-          {!hasVideo && scene?.imagePrompt && (
-            <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
-              <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
-                {scene.imagePrompt}
-              </p>
-              <CopyButton text={scene.imagePrompt} />
+          {/* 2026-09-16(17차) 추가 — 사용자 요청: "14단계에서 모달을 띄우면 트랙번호 설정,
+              시간설정, 위치설정을 할수 있게" + "현재 모달을 띄우면 현재 설정된 값이 보이면
+              되겠다". 14번(RenderPanel)에서만 clipControl이 넘어온다. */}
+          {clipControl?.enabled && (
+            <div className="border-t border-white/10 pt-1.5 mt-1">
+              <p className="text-[10px] font-black text-neutral-400 mb-1">🎬 렌더링 파일(.mlt) 설정</p>
+              {!clipControl.mltUrl ? (
+                <p className="text-[10px] text-amber-300">
+                  아직 Shotcut 프로젝트(.mlt) 파일이 없습니다 — 위 &quot;🎬 렌더링 파일&quot;에서 먼저 업로드해주세요.
+                </p>
+              ) : clipControl.loading ? (
+                <p className="text-[10px] text-neutral-400">불러오는 중...</p>
+              ) : clipControl.error ? (
+                <p className="text-[10px] text-red-400 font-bold">{clipControl.error}</p>
+              ) : !clipControl.info ? (
+                <p className="text-[10px] text-neutral-400">
+                  이 .mlt 파일에서 {scene ? `${scene.id}.mp4` : '이 장면'} 클립을 찾지 못했습니다(파일명이 장면 ID와 일치해야 합니다).
+                </p>
+              ) : (
+                <ClipControlFields
+                  info={clipControl.info}
+                  totalTracks={clipControl.totalTracks}
+                  onSetPosition={clipControl.onSetPosition}
+                  onSetTrack={clipControl.onSetTrack}
+                />
+              )}
             </div>
           )}
         </div>
@@ -1103,7 +1064,7 @@ export function SceneEditorList({
   characterTabs = [],
   srtText = '',
   mergeMediaColumn = false,
-  captionStyle,
+  mltUrl = '',
 }: {
   scenePrompts: string;
   onSave: (text: string) => void | Promise<void>;
@@ -1123,20 +1084,92 @@ export function SceneEditorList({
   // true로 넘겨서 "화면" 열 하나로 합친다: sceneVideo가 있으면 영상 썸네일, 없으면(장면이미지
   // 유무 무관) 이미지 썸네일/자리표시자를 보여준다.
   mergeMediaColumn?: boolean;
-  // 2026-09-16(15차) 추가 — 유닛의 자막 스타일(정렬/줄수/글자크기/배경·글자색). 아래
-  // SceneImageModal/SceneVideoModal/SceneMergedModal의 캡션 오버레이에 그대로 전달된다.
-  captionStyle?: CaptionStyle;
+  // 2026-09-16(17차) 추가 — 사용자 요청: "14번에서 영상 앞의 1초를 잘르는 편집을 해달라는게
+  // 아니라, 위치만 정확하게 셋팅하고 싶은거야 — 숏컷 셋팅파일에다가" + "모달을 띄우면 트랙번호
+  // 설정, 시간설정, 위치설정을 할수 있게". 등록된 Shotcut 프로젝트(.mlt) 파일의 공개 URL —
+  // 있으면(14번) 영상 모달에 실제 .mlt 클립의 트랙/위치 조정 패널이 뜨고, 없으면(13번, 또는
+  // 14번인데 아직 .mlt를 안 올린 상태) 패널 자체가 안 뜨거나 "먼저 업로드해주세요" 안내만 뜬다.
+  mltUrl?: string;
 }) {
   const scenes = parseSceneBlocks(scenePrompts);
   const srtLines = useMemo(() => parseSrtLines(srtText), [srtText]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 장면 추가 중
   const [draft, setDraft] = useState<SceneBlock>(EMPTY_SCENE_DRAFT);
   // 2026-09-10 추가 — 장면이미지 썸네일을 클릭하면 이 인덱스로 SceneImageModal을 연다. null=닫힘.
-  // 2026-09-16(16차) — mergeMediaColumn(14번)일 땐 이 인덱스로 SceneMergedModal을 연다(영상/이미지
-  // 구분 없이 이거 하나만 쓴다) — previewVideoIndex는 mergeMediaColumn=false(13번)에서만 쓰인다.
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   // 2026-09-13 추가 — 장면영상 썸네일을 클릭하면 이 인덱스로 SceneVideoModal을 연다. null=닫힘.
   const [previewVideoIndex, setPreviewVideoIndex] = useState<number | null>(null);
+  // 2026-09-16(17차) 추가 — mltUrl이 있으면(14번) 그 .mlt 파일 안의 클립별 트랙/위치를
+  // 한 번에 불러와둔다 — 영상 모달을 열 때마다 다시 fetch하지 않고 여기서 가진 값을 그대로
+  // 보여준다(사용자 요청: "현재 모달을 띄우면 현재 설정된 값이 보이면 되겠다").
+  const [clipPositions, setClipPositions] = useState<ClipPosition[] | null>(null);
+  const [clipTotalTracks, setClipTotalTracks] = useState(0);
+  const [clipLoading, setClipLoading] = useState(false);
+  const [clipError, setClipError] = useState('');
+
+  useEffect(() => {
+    if (!mltUrl) {
+      setClipPositions(null);
+      setClipTotalTracks(0);
+      setClipError('');
+      return;
+    }
+    let cancelled = false;
+    setClipLoading(true);
+    setClipError('');
+    fetch(`/api/render-position?mltUrl=${encodeURIComponent(mltUrl)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data.error) {
+          setClipError(data.error);
+          return;
+        }
+        setClipPositions(data.clips);
+        setClipTotalTracks(data.totalTracks);
+      })
+      .catch((err) => {
+        if (!cancelled) setClipError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setClipLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mltUrl]);
+
+  // 장면 id("S02")와 .mlt 안 실제 파일명("s02.mp4")을 확장자 무관하게 매칭한다 — 실제 업로드된
+  // 파일들이 전부 "{장면id}.mp4" 규칙으로 이름 붙여져 있다는 전제(코카콜라 유닛 실측 확인).
+  function findClipForScene(scene: SceneBlock | null): ClipPosition | null {
+    if (!scene || !clipPositions) return null;
+    const idLower = scene.id.toLowerCase();
+    return clipPositions.find((c) => c.file.toLowerCase().startsWith(`${idLower}.`)) || null;
+  }
+
+  async function setClipPositionMs(file: string, positionMs: number) {
+    const res = await fetch('/api/render-position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mltUrl, file, action: 'position', positionMs }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '위치 저장 실패');
+    setClipPositions(data.clips);
+    setClipTotalTracks(data.totalTracks);
+  }
+
+  async function setClipTrackNumber(file: string, trackNumber: number) {
+    const res = await fetch('/api/render-position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mltUrl, file, action: 'track', trackNumber }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '트랙 저장 실패');
+    setClipPositions(data.clips);
+    setClipTotalTracks(data.totalTracks);
+  }
   // 2026-09-12 추가 — 탭 필터 상태. 'all' | 'none' | 'multi' | 탭 인덱스(문자열).
   const [filterTab, setFilterTab] = useState<string>('all');
   // 2026-09-16(3차) 추가 — 사용자 요청: "srt자막 각 라인 선택해서 결합,분리 할수있게(묶음=
@@ -1518,7 +1551,7 @@ export function SceneEditorList({
                               {s.sceneVideo ? (
                                 <button
                                   type="button"
-                                  onClick={() => setPreviewIndex(navIdx)}
+                                  onClick={() => setPreviewVideoIndex(navIdx)}
                                   className="relative block"
                                   title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)"
                                 >
@@ -1750,31 +1783,17 @@ export function SceneEditorList({
         </button>
       )}
       {previewIndex !== null && (
-        mergeMediaColumn ? (
-          <SceneMergedModal
-            scenes={scenes}
-            navItems={navItems}
-            index={previewIndex}
-            onClose={() => setPreviewIndex(null)}
-            onNavigate={setPreviewIndex}
-            totalLines={srtLines.length}
-            totalScenes={filteredWithIndex.length}
-            captionStyle={captionStyle}
-          />
-        ) : (
-          <SceneImageModal
-            scenes={scenes}
-            navItems={navItems}
-            index={previewIndex}
-            onClose={() => setPreviewIndex(null)}
-            onNavigate={setPreviewIndex}
-            totalLines={srtLines.length}
-            totalScenes={filteredWithIndex.length}
-            captionStyle={captionStyle}
-          />
-        )
+        <SceneImageModal
+          scenes={scenes}
+          navItems={navItems}
+          index={previewIndex}
+          onClose={() => setPreviewIndex(null)}
+          onNavigate={setPreviewIndex}
+          totalLines={srtLines.length}
+          totalScenes={filteredWithIndex.length}
+        />
       )}
-      {previewVideoIndex !== null && !mergeMediaColumn && (
+      {previewVideoIndex !== null && (
         <SceneVideoModal
           scenes={scenes}
           navItems={navItems}
@@ -1783,7 +1802,24 @@ export function SceneEditorList({
           onNavigate={setPreviewVideoIndex}
           totalLines={srtLines.length}
           totalScenes={filteredWithIndex.length}
-          captionStyle={captionStyle}
+          clipControl={
+            mergeMediaColumn
+              ? {
+                  enabled: true,
+                  mltUrl,
+                  loading: clipLoading,
+                  error: clipError,
+                  totalTracks: clipTotalTracks,
+                  info: findClipForScene(
+                    navItems[previewVideoIndex]?.sceneIdx !== null && navItems[previewVideoIndex]?.sceneIdx !== undefined
+                      ? scenes[navItems[previewVideoIndex]!.sceneIdx!]
+                      : null
+                  ),
+                  onSetPosition: setClipPositionMs,
+                  onSetTrack: setClipTrackNumber,
+                }
+              : undefined
+          }
         />
       )}
     </div>
