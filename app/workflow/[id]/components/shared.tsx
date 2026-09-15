@@ -1716,6 +1716,9 @@ export function SceneEditorList({
                           <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
                             —
                           </td>
+                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
+                            —
+                          </td>
                           <td className="px-2 py-1.5" rowSpan={row.span}>
                             {row.group.lines.length > 0 && (
                               <button
