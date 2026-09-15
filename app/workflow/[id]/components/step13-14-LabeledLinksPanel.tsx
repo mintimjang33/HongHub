@@ -103,7 +103,12 @@ const CARET_NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight
 // 처음엔 컴포넌트 state 기본값으로만 뒀더니 편집창을 닫았다 열 때마다 초기값(중앙/2줄/13px)으로
 // 리셋됐다(사용자 지적: "이 설정값은 왜 저장이 안되???"). 나레이션 선택(previewNarrationUrl)과
 // 똑같이 localStorage에 유닛별로 저장해서 편집창을 다시 열어도 마지막 설정이 유지되게 한다.
-function LabeledFieldSection({
+//
+// 2026-09-16(6차) 수정 — export로 변경. 사용자 요청("14단계에서... 수동으로 업로드, 삭제
+// 할수있게 해주고~")으로 14번(렌더링) 단계도 "콘텐츠 하나에 라벨 붙은 링크/파일 여러 개"라는
+// 완전히 같은 구조(narrationUrls/subtitleUrls와 동일)가 필요해져서, 이 조각을 새로 만든
+// step14-RenderPanel.tsx에서도 그대로 재사용할 수 있게 export한다.
+export function LabeledFieldSection({
   site,
   unit,
   onRefresh,
