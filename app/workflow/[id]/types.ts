@@ -36,6 +36,12 @@ export type AnalysisResult = {
 // 여기 unit id를 기준으로 진행 상태를 붙일 수 있게 id를 갖고 있다.
 export type UnitReview = { score?: number; feedback?: string; reviewedAt?: string };
 export type UnitCategory = 'trivia' | 'disaster';
+// 2026-09-16(15차) 추가 — 자막 표시 스타일(정렬/줄수/글자크기/배경·글자색). 사용자 지적: "로컬에
+// 저장되면 다른곳에서 보면 또 다르게 나오는데?? 그러면 안되지~" → "DB에 저장을 해둬 각 컨텐츠의
+// 자막 설정으로". 예전엔 이 값들이 브라우저 localStorage에만 저장돼 기기마다 다르게 보였다 — 이제
+// ContentUnit.captionStyle(이 아래)에 서버 저장해서 12번 편집기(step13-14-LabeledLinksPanel.tsx)와
+// 13/14번 미리보기(shared.tsx의 SceneImageModal/SceneVideoModal)가 항상 같은 값을 공유한다.
+export type CaptionStyle = { align: 'left' | 'center' | 'right'; lines: 1 | 2; fontSize: number; bg: string; color: string };
 export type ContentUnit = {
   id: string;
   material: string;
@@ -97,6 +103,9 @@ export type ContentUnit = {
   // subtitleUrls와 완전히 같은 구조(라벨 붙은 링크/파일 여러 개)라 LabeledFieldSection을
   // 그대로 재사용한다(step14-RenderPanel.tsx).
   renderFiles?: LabeledItem[];
+  // 2026-09-16(15차) 추가 — 자막 표시 스타일(정렬/줄수/글자크기/배경·글자색). 위 CaptionStyle
+  // 주석 참고 — 12번 편집기가 여기 저장/로드하고, 13/14번 미리보기가 그대로 읽어서 적용한다.
+  captionStyle?: CaptionStyle;
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -172,9 +181,9 @@ export type SceneBlock = {
   time: string;
   sceneImage: string;
   // 2026-09-13 추가 — 사용자 요청: "장면 이미지 오른쪽에 영상장면 추가해줘, 장면 이미지와 동일
-  // 방식으로(영상 필요한 것들만 몇 개만 등록할 거야)". sceneImage와 완전히 같은 패턴(단일 URL,
-  // 파일 업로드로 등록, 값이 없으면 빈 문자열)으로 둔다 — 대부분의 씬은 정지 이미지만 쓰고,
-  // 훅/인트로 등 실제로 영상 클립을 만든 일부 씬에만 채워진다.
+  // 방식으로". sceneImage와 완전히 같은 패턴(단일 URL, 파일 업로드로 등록, 값이 없으면 빈 문자열)
+  // 으로 둔다 — 대부분의 씬은 정지 이미지만 쓰고, 훅/인트로 등 실제로 영상 클립을 만든 일부
+  // 씬에만 채워진다.
   sceneVideo: string;
   imagePrompt: string;
   clean: string;
