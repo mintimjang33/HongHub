@@ -310,6 +310,16 @@ export function isImageVideoStep(step: Step): boolean {
   return /이미지/.test(step.name) || /영상/.test(step.name);
 }
 
+// 14번(렌더링) — 2026-09-16(6차) 신설, 사용자 요청: "14단계가 뭐하는 단계인지 설명서
+// 추가해주고", "수동으로 업로드, 삭제 할수있게 해주고~". 그동안 이 단계엔 전용 패널이 없어서
+// StepDocSection과 stepLink()의 fallback 링크만 떴다 — Shotcut 프로젝트 파일/최종 렌더링
+// 영상을 콘텐츠(유닛)별로 올려두고 지울 수 있는 RenderPanel을 새로 연결한다. exact match로
+// 좁혀서(다른 단계 이름에 "렌더링"이 우연히 섞일 가능성은 낮지만, 이 파일의 다른 단계 판별
+// 함수들과 같은 방식을 유지) 잘못 매칭되는 걸 막는다.
+export function isRenderStep(step: Step): boolean {
+  return step.name.trim() === '렌더링';
+}
+
 // 단계 이름/내용에 등장하는 키워드로 실제 작업 페이지 바로가기 링크를 만들어준다.
 // "채널 발굴"(1번), "소재 수집"(2번), "대본 수집"(3번) 단계는 이 페이지에서 바로 처리할 수 있게
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
@@ -319,6 +329,9 @@ export function isImageVideoStep(step: Step): boolean {
 // 이미 떠 있는데도, desc에 "생성"이라는 단어가 하나만 섞여 있으면(예: 14번 desc의 "음성에 맞춰
 // 생성") 엉뚱한 "🎯 소스 발굴 → 콘텐츠 생성 탭" 링크가 그 밑에 같이 붙어 나왔다(사용자 지적,
 // 14번 화면 스크린샷). 전용 패널이 있는 단계는 애초에 이 폴백 링크가 필요 없으므로 제외 목록에 추가.
+// 2026-09-16(6차) 수정 — 같은 이유로 isRenderStep도 제외 목록에 추가: 14번(렌더링) desc에
+// "생성"이라는 단어(`draft_content.json`을 코드로 "생성"해서)가 들어있어서, 이제 막 연결한
+// RenderPanel 밑에 똑같이 엉뚱한 "🎯 소스 발굴 → 콘텐츠 생성 탭" 링크가 겹쳐 뜨는 걸 미리 방지.
 export function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
   if (
@@ -335,7 +348,8 @@ export function stepLink(step: Step): { href: string; label: string } | null {
     isPlanningDocStep(step) ||
     isNarrationStep(step) ||
     isSubtitleStep(step) ||
-    isImageVideoStep(step)
+    isImageVideoStep(step) ||
+    isRenderStep(step)
   )
     return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
