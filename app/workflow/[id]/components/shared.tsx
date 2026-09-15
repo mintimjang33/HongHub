@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { SceneBlock, Site, Step } from '../types';
+import type { SceneBlock, Site, Step, CaptionStyle } from '../types';
 import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById } from '../utils';
 
 // 2026-09-13 (4차) 추가 — 사용자 요청: "13단계에서 모달을 띄웠을 때 선택한 이미지를 다운받을
@@ -35,7 +35,13 @@ function formatTimeWithDuration(time: string): string {
 // 코드 기본값(DEFAULT_PREVIEW_STYLE.fontSize=15)이 아니라 유닛별로 사용자가 직접 조절해서
 // localStorage에 저장해둔 값이라, 실제로 이 콘텐츠에서 쓰던 크기는 13이었다 — 코드 기본값이
 // 아니라 사용자가 실제로 보고 있던 값에 맞춘다.
-const CAPTION_FONT_SIZE = 13;
+// 2026-09-16(15차) 수정 — 사용자 지적: "로컬에 저장되면 다른곳에서 보면 또 다르게
+// 나오는데?? 그러면 안되지" — 정렬/줄수/글자크기/배경·글자색이 브라우저 localStorage에만
+// 저장돼 기기마다 다르게 보이던 문제. 이제 이 값들을 유닛(ContentUnit.captionStyle, types.ts)에
+// 저장해서 12번 편집기와 13/14번 미리보기가 항상 같은 값을 공유한다 — 여기 하드코딩 상수 대신
+// 각 씬이 속한 유닛의 captionStyle을 props로 받아 쓰고, 아직 저장된 적 없는(과거 데이터)
+// 유닛은 이 기본값으로 대체한다.
+const DEFAULT_CAPTION_STYLE: CaptionStyle = { align: 'center', lines: 2, fontSize: 13, bg: '#000000', color: '#ffffff' };
 
 async function downloadFile(url: string, filename: string) {
   try {
@@ -164,6 +170,7 @@ export function SceneImageModal({
   onNavigate,
   totalLines,
   totalScenes,
+  captionStyle,
 }: {
   scenes: SceneBlock[];
   navItems: ModalNavItem[];
@@ -172,6 +179,7 @@ export function SceneImageModal({
   onNavigate: (idx: number) => void;
   totalLines: number;
   totalScenes: number;
+  captionStyle?: CaptionStyle;
 }) {
   const entry = navItems[index];
   const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
@@ -263,24 +271,33 @@ export function SceneImageModal({
               보여줘". step13-14-LabeledLinksPanel.tsx의 캡션 미리보기와 같은 스타일(흰 글씨 +
               검은 배경 박스, 화면 하단 중앙)로 지금 이 줄의 자막을 이미지/영상 위에 실제
               캡션처럼 얹어 보여준다. */}
-          {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[96%] text-center pointer-events-none">
-              <span
-                className="font-bold text-white inline-block"
-                style={{
-                  backgroundColor: '#000000',
-                  padding: '4px 10px',
-                  borderRadius: 3,
-                  fontSize: CAPTION_FONT_SIZE,
-                  boxDecorationBreak: 'clone',
-                  WebkitBoxDecorationBreak: 'clone',
-                  whiteSpace: 'pre-line',
-                }}
+          {entry.text && (() => {
+            const style = captionStyle || DEFAULT_CAPTION_STYLE;
+            return (
+              <div
+                className="absolute bottom-4 inset-x-3 pointer-events-none flex"
+                style={{ justifyContent: style.align === 'left' ? 'flex-start' : style.align === 'right' ? 'flex-end' : 'center' }}
               >
-                {entry.text}
-              </span>
-            </div>
-          )}
+                <span
+                  className="font-bold inline-block"
+                  style={{
+                    maxWidth: style.lines === 1 ? '96%' : '75%',
+                    textAlign: style.align,
+                    color: style.color,
+                    backgroundColor: style.bg,
+                    padding: '4px 10px',
+                    borderRadius: 3,
+                    fontSize: style.fontSize,
+                    boxDecorationBreak: 'clone',
+                    WebkitBoxDecorationBreak: 'clone',
+                    whiteSpace: 'pre-line',
+                  }}
+                >
+                  {entry.text}
+                </span>
+              </div>
+            );
+          })()}
         </div>
         <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
           {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
@@ -333,6 +350,7 @@ export function SceneVideoModal({
   onNavigate,
   totalLines,
   totalScenes,
+  captionStyle,
 }: {
   scenes: SceneBlock[];
   navItems: ModalNavItem[];
@@ -341,6 +359,7 @@ export function SceneVideoModal({
   onNavigate: (idx: number) => void;
   totalLines: number;
   totalScenes: number;
+  captionStyle?: CaptionStyle;
 }) {
   const entry = navItems[index];
   const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
@@ -419,24 +438,33 @@ export function SceneVideoModal({
               ›
             </button>
           )}
-          {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[96%] text-center pointer-events-none">
-              <span
-                className="font-bold text-white inline-block"
-                style={{
-                  backgroundColor: '#000000',
-                  padding: '4px 10px',
-                  borderRadius: 3,
-                  fontSize: CAPTION_FONT_SIZE,
-                  boxDecorationBreak: 'clone',
-                  WebkitBoxDecorationBreak: 'clone',
-                  whiteSpace: 'pre-line',
-                }}
+          {entry.text && (() => {
+            const style = captionStyle || DEFAULT_CAPTION_STYLE;
+            return (
+              <div
+                className="absolute bottom-4 inset-x-3 pointer-events-none flex"
+                style={{ justifyContent: style.align === 'left' ? 'flex-start' : style.align === 'right' ? 'flex-end' : 'center' }}
               >
-                {entry.text}
-              </span>
-            </div>
-          )}
+                <span
+                  className="font-bold inline-block"
+                  style={{
+                    maxWidth: style.lines === 1 ? '96%' : '75%',
+                    textAlign: style.align,
+                    color: style.color,
+                    backgroundColor: style.bg,
+                    padding: '4px 10px',
+                    borderRadius: 3,
+                    fontSize: style.fontSize,
+                    boxDecorationBreak: 'clone',
+                    WebkitBoxDecorationBreak: 'clone',
+                    whiteSpace: 'pre-line',
+                  }}
+                >
+                  {entry.text}
+                </span>
+              </div>
+            );
+          })()}
         </div>
         <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
           {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
@@ -891,6 +919,7 @@ export function SceneEditorList({
   characterTabs = [],
   srtText = '',
   mergeMediaColumn = false,
+  captionStyle,
 }: {
   scenePrompts: string;
   onSave: (text: string) => void | Promise<void>;
@@ -910,6 +939,9 @@ export function SceneEditorList({
   // true로 넘겨서 "화면" 열 하나로 합친다: sceneVideo가 있으면 영상 썸네일, 없으면(장면이미지
   // 유무 무관) 이미지 썸네일/자리표시자를 보여준다.
   mergeMediaColumn?: boolean;
+  // 2026-09-16(15차) 추가 — 유닛의 자막 스타일(정렬/줄수/글자크기/배경·글자색). 아래
+  // SceneImageModal/SceneVideoModal의 캡션 오버레이에 그대로 전달된다.
+  captionStyle?: CaptionStyle;
 }) {
   const scenes = parseSceneBlocks(scenePrompts);
   const srtLines = useMemo(() => parseSrtLines(srtText), [srtText]);
@@ -1498,6 +1530,9 @@ export function SceneEditorList({
                           <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
                             —
                           </td>
+                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
+                            —
+                          </td>
                           <td className="px-2 py-1.5" rowSpan={row.span}>
                             {row.group.lines.length > 0 && (
                               <button
@@ -1537,6 +1572,7 @@ export function SceneEditorList({
           onNavigate={setPreviewIndex}
           totalLines={srtLines.length}
           totalScenes={filteredWithIndex.length}
+          captionStyle={captionStyle}
         />
       )}
       {previewVideoIndex !== null && (
@@ -1548,6 +1584,7 @@ export function SceneEditorList({
           onNavigate={setPreviewVideoIndex}
           totalLines={srtLines.length}
           totalScenes={filteredWithIndex.length}
+          captionStyle={captionStyle}
         />
       )}
     </div>
