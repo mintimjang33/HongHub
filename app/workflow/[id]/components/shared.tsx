@@ -43,7 +43,12 @@ function formatTimeWithDuration(time: string): string {
 // 스타일 조정을 한 번도 안 한) 콘텐츠를 위한 안전한 기본값만 여기 남겨둔다.
 const DEFAULT_CAPTION_STYLE: CaptionStyle = { align: 'center', lines: 2, fontSize: 13, bg: '#000000', color: '#ffffff' };
 
-async function downloadFile(url: string, filename: string) {
+// 2026-09-16(22차) 수정 — export로 변경. 사용자 지적: "클릭해도 다운로드가 안되는데?" — 12번
+// (step13-14-LabeledLinksPanel.tsx)의 "렌더링 파일"/"나레이션"/"자막" 목록이 지금까지 <a
+// target="_blank">만 쓰고 있었는데, Supabase Storage가 내려주는 Content-Type에 따라(특히
+// .mlt는 XML이라) 브라우저가 강제로 저장하지 않고 그대로 새 탭에 표시해버리는 경우가 있었다.
+// 여기 있던 걸 그대로 재사용할 수 있게 export해서, 그 목록에도 같은 강제 다운로드 버튼을 붙인다.
+export async function downloadFile(url: string, filename: string) {
   try {
     const res = await fetch(url);
     const blob = await res.blob();
