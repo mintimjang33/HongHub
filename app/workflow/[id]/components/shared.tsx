@@ -289,6 +289,16 @@ function ClipControlFields({
     if (inMs === null || outMs === null || outMs <= inMs) return null;
     return `${((outMs - inMs) / 1000).toFixed(3)}s`;
   })();
+  // 2026-09-16(26차) 추가 — 사용자 지적: "적용을 해야 하는건지, 적용이 된건지 구분좀 해줘" —
+  // 계산된 구간 길이가 지금 입력칸의 임시 값(draft)에서 나온 건지, 실제로 파일에 저장된 값
+  // (info.inMs/outMs)과 같은 건지 구분이 안 됐다. 입력칸 값이 서버에 저장된 값과 다르면
+  // "아직 적용 안 됨"으로, 같으면(방금 적용했거나 원래 그 값이었거나) "적용됨"으로 표시한다.
+  const isRangeDirty = (() => {
+    const inMs = clockToMs(inDraft);
+    const outMs = clockToMs(outDraft);
+    if (inMs === null || outMs === null) return true;
+    return inMs !== info.inMs || outMs !== info.outMs;
+  })();
 
   async function applyRange() {
     const inMs = clockToMs(inDraft);
@@ -369,9 +379,16 @@ function ClipControlFields({
         </button>
         {/* 2026-09-16(25차) 수정 — 사용자 지적: "너무 안보여" — text-neutral-500는 어두운
             모달 배경 위에서 대비가 너무 낮았다. 다른 계산값(원본 길이 등)과 달리 이건 사용자가
-            방금 요청해서 새로 넣은 정보라 눈에 띄어야 하므로, 밝은 에메랄드색+굵게로 확실히
-            보이게 한다. */}
-        {rangeDurationLabel && <span className="text-[11px] font-bold text-emerald-400">({rangeDurationLabel})</span>}
+            방금 요청해서 새로 넣은 정보라 눈에 띄어야 하므로, 밝은 색+굵게로 확실히 보이게 한다.
+            (26차) 수정 — "적용을 해야 하는건지, 적용이 된건지 구분좀 해줘": 입력칸 값이 실제
+            저장된 값과 다르면(아직 "적용" 안 누름) 주황색+"미적용", 같으면(적용 완료) 에메랄드
+            색+"적용됨"으로 상태 자체를 다르게 보여준다. */}
+        {rangeDurationLabel &&
+          (isRangeDirty ? (
+            <span className="text-[11px] font-bold text-amber-400">({rangeDurationLabel}) · 미적용</span>
+          ) : (
+            <span className="text-[11px] font-bold text-emerald-400">✓ ({rangeDurationLabel}) 적용됨</span>
+          ))}
       </div>
       {err && <p className="text-[10px] text-red-400 font-bold">{err}</p>}
     </div>
