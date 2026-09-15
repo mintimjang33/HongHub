@@ -23,13 +23,6 @@ import { SceneEditorList } from './shared';
 // 안에서 독립적으로 다시 로드한다. 캐릭터 탭 분류도 13단계와 동일하게 파이프라인 공유값
 // (analysis_result.characterStyle)을 그대로 읽어 쓴다 — 여기서 캐릭터를 새로 고를 필요는
 // 없으므로 선택 UI는 넣지 않고 값만 읽는다.
-//
-// 2026-09-16(11차) 수정 — 사용자 지적: "14단계에선 이미지,영상 분류하는게 아니고~ 앞부분은
-// 영상만 있고 자막 9~10번부터 이미지자나? 그럼 있는것만 셋팅해서 보여줘야해". 13단계 표는
-// "장면이미지"/"영상장면" 두 열을 항상 나란히 보여주지만, 실제로는 한 씬에 둘 중 하나만 채워져
-// 있어서 절반이 늘 "없음"으로 낭비된다 — 14번(참고용 보기)에서는 mergeMediaColumn을 켜서 그
-// 씬이 실제로 갖고 있는 것 하나만 "화면" 열 하나로 합쳐 보여준다(shared.tsx SceneEditorList
-// 참고).
 export function RenderPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const units = site.script_draft?.units || [];
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
@@ -87,10 +80,18 @@ export function RenderPanel({ site, onRefresh }: { site: Site; onRefresh: () => 
       <div className="text-xs font-black text-neutral-500 mb-2">🎬 렌더링 파일 (Shotcut 프로젝트 · 최종 영상)</div>
       <div className="space-y-1.5">
         {units.map((u) => {
-          const fileCount = normalizeLabeledItems(u.renderFiles).length;
+          const renderFileItems = normalizeLabeledItems(u.renderFiles);
+          const fileCount = renderFileItems.length;
           const isOpen = openUnitId === u.id;
           const srtText = srtTexts[u.id];
           const srtError = srtErrors[u.id];
+          // 2026-09-16(17차) 추가 — 사용자 요청: "모달에서 트랙번호 설정, 시간설정, 위치설정을
+          // 할수 있게" — SceneEditorList에 실제 .mlt 파일 URL을 넘겨야 모달 안에서 그 파일을
+          // 읽고/고칠 수 있다. 최종으로 체크된 것이 있으면 그걸, 없으면 등록된 것 중 .mlt
+          // 확장자인 첫 파일을 쓴다(최종 영상 mp4가 섞여 있어도 무시).
+          const mltFile =
+            renderFileItems.find((it) => it.selected && it.url.toLowerCase().endsWith('.mlt')) ||
+            renderFileItems.find((it) => it.url.toLowerCase().endsWith('.mlt'));
           return (
             <div key={u.id} className="bg-white border border-neutral-100 rounded-lg overflow-hidden">
               <button
@@ -136,7 +137,7 @@ export function RenderPanel({ site, onRefresh }: { site: Site; onRefresh: () => 
                       characterTabs={selectedCharacterPreset.tabs || []}
                       srtText={srtText || ''}
                       mergeMediaColumn
-                      captionStyle={u.captionStyle}
+                      mltUrl={mltFile?.url || ''}
                     />
                   </div>
                 </div>
