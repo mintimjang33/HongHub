@@ -26,7 +26,7 @@ import { CopyButton, SceneEditorList, PresetPickerModal } from './shared';
 // (파이프라인) 전체에서 한 번만 고르면 되는 구조가 맞다는 것. `AnalysisResult.imageStyle`(types.ts)
 // 로 다시 옮기고, 이 패널 최상단(콘텐츠 목록 위)에 선택 UI를 한 번만 둔다 — `/api/sites/[id]`
 // PATCH는 analysis_result를 통째로 교체하므로(부분 병합 아님) 기존 값을 스프레드해서 imageStyle만
-// 덮어쓴다.
+// 덮어써야 한다.
 //
 // 2026-09-11 "화풍 지정 안 함" 프리셋 수정 — 스토리 무관 조명 강제 버그:
 // 처음 버전은 이름과 달리 "dramatic lighting... glowing effects for dramatic emphasis"를 항상
@@ -95,7 +95,7 @@ import { CopyButton, SceneEditorList, PresetPickerModal } from './shared';
 // JSON 스키마와 작성 규칙 문구를 갱신했고, registerParsed()도 SceneBlock.moving/needsVideoClip/
 // video로 직접 매핑한다(예전엔 "[영상클립 필요]" 마커를 video 한 필드에 텍스트로 욱여넣었다).
 //
-// 2026-09-16 추가 — 12번(나레이션·자막) 화면에 "최종 선택" 체크박스가 생겨서(사용자 요청: "12단계에서
+// 2026-09-16 추가 — 12번(나레이션·자막) 화면에 "최종 선택" 체크박스가 생겨서(사용자 요청: "12단계에
 // 사용자가 최종 자막을 선택하면(체크) => 13단계로 자동 넘어가게되고 그것을 바탕으로 씬을 구분하는
 // 방식으로 앞으로 수정할예정"), 아래 SRT 로딩 useEffect가 무조건 subtitleUrls[0]만 읽던 것을
 // selected:true인 항목을 우선하도록 바꿨다 — 실사고: 코카콜라 유닛에 "자동 생성" 다음 "제미나이
@@ -278,7 +278,7 @@ export function ImageVideoPanel({ site, onRefresh }: { site: Site; onRefresh: ()
   }
 
   // 2026-09-11 추가 — 캐릭터 선택 저장. selectStyle과 완전히 같은 패턴(analysis_result는 PATCH 시
-  // 전체 교체라 기존 값을 스프레드해서 characterStyle만 덮어써야 함).
+  // 전체 교체라 기존 필드를 스프레드해서 characterStyle만 덮어써야 함).
   async function selectCharacter(characterId: string) {
     setOptimisticCharacterId(characterId);
     setSavingCharacter(true);
@@ -606,6 +606,7 @@ ${srtText || '(자막 없음)'}`}
                     onSave={(text) => save(u.id, text)}
                     characterTabs={selectedCharacterPreset.tabs || []}
                     srtText={srtText || ''}
+                    captionStyle={u.captionStyle}
                   />
                 </div>
               )}
