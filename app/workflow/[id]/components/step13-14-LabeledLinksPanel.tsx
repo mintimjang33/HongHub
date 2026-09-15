@@ -117,10 +117,13 @@ function readEditableTextWithBreaks(el: HTMLElement): string {
 // 추가했다. 문자를 입력할 때마다는 동작하면 안 되므로(캐럿이 계속 오른쪽으로 밀리면서 타이핑
 // 중에 오디오까지 계속 seek되어 방해됨) 클릭과 탐색용 키(CARET_NAV_KEYS)에서만 부른다.
 //
-// 정렬/줄수/글자크기/배경·글자색(previewAlign 등)은 실제 저장 필드가 아니라 미리보기 전용 값이라,
-// 처음엔 컴포넌트 state 기본값으로만 뒀더니 편집창을 닫았다 열 때마다 초기값(중앙/2줄/13px)으로
-// 리셋됐다(사용자 지적: "이 설정값은 왜 저장이 안되???"). 나레이션 선택(previewNarrationUrl)과
-// 똑같이 localStorage에 유닛별로 저장해서 편집창을 다시 열어도 마지막 설정이 유지되게 한다.
+// 2026-09-16(15차) 수정 — 정렬/줄수/글자크기/배경·글자색(previewAlign 등)은 처음엔 컴포넌트
+// state 기본값으로만 뒀더니 편집창을 닫았다 열 때마다 초기값(중앙/2줄/13px)으로 리셋됐다
+// (사용자 지적: "이 설정값은 왜 저장이 안되???"). 처음엔 나레이션 선택(previewNarrationUrl)과
+// 똑같이 localStorage에 저장했는데, 사용자가 "로컬에 저장되면 다른곳에서 보면 또 다르게
+// 나오는데?? 그러면 안되지~"라고 재지적 — 기기마다 달라지는 게 문제였다. 이제 이 스타일만
+// unit.captionStyle(DB, types.ts)에 저장한다(narrationPrefKey는 개인 취향이라 그대로
+// localStorage 유지). 아래 saveCaptionStyle 참고.
 //
 // 2026-09-16(6차) 수정 — export로 변경. 사용자 요청("14단계에서... 수동으로 업로드, 삭제
 // 할수있게 해주고~")으로 14번(렌더링) 단계도 "콘텐츠 하나에 라벨 붙은 링크/파일 여러 개"라는
@@ -189,41 +192,54 @@ export function LabeledFieldSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCueIdx, editingIdx]);
 
-  // 마지막으로 골랐던 나레이션/스타일을 편집 화면을 다시 열 때마다 기억한다 — 사용자 지적:
-  // "이거 마지막했던걸로 자동 저장하게 해줘~ 자꾸 바뀌고 있어서" (나레이션), "이 설정값은 왜
-  // 저장이 안되???" (정렬/줄수/글자크기/색상). 콘텐츠(유닛)별로 따로 기억하도록 localStorage
-  // 키에 unit.id를 넣는다.
+  // 마지막으로 골랐던 나레이션을 편집 화면을 다시 열 때마다 기억한다 — 사용자 지적: "이거
+  // 마지막했던걸로 자동 저장하게 해줘~ 자꾸 바뀌고 있어서". 콘텐츠(유닛)별로 따로 기억하도록
+  // localStorage 키에 unit.id를 넣는다. 기기마다 달라도 무방한 개인 취향이라 그대로 둔다 —
+  // 자막 스타일(정렬/줄수/글자크기/색상)과 달리 다른 브라우저에서 다르게 보여도 문제 없음.
   const narrationPrefKey = `honghub_preview_narration_${unit.id}`;
-  const stylePrefKey = `honghub_preview_style_${unit.id}`;
 
-  function saveStyleToStorage(next: Partial<PreviewStyle>) {
+  // 2026-09-16(15차) 수정 — 사용자 지적: "로컬에 저장되면 다른곳에서 보면 또 다르게 나오는데??
+  // 그러면 안되지~" → "srt파일과 별도로 줄바꿈/텍스트크기/중앙정렬 이런걸 DB에 저장을 해둬 각
+  // 컨텐츠의 자막 설정으로". 정렬/줄수/글자크기/배경·글자색을 더 이상 localStorage에 저장하지
+  // 않고, 이 유닛(unit.captionStyle)에 PATCH로 저장한다 — subtitleUrls 등 다른 필드와 같은
+  // /api/script-draft unitPatch 경로를 그대로 쓴다. 이제 어느 브라우저/기기에서 열어도 같은
+  // 값을 보고, 13/14번(shared.tsx의 SceneImageModal/SceneVideoModal)도 이 값을 그대로 읽어서
+  // 적용한다(이전엔 13/14번이 이 설정을 전혀 몰랐다).
+  async function saveCaptionStyle(next: Partial<PreviewStyle>) {
+    const current: PreviewStyle = { align: previewAlign, lines: previewLines, fontSize: previewFontSize, bg: previewBg, color: previewColor };
+    const merged = { ...current, ...next };
     try {
-      const current: PreviewStyle = { align: previewAlign, lines: previewLines, fontSize: previewFontSize, bg: previewBg, color: previewColor };
-      localStorage.setItem(stylePrefKey, JSON.stringify({ ...current, ...next }));
+      await fetch('/api/script-draft', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: site.id, unitPatch: { id: unit.id, fields: { captionStyle: merged } } }),
+      });
+      onRefresh();
     } catch {
-      // 저장 실패해도 이번 세션 미리보기 동작에는 지장 없음.
+      // 저장 실패해도 이번 세션 미리보기 동작에는 지장 없음 — 다만 새로고침하거나 다른
+      // 기기에서 열면 이 변경이 반영 안 돼 있을 수 있다.
     }
   }
 
   function updatePreviewAlign(v: 'left' | 'center' | 'right') {
     setPreviewAlign(v);
-    saveStyleToStorage({ align: v });
+    saveCaptionStyle({ align: v });
   }
   function updatePreviewLines(v: 1 | 2) {
     setPreviewLines(v);
-    saveStyleToStorage({ lines: v });
+    saveCaptionStyle({ lines: v });
   }
   function updatePreviewFontSize(v: number) {
     setPreviewFontSize(v);
-    saveStyleToStorage({ fontSize: v });
+    saveCaptionStyle({ fontSize: v });
   }
   function updatePreviewBg(v: string) {
     setPreviewBg(v);
-    saveStyleToStorage({ bg: v });
+    saveCaptionStyle({ bg: v });
   }
   function updatePreviewColor(v: string) {
     setPreviewColor(v);
-    saveStyleToStorage({ color: v });
+    saveCaptionStyle({ color: v });
   }
 
   function seekToCue(idx: number) {
@@ -378,16 +394,15 @@ export function LabeledFieldSection({
     setPreviewTime(0);
     setSelectedCueIdx(0);
     let savedUrl = '';
-    let savedStyle: Partial<PreviewStyle> | null = null;
     try {
       savedUrl = localStorage.getItem(narrationPrefKey) || '';
-      const rawStyle = localStorage.getItem(stylePrefKey);
-      if (rawStyle) savedStyle = JSON.parse(rawStyle);
     } catch {
-      // 프라이빗 모드 등에서 localStorage가 막혀있거나 저장된 값이 깨져 있을 수 있다 — 기본값으로 진행.
+      // 프라이빗 모드 등에서 localStorage가 막혀있을 수 있다 — 기본값으로 진행.
     }
     const hasSaved = savedUrl && narrationItems.some((n) => n.url === savedUrl);
     setPreviewNarrationUrl(hasSaved ? savedUrl : narrationItems[0]?.url || '');
+    // 2026-09-16(15차) 수정 — 스타일은 이제 localStorage가 아니라 unit.captionStyle(DB)에서 읽는다.
+    const savedStyle = unit.captionStyle;
     setPreviewAlign(savedStyle?.align ?? DEFAULT_PREVIEW_STYLE.align);
     setPreviewLines(savedStyle?.lines ?? DEFAULT_PREVIEW_STYLE.lines);
     setPreviewFontSize(savedStyle?.fontSize ?? DEFAULT_PREVIEW_STYLE.fontSize);
