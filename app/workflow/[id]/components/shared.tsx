@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import type { SceneBlock, Site, Step } from '../types';
+import type { SceneBlock, Site, Step, CaptionStyle } from '../types';
 import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById } from '../utils';
 
 // 2026-09-13 (4차) 추가 — 사용자 요청: "13단계에서 모달을 띄웠을 때 선택한 이미지를 다운받을
@@ -35,7 +35,13 @@ function formatTimeWithDuration(time: string): string {
 // 코드 기본값(DEFAULT_PREVIEW_STYLE.fontSize=15)이 아니라 유닛별로 사용자가 직접 조절해서
 // localStorage에 저장해둔 값이라, 실제로 이 콘텐츠에서 쓰던 크기는 13이었다 — 코드 기본값이
 // 아니라 사용자가 실제로 보고 있던 값에 맞춘다.
-const CAPTION_FONT_SIZE = 13;
+// 2026-09-16(15차) 수정 — 12번(step13-14-LabeledLinksPanel.tsx)이 정렬/줄수/글자크기/배경·
+// 글자색을 이제 유닛별로 DB(ContentUnit.captionStyle)에 저장해두고, 13번(step16-17-
+// ImageVideoPanel.tsx)이 그 값을 SceneEditorList에 captionStyle prop으로 그대로 넘긴다 —
+// 12번에서 실제로 조정한 스타일과 13/14번 모달의 캡션 오버레이가 항상 같은 값을 쓰게 하기
+// 위함(고정 폰트 크기 하나만 쓰던 방식에서 발전). captionStyle이 아직 없는(그 유닛에서 12번
+// 스타일 조정을 한 번도 안 한) 콘텐츠를 위한 안전한 기본값만 여기 남겨둔다.
+const DEFAULT_CAPTION_STYLE: CaptionStyle = { align: 'center', lines: 2, fontSize: 13, bg: '#000000', color: '#ffffff' };
 
 async function downloadFile(url: string, filename: string) {
   try {
@@ -307,6 +313,7 @@ export function SceneImageModal({
   onNavigate,
   totalLines,
   totalScenes,
+  captionStyle,
 }: {
   scenes: SceneBlock[];
   navItems: ModalNavItem[];
@@ -315,7 +322,11 @@ export function SceneImageModal({
   onNavigate: (idx: number) => void;
   totalLines: number;
   totalScenes: number;
+  // 2026-09-16(15차) 추가 — 12번에서 유닛별로 저장한 자막 스타일(ContentUnit.captionStyle).
+  // 안 넘어오면(옛 데이터, 12번에서 한 번도 조정 안 한 유닛) DEFAULT_CAPTION_STYLE을 쓴다.
+  captionStyle?: CaptionStyle;
 }) {
+  const effectiveCaptionStyle = captionStyle || DEFAULT_CAPTION_STYLE;
   const entry = navItems[index];
   const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
   const hasPrev = index > 0;
@@ -407,16 +418,25 @@ export function SceneImageModal({
               검은 배경 박스, 화면 하단 중앙)로 지금 이 줄의 자막을 이미지/영상 위에 실제
               캡션처럼 얹어 보여준다. */}
           {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+            <div
+              className="absolute bottom-4 inset-x-4 pointer-events-none flex"
+              style={{
+                justifyContent: effectiveCaptionStyle.align === 'left' ? 'flex-start' : effectiveCaptionStyle.align === 'right' ? 'flex-end' : 'center',
+              }}
+            >
               <span
-                className="font-bold text-white inline-block"
+                className="font-bold inline-block"
                 style={{
-                  backgroundColor: '#000000',
+                  color: effectiveCaptionStyle.color,
+                  backgroundColor: effectiveCaptionStyle.bg,
+                  fontSize: effectiveCaptionStyle.fontSize,
                   padding: '4px 10px',
                   borderRadius: 3,
-                  fontSize: CAPTION_FONT_SIZE,
+                  maxWidth: effectiveCaptionStyle.lines === 1 ? '92%' : '70%',
+                  textAlign: effectiveCaptionStyle.align,
                   boxDecorationBreak: 'clone',
                   WebkitBoxDecorationBreak: 'clone',
+                  whiteSpace: 'pre-line',
                 }}
               >
                 {entry.text}
@@ -476,6 +496,7 @@ export function SceneVideoModal({
   totalLines,
   totalScenes,
   clipControl,
+  captionStyle,
 }: {
   scenes: SceneBlock[];
   navItems: ModalNavItem[];
@@ -487,7 +508,10 @@ export function SceneVideoModal({
   // 2026-09-16(17차) 추가 — 14번(RenderPanel)에서만 넘어온다. 13번 호출부는 이 prop 자체를
   // 안 넘기므로 패널이 안 보인다.
   clipControl?: ClipControl;
+  // 2026-09-16(15차) 추가 — SceneImageModal과 동일, 12번에서 저장한 유닛별 자막 스타일.
+  captionStyle?: CaptionStyle;
 }) {
+  const effectiveCaptionStyle = captionStyle || DEFAULT_CAPTION_STYLE;
   const entry = navItems[index];
   const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
   const hasPrev = index > 0;
@@ -566,16 +590,25 @@ export function SceneVideoModal({
             </button>
           )}
           {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+            <div
+              className="absolute bottom-4 inset-x-4 pointer-events-none flex"
+              style={{
+                justifyContent: effectiveCaptionStyle.align === 'left' ? 'flex-start' : effectiveCaptionStyle.align === 'right' ? 'flex-end' : 'center',
+              }}
+            >
               <span
-                className="font-bold text-white inline-block"
+                className="font-bold inline-block"
                 style={{
-                  backgroundColor: '#000000',
+                  color: effectiveCaptionStyle.color,
+                  backgroundColor: effectiveCaptionStyle.bg,
+                  fontSize: effectiveCaptionStyle.fontSize,
                   padding: '4px 10px',
                   borderRadius: 3,
-                  fontSize: CAPTION_FONT_SIZE,
+                  maxWidth: effectiveCaptionStyle.lines === 1 ? '92%' : '70%',
+                  textAlign: effectiveCaptionStyle.align,
                   boxDecorationBreak: 'clone',
                   WebkitBoxDecorationBreak: 'clone',
+                  whiteSpace: 'pre-line',
                 }}
               >
                 {entry.text}
@@ -1065,6 +1098,7 @@ export function SceneEditorList({
   srtText = '',
   mergeMediaColumn = false,
   mltUrl = '',
+  captionStyle,
 }: {
   scenePrompts: string;
   onSave: (text: string) => void | Promise<void>;
@@ -1090,6 +1124,11 @@ export function SceneEditorList({
   // 있으면(14번) 영상 모달에 실제 .mlt 클립의 트랙/위치 조정 패널이 뜨고, 없으면(13번, 또는
   // 14번인데 아직 .mlt를 안 올린 상태) 패널 자체가 안 뜨거나 "먼저 업로드해주세요" 안내만 뜬다.
   mltUrl?: string;
+  // 2026-09-16(15차) 추가 — 12번(step13-14-LabeledLinksPanel.tsx)에서 유닛별로 저장한 자막
+  // 스타일(ContentUnit.captionStyle). 13번(step16-17-ImageVideoPanel.tsx)이 그대로 넘겨주고,
+  // 이 컴포넌트는 그걸 다시 SceneImageModal/SceneVideoModal에 전달만 한다 — 실제 렌더링은
+  // 그 모달들 안에서 한다.
+  captionStyle?: CaptionStyle;
 }) {
   const scenes = parseSceneBlocks(scenePrompts);
   const srtLines = useMemo(() => parseSrtLines(srtText), [srtText]);
@@ -1564,6 +1603,34 @@ export function SceneEditorList({
                                   />
                                   <span className="absolute inset-0 flex items-center justify-center text-white text-sm drop-shadow pointer-events-none">▶</span>
                                 </button>
+                              ) : s.needsVideoClip ? (
+                                // 2026-09-16(18차) 추가 — 사용자 지적: "14단계에 구현이
+                                // 안되었는데???" — 실제 영상 클립은 대부분 sceneVideo(앱에
+                                // 올려둔 미리보기)가 아니라 Shotcut 로컬 파일로만 존재해서,
+                                // needsVideoClip이 true여도 sceneVideo가 비어있는 경우가
+                                // 대다수였다. 이전엔 sceneVideo가 없으면 무조건 이미지 모달로
+                                // 빠져서, 렌더링(.mlt) 트랙/위치 패널이 있는 영상 모달을 열
+                                // 방법이 아예 없었다 — needsVideoClip이면 sceneImage가 있어도
+                                // (썸네일로만 쓰고) 클릭은 항상 영상 모달을 열게 한다.
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewVideoIndex(navIdx)}
+                                  className="relative block"
+                                  title="클릭하면 렌더링(.mlt) 트랙/위치 설정 열기"
+                                >
+                                  {s.sceneImage ? (
+                                    <img
+                                      src={s.sceneImage}
+                                      alt={s.title}
+                                      className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                                    />
+                                  ) : (
+                                    <div className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300">
+                                      🎬 설정
+                                    </div>
+                                  )}
+                                  <span className="absolute inset-0 flex items-center justify-center text-white text-sm drop-shadow pointer-events-none">🎬</span>
+                                </button>
                               ) : s.sceneImage ? (
                                 <button type="button" onClick={() => setPreviewIndex(navIdx)} className="block" title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)">
                                   <img
@@ -1791,6 +1858,7 @@ export function SceneEditorList({
           onNavigate={setPreviewIndex}
           totalLines={srtLines.length}
           totalScenes={filteredWithIndex.length}
+          captionStyle={captionStyle}
         />
       )}
       {previewVideoIndex !== null && (
@@ -1802,6 +1870,7 @@ export function SceneEditorList({
           onNavigate={setPreviewVideoIndex}
           totalLines={srtLines.length}
           totalScenes={filteredWithIndex.length}
+          captionStyle={captionStyle}
           clipControl={
             mergeMediaColumn
               ? {
