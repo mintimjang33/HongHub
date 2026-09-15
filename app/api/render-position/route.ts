@@ -218,9 +218,15 @@ async function fetchAndUpload(mltUrl: string, transform: (xml: string) => string
   const storagePath = mltUrl.slice(idx + marker.length).split('?')[0];
 
   const supabase = getSupabaseServerClient();
+  // 2026-09-16(23차) 수정 — 사용자 지적: "mlt파일 클릭하니까 이렇게 깨져서 나와". Storage
+  // 객체 메타데이터에는 'application/xml'로 정확히 저장되는 게 실측 확인됐지만(Storage API로
+  // 직접 조회: mimetype "application/xml"), Supabase가 공개 URL로 서빙할 때는 charset 없는
+  // 'text/plain'으로 내려버려 브라우저가 인코딩을 잘못 추측해 한글이 깨졌다. .md/.txt처럼
+  // 'text/plain; charset=utf-8'로 저장한 파일은 항상 정상 표시됐으므로(app/api/upload 참고)
+  // 같은 값으로 통일한다.
   const { error } = await supabase.storage
     .from('honghub-files')
-    .upload(storagePath, new TextEncoder().encode(updated), { contentType: 'application/xml', upsert: true });
+    .upload(storagePath, new TextEncoder().encode(updated), { contentType: 'text/plain; charset=utf-8', upsert: true });
   if (error) return { error: error.message, status: 500 } as const;
   return { xml: updated } as const;
 }
