@@ -138,6 +138,7 @@ export function RenderPanel({ site, onRefresh }: { site: Site; onRefresh: () => 
                       srtText={srtText || ''}
                       mergeMediaColumn
                       mltUrl={mltFile?.url || ''}
+                      captionStyle={u.captionStyle}
                     />
                   </div>
                 </div>
