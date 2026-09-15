@@ -22,14 +22,16 @@ function formatTimeWithDuration(time: string): string {
 }
 
 // 2026-09-16(8차) 추가 — 사용자 지적: "원래 자막에서 이건 한줄로 나왔었잖아 그럼 한줄로
-// 표시를 해줘야지". 화면 위 자막 오버레이가 실제 최종 영상(1920px 캔버스, 54pt)과 달리 훨씬
-// 좁은 모달 폭(약 470px) 안에 고정 18px로 그려지다 보니, 원래 한 줄짜리 자막이 줄바꿈되어
-// 두 줄처럼 보이는 문제가 있었다 — 글자 수에 비례해 폰트 크기를 줄여서 항상 한 줄에 들어가게
-// 한다(줄바꿈 자체는 white-space: nowrap으로 막고, 그 폭에 맞게 글자 크기만 줄인다).
-function captionFontSize(text: string): number {
-  const len = text.length || 1;
-  return Math.max(11, Math.min(18, Math.floor(460 / len)));
-}
+// 표시를 해줘야지". 처음엔 글자 수에 비례해 폰트 크기를 줄이는 방식(captionFontSize)으로
+// 대응했는데, (9차)에서 긴 줄이 잘리는 부작용을 고치려 최소값을 더 낮췄더니 결국 장면마다
+// 자막 길이에 따라 글씨 크기가 들쭉날쭉해지는 문제가 생겼다(사용자 지적, 2026-09-16(12차):
+// "13단계에서 글씨 크기가 장면마다 달라~ 12단계에서 그렇게 안했거든~ 1줄은 1줄, 크기 모든곳에서
+// 동일"). 12번(나레이션·자막)의 캡션 미리보기는 애초에 글자 수와 무관하게 고정 크기 하나만
+// 쓰고, 그 크기에 안 들어가는 긴 줄은 그냥 자연스럽게 줄바꿈되도록 둔다 — 여기도 그 방식을
+// 그대로 따른다: 동적 계산 없이 고정 폰트 크기(12번 기본값과 동일한 15px)를 쓰고, nowrap을
+// 없애 길면 자연스럽게 줄바꿈되게 한다. 대신 12번과 동일하게 boxDecorationBreak: 'clone'을
+// 줘서 줄바꿈되더라도 각 줄마다 독립된 배경 박스가 붙는 실제 자막 느낌을 유지한다.
+const CAPTION_FONT_SIZE = 15;
 
 async function downloadFile(url: string, filename: string) {
   try {
@@ -258,15 +260,16 @@ export function SceneImageModal({
               검은 배경 박스, 화면 하단 중앙)로 지금 이 줄의 자막을 이미지/영상 위에 실제
               캡션처럼 얹어 보여준다. */}
           {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[96%] text-center pointer-events-none">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
               <span
                 className="font-bold text-white inline-block"
                 style={{
                   backgroundColor: '#000000',
                   padding: '4px 10px',
                   borderRadius: 3,
-                  fontSize: captionFontSize(entry.text),
-                  whiteSpace: 'nowrap',
+                  fontSize: CAPTION_FONT_SIZE,
+                  boxDecorationBreak: 'clone',
+                  WebkitBoxDecorationBreak: 'clone',
                 }}
               >
                 {entry.text}
@@ -412,15 +415,16 @@ export function SceneVideoModal({
             </button>
           )}
           {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[96%] text-center pointer-events-none">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
               <span
                 className="font-bold text-white inline-block"
                 style={{
                   backgroundColor: '#000000',
                   padding: '4px 10px',
                   borderRadius: 3,
-                  fontSize: captionFontSize(entry.text),
-                  whiteSpace: 'nowrap',
+                  fontSize: CAPTION_FONT_SIZE,
+                  boxDecorationBreak: 'clone',
+                  WebkitBoxDecorationBreak: 'clone',
                 }}
               >
                 {entry.text}
@@ -880,6 +884,7 @@ export function SceneEditorList({
   saving,
   characterTabs = [],
   srtText = '',
+  mergeMediaColumn = false,
 }: {
   scenePrompts: string;
   onSave: (text: string) => void | Promise<void>;
@@ -891,6 +896,14 @@ export function SceneEditorList({
   // 있는 srtText를 그대로 넘겨줌). 비어있으면(아직 안 불러왔거나 자막 자체가 없음) 맨 왼쪽 열이
   // 그냥 "—"로 표시된다.
   srtText?: string;
+  // 2026-09-16(11차) 추가 — 사용자 지적: "14단계에선 이미지,영상 분류하는게 아니고~ 앞부분은
+  // 영상만 있고 자막 9~10번부터 이미지자나? 그럼 있는것만 셋팅해서 보여줘야해". 원래 표는
+  // "장면이미지"/"영상장면" 두 열을 항상 나란히 보여주는데, 실제로는 needsVideoClip에 따라
+  // 한 씬에 둘 중 하나만 채워져서 나머지 칸은 늘 "없음"으로 낭비된다 — 13번(이미지·영상 생성
+  // 작업 화면)에서는 이 구분이 여전히 의미 있어서 그대로 두고, 14번(렌더링, 참고용 보기)에서만
+  // true로 넘겨서 "화면" 열 하나로 합친다: sceneVideo가 있으면 영상 썸네일, 없으면(장면이미지
+  // 유무 무관) 이미지 썸네일/자리표시자를 보여준다.
+  mergeMediaColumn?: boolean;
 }) {
   const scenes = parseSceneBlocks(scenePrompts);
   const srtLines = useMemo(() => parseSrtLines(srtText), [srtText]);
@@ -1201,8 +1214,16 @@ export function SceneEditorList({
                 <th className="text-left font-black px-2 py-1.5 w-44">자막(SRT)</th>
                 <th className="text-left font-black px-2 py-1.5 w-28">장면</th>
                 <th className="text-left font-black px-2 py-1.5 w-20">타임</th>
-                <th className="text-left font-black px-2 py-1.5 w-20">장면이미지</th>
-                <th className="text-left font-black px-2 py-1.5 w-20">영상장면</th>
+                {/* 2026-09-16(11차) — mergeMediaColumn(14번)이면 "화면" 한 칸, 아니면(13번)
+                    기존처럼 이미지/영상 두 칸을 따로 보여준다. */}
+                {mergeMediaColumn ? (
+                  <th className="text-left font-black px-2 py-1.5 w-20">화면</th>
+                ) : (
+                  <>
+                    <th className="text-left font-black px-2 py-1.5 w-20">장면이미지</th>
+                    <th className="text-left font-black px-2 py-1.5 w-20">영상장면</th>
+                  </>
+                )}
                 <th className="text-left font-black px-2 py-1.5">이미지 프롬프트</th>
                 <th className="text-left font-black px-2 py-1.5">무빙/영상 프롬프트</th>
                 <th className="text-left font-black px-2 py-1.5 w-14">관리</th>
@@ -1214,7 +1235,7 @@ export function SceneEditorList({
                   if (!row.isFirst) return null;
                   return (
                     <tr key={row.key}>
-                      <td colSpan={9} className="p-1.5 bg-neutral-50">
+                      <td colSpan={mergeMediaColumn ? 8 : 9} className="p-1.5 bg-neutral-50">
                         <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
                       </td>
                     </tr>
@@ -1260,61 +1281,110 @@ export function SceneEditorList({
                           <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap" rowSpan={row.span}>
                             {s.time ? formatTimeWithDuration(s.time) : '—'}
                           </td>
-                          <td className="px-2 py-1.5" rowSpan={row.span}>
-                            {/* 2026-09-13 (10차) 수정 — 사용자 요청: "이미지나 영상이 없어도 모달
-                                띄어줘 대본,프롬프트,해석 볼수 있게" — 이미지가 아직 없어도 "없음"
-                                자리표시자를 눌러서 대본/프롬프트/해석은 미리 확인할 수 있게, 자리
-                                표시자도 버튼으로 바꿔 항상 모달을 연다. */}
-                            {s.sceneImage ? (
-                              <button type="button" onClick={() => setPreviewIndex(navIdx)} className="block" title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)">
-                                <img
-                                  src={s.sceneImage}
-                                  alt={s.title}
-                                  className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
-                                />
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewIndex(navIdx)}
-                                className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
-                                title="클릭하면 대본·프롬프트·해석 보기 (이미지는 아직 없음)"
-                              >
-                                없음
-                              </button>
-                            )}
-                          </td>
-                          {/* 2026-09-13 추가 — 장면영상 열. 장면이미지 열과 완전히 같은 방식(썸네일
-                              클릭 → 모달, 없으면 "없음" 자리표시자) — 실제로 영상 클립을 만든 일부
-                              장면에만 채워진다. */}
-                          <td className="px-2 py-1.5" rowSpan={row.span}>
-                            {s.sceneVideo ? (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewVideoIndex(navIdx)}
-                                className="relative block"
-                                title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)"
-                              >
-                                <video
-                                  src={s.sceneVideo}
-                                  muted
-                                  playsInline
-                                  preload="metadata"
-                                  className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
-                                />
-                                <span className="absolute inset-0 flex items-center justify-center text-white text-sm drop-shadow pointer-events-none">▶</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setPreviewVideoIndex(navIdx)}
-                                className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
-                                title="클릭하면 대본·프롬프트·해석 보기 (영상은 아직 없음)"
-                              >
-                                없음
-                              </button>
-                            )}
-                          </td>
+                          {/* 2026-09-16(11차) 수정 — 사용자 지적: "14단계에선 이미지,영상
+                              분류하는게 아니고~ 앞부분은 영상만 있고 자막 9~10번부터
+                              이미지자나? 그럼 있는것만 셋팅해서 보여줘야해". mergeMediaColumn이
+                              true(14번)면 "장면이미지"/"영상장면" 두 칸을 따로 안 두고, 그 씬이
+                              실제로 갖고 있는 것 하나만(영상이 있으면 영상, 없으면 이미지) "화면"
+                              칸 하나로 합쳐 보여준다. 13번(mergeMediaColumn 기본값 false)은
+                              기존 그대로 두 칸을 유지한다 — 이미지 생성 작업 중에는 "이 씬이
+                              영상까지 필요한 씬인지"를 한눈에 구분하는 게 여전히 유용하다. */}
+                          {mergeMediaColumn ? (
+                            <td className="px-2 py-1.5" rowSpan={row.span}>
+                              {s.sceneVideo ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewVideoIndex(navIdx)}
+                                  className="relative block"
+                                  title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)"
+                                >
+                                  <video
+                                    src={s.sceneVideo}
+                                    muted
+                                    playsInline
+                                    preload="metadata"
+                                    className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                                  />
+                                  <span className="absolute inset-0 flex items-center justify-center text-white text-sm drop-shadow pointer-events-none">▶</span>
+                                </button>
+                              ) : s.sceneImage ? (
+                                <button type="button" onClick={() => setPreviewIndex(navIdx)} className="block" title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)">
+                                  <img
+                                    src={s.sceneImage}
+                                    alt={s.title}
+                                    className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                                  />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewIndex(navIdx)}
+                                  className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
+                                  title="클릭하면 대본·프롬프트·해석 보기 (아직 없음)"
+                                >
+                                  없음
+                                </button>
+                              )}
+                            </td>
+                          ) : (
+                            <>
+                              <td className="px-2 py-1.5" rowSpan={row.span}>
+                                {/* 2026-09-13 (10차) 수정 — 사용자 요청: "이미지나 영상이 없어도 모달
+                                    띄어줘 대본,프롬프트,해석 볼수 있게" — 이미지가 아직 없어도 "없음"
+                                    자리표시자를 눌러서 대본/프롬프트/해석은 미리 확인할 수 있게, 자리
+                                    표시자도 버튼으로 바꿔 항상 모달을 연다. */}
+                                {s.sceneImage ? (
+                                  <button type="button" onClick={() => setPreviewIndex(navIdx)} className="block" title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)">
+                                    <img
+                                      src={s.sceneImage}
+                                      alt={s.title}
+                                      className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                                    />
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewIndex(navIdx)}
+                                    className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
+                                    title="클릭하면 대본·프롬프트·해석 보기 (이미지는 아직 없음)"
+                                  >
+                                    없음
+                                  </button>
+                                )}
+                              </td>
+                              {/* 2026-09-13 추가 — 장면영상 열. 장면이미지 열과 완전히 같은 방식(썸네일
+                                  클릭 → 모달, 없으면 "없음" 자리표시자) — 실제로 영상 클립을 만든 일부
+                                  장면에만 채워진다. */}
+                              <td className="px-2 py-1.5" rowSpan={row.span}>
+                                {s.sceneVideo ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewVideoIndex(navIdx)}
+                                    className="relative block"
+                                    title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)"
+                                  >
+                                    <video
+                                      src={s.sceneVideo}
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                      className="w-14 h-14 object-cover rounded-md border border-neutral-200 hover:opacity-80"
+                                    />
+                                    <span className="absolute inset-0 flex items-center justify-center text-white text-sm drop-shadow pointer-events-none">▶</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewVideoIndex(navIdx)}
+                                    className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
+                                    title="클릭하면 대본·프롬프트·해석 보기 (영상은 아직 없음)"
+                                  >
+                                    없음
+                                  </button>
+                                )}
+                              </td>
+                            </>
+                          )}
                           <td className="px-2 py-1.5" rowSpan={row.span}>
                             {s.imagePrompt ? (
                               <div className="flex items-start gap-1">
@@ -1408,9 +1478,14 @@ export function SceneEditorList({
                               ? `${formatSecToMMSS(row.group.lines[0].line.start)}-${formatSecToMMSS(row.group.lines[row.group.lines.length - 1].line.end)}`
                               : '—'}
                           </td>
-                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
-                            —
-                          </td>
+                          {/* 2026-09-16(11차) — mergeMediaColumn(14번)이면 화면 칸 하나만,
+                              아니면(13번) 이미지/영상 두 칸을 그대로 유지한다 — 위 헤더/유
+                              칼럼 수와 맞춰야 한다. */}
+                          {!mergeMediaColumn && (
+                            <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
+                              —
+                            </td>
+                          )}
                           <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
                             —
                           </td>
