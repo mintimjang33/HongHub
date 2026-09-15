@@ -91,6 +91,12 @@ export type ContentUnit = {
   // 2026-09-01 추가 — 9번(자막) 단계. narrationUrls와 구조·용도가 완전히 같아서(콘텐츠 하나에
   // 라벨 붙은 링크/파일 여러 개) 같은 LabeledLinksPanel 컴포넌트를 재사용한다.
   subtitleUrls?: LabeledItem[];
+  // 2026-09-16(6차) 추가 — 사용자 요청: "1번컨텐츠에 지금 업로드한 숏컷파일 등록해주고~
+  // 수동으로 업로드 , 삭제 할수있게 해주고~". 14번(렌더링) 단계에서 편집에 쓰는 프로젝트
+  // 파일(Shotcut .mlt 등)이나 완성된 최종 렌더링 영상 파일을 올려두는 곳 — narrationUrls/
+  // subtitleUrls와 완전히 같은 구조(라벨 붙은 링크/파일 여러 개)라 LabeledFieldSection을
+  // 그대로 재사용한다(step14-RenderPanel.tsx).
+  renderFiles?: LabeledItem[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -193,7 +199,9 @@ export type SceneBlock = {
 // 여전히 배열의 첫 번째로 fallback한다 — step13-14-LabeledLinksPanel.tsx의 체크박스가 이 필드를
 // 켜고, step16-17-ImageVideoPanel.tsx가 이 필드를 읽는다.
 export type LabeledItem = { label: string; url: string; selected?: boolean };
-export type LabeledField = 'narrationUrls' | 'subtitleUrls';
+// 2026-09-16(6차) 추가 — renderFiles(14번 렌더링 단계의 Shotcut 프로젝트/최종 영상 파일)도
+// narrationUrls/subtitleUrls와 같은 LabeledFieldSection 컴포넌트를 재사용하므로 이 유니언에 추가.
+export type LabeledField = 'narrationUrls' | 'subtitleUrls' | 'renderFiles';
 
 // 2026-09-11 추가 — 13번 화풍 선택 프리셋. 사용자가 같은 씬(약사 스틱맨+무너지는 PHARMACY 네온사인)을
 // Flow에서 여러 화풍으로 직접 만들어 비교 확정한 뒤 추가됨. promptStyle은 4대 핵심 원칙 1번(비주얼
