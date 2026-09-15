@@ -168,7 +168,19 @@ type ModalNavItem = { lineIdx: number | null; text: string; sceneIdx: number | n
 // 옮기고 싶다는 뜻이었다("위치만 정확하게 셋팅하고 싶은거야 — 숏컷 셋팅파일에다가"). app/api/
 // render-position이 실제 .mlt 파일을 읽고/고쳐서 이 값을 돌려준다 — 여기서 같은 모양을 다시
 // 선언하는 이유는 서버 전용 라우트 파일을 프런트엔드에서 import할 수 없기 때문.
-type ClipPosition = { file: string; positionMs: number; durationMs: number; trackNumber: number };
+// 2026-09-16(21차) 추가 — 사용자 요청: "영상의 몇초부토 몇초까지만 사용하고 싶은지 정할수
+// 있어?" — inMs/outMs(소스 영상에서 실제로 재생하는 구간)와 sourceMaxMs(그 소스 파일의
+// 최대 길이, 이 이상으로는 구간을 늘릴 수 없음)를 추가. app/api/render-position의 ClipPosition과
+// 반드시 같은 모양을 유지할 것.
+type ClipPosition = {
+  file: string;
+  positionMs: number;
+  durationMs: number;
+  trackNumber: number;
+  inMs: number;
+  outMs: number;
+  sourceMaxMs: number;
+};
 
 // 밀리초를 "분:초.밀리초"(예: "0:11.000")로 표시 — mlt가 실제로 쓰는 밀리초 정밀도를 그대로
 // 보여줘야 한다(사용자 지적: "0:06 이렇게만 나오지만 좀더 디테일하게 나와야 할꺼 같아").
@@ -207,22 +219,32 @@ function ClipControlFields({
   totalTracks,
   onSetPosition,
   onSetTrack,
+  onSetRange,
 }: {
   info: ClipPosition;
   totalTracks: number;
   onSetPosition: (file: string, positionMs: number) => Promise<void>;
   onSetTrack: (file: string, trackNumber: number) => Promise<void>;
+  // 2026-09-16(21차) 추가 — 사용자 요청: "영상의 몇초부토 몇초까지만 사용하고 싶은지 정할수
+  // 있어?". 위치(트랙 안 어디서 시작하는지)와는 별개로, 소스 영상 자체에서 어느 구간을 쓸지
+  // 지정한다.
+  onSetRange: (file: string, inMs: number, outMs: number) => Promise<void>;
 }) {
   const [posDraft, setPosDraft] = useState(msToClock(info.positionMs));
   const [trackDraft, setTrackDraft] = useState(String(info.trackNumber));
+  const [inDraft, setInDraft] = useState(msToClock(info.inMs));
+  const [outDraft, setOutDraft] = useState(msToClock(info.outMs));
   const [savingPos, setSavingPos] = useState(false);
   const [savingTrack, setSavingTrack] = useState(false);
+  const [savingRange, setSavingRange] = useState(false);
   const [err, setErr] = useState('');
 
   useEffect(() => {
     setPosDraft(msToClock(info.positionMs));
     setTrackDraft(String(info.trackNumber));
-  }, [info.file, info.positionMs, info.trackNumber]);
+    setInDraft(msToClock(info.inMs));
+    setOutDraft(msToClock(info.outMs));
+  }, [info.file, info.positionMs, info.trackNumber, info.inMs, info.outMs]);
 
   async function applyPosition() {
     const ms = clockToMs(posDraft);
@@ -258,10 +280,36 @@ function ClipControlFields({
     }
   }
 
+  async function applyRange() {
+    const inMs = clockToMs(inDraft);
+    const outMs = clockToMs(outDraft);
+    if (inMs === null || outMs === null) {
+      setErr('시간 형식이 올바르지 않습니다. 예: 0:01.000');
+      return;
+    }
+    if (outMs <= inMs) {
+      setErr('끝 지점은 시작 지점보다 뒤여야 합니다.');
+      return;
+    }
+    if (outMs > info.sourceMaxMs) {
+      setErr(`끝 지점은 원본 영상 길이(${msToClock(info.sourceMaxMs)})를 넘을 수 없습니다.`);
+      return;
+    }
+    setErr('');
+    setSavingRange(true);
+    try {
+      await onSetRange(info.file, inMs, outMs);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingRange(false);
+    }
+  }
+
   return (
     <div className="space-y-1.5">
       <p className="text-[10px] text-neutral-400 font-mono">
-        클립: {info.file} · 길이 {msToClock(info.durationMs)}(참고용 — 구간 자르기는 지원하지 않음)
+        클립: {info.file} · 원본 길이 {msToClock(info.sourceMaxMs)}
       </p>
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] font-bold text-neutral-400 w-16 shrink-0">트랙 번호</span>
@@ -287,6 +335,29 @@ function ClipControlFields({
           {savingPos ? '적용 중...' : '적용'}
         </button>
       </div>
+      {/* 2026-09-16(21차) 추가 — 사용자 요청: "영상의 몇초부토 몇초까지만 사용하고 싶은지
+          정할수 있어?" — 소스 영상에서 실제로 쓸 구간(시작~끝)을 지정한다. 위 "타임라인 위치"와
+          달리 이건 그 영상 파일 자체의 몇 초~몇 초를 보여줄지 정하는 것 — 시작을 늦추면 앞부분을
+          자른 것과 같은 효과, 끝을 당기면 뒷부분을 자른 것과 같은 효과다. */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[10px] font-bold text-neutral-400 w-16 shrink-0">사용 구간</span>
+        <input
+          value={inDraft}
+          onChange={(e) => setInDraft(e.target.value)}
+          placeholder="0:00.000"
+          className="w-24 border border-neutral-700 bg-neutral-800 rounded-lg px-1.5 py-1 text-[11px] font-mono text-white"
+        />
+        <span className="text-[10px] text-neutral-500">~</span>
+        <input
+          value={outDraft}
+          onChange={(e) => setOutDraft(e.target.value)}
+          placeholder="0:06.000"
+          className="w-24 border border-neutral-700 bg-neutral-800 rounded-lg px-1.5 py-1 text-[11px] font-mono text-white"
+        />
+        <button onClick={applyRange} disabled={savingRange} className="text-[10px] font-black text-blue-400 hover:underline disabled:opacity-40">
+          {savingRange ? '적용 중...' : '적용'}
+        </button>
+      </div>
       {err && <p className="text-[10px] text-red-400 font-bold">{err}</p>}
     </div>
   );
@@ -303,6 +374,7 @@ export type ClipControl = {
   info: ClipPosition | null;
   onSetPosition: (file: string, positionMs: number) => Promise<void>;
   onSetTrack: (file: string, trackNumber: number) => Promise<void>;
+  onSetRange: (file: string, inMs: number, outMs: number) => Promise<void>;
 };
 
 export function SceneImageModal({
@@ -664,6 +736,7 @@ export function SceneVideoModal({
                   totalTracks={clipControl.totalTracks}
                   onSetPosition={clipControl.onSetPosition}
                   onSetTrack={clipControl.onSetTrack}
+                  onSetRange={clipControl.onSetRange}
                 />
               )}
             </div>
@@ -1229,6 +1302,21 @@ export function SceneEditorList({
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '트랙 저장 실패');
+    setClipPositions(data.clips);
+    setClipTotalTracks(data.totalTracks);
+  }
+
+  // 2026-09-16(21차) 추가 — 사용자 요청: "영상의 몇초부토 몇초까지만 사용하고 싶은지 정할수
+  // 있어?". 소스 영상에서 실제로 재생할 구간(시작~끝)을 지정한다 — 위치(트랙 안 시작 시각)와는
+  // 별개다.
+  async function setClipRange(file: string, inMs: number, outMs: number) {
+    const res = await fetch('/api/render-position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mltUrl, file, action: 'range', inMs, outMs }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '구간 저장 실패');
     setClipPositions(data.clips);
     setClipTotalTracks(data.totalTracks);
   }
@@ -1909,6 +1997,7 @@ export function SceneEditorList({
                   ),
                   onSetPosition: setClipPositionMs,
                   onSetTrack: setClipTrackNumber,
+                  onSetRange: setClipRange,
                 }
               : undefined
           }
