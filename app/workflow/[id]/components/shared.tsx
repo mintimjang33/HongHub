@@ -516,6 +516,14 @@ export function SceneVideoModal({
   const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
   const hasPrev = index > 0;
   const hasNext = index < navItems.length - 1;
+  // 2026-09-16(19차) 추가 — 사용자 지적: "2번째 스샷을 보면 초단위가 디테일하게 안나오는데???".
+  // <video controls>의 재생시간 표시는 브라우저가 그리는 네이티브 UI라 "0:06 / 0:06"처럼 초
+  // 단위로만 나오고 밀리초까지는 커스터마이징할 수 없다 — 대신 재생 시각을 따로 추적해서
+  // msToClock(위에서 이미 만든, .mlt 위치 입력과 같은 포맷)으로 정밀하게 보여주는 텍스트를 둔다.
+  const [videoTime, setVideoTime] = useState<{ current: number; duration: number } | null>(null);
+  useEffect(() => {
+    setVideoTime(null);
+  }, [scene?.sceneVideo]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -573,11 +581,25 @@ export function SceneVideoModal({
             </button>
           )}
           {scene?.sceneVideo ? (
-            <video src={scene.sceneVideo} controls autoPlay className="max-w-full max-h-[70vh]" />
+            <video
+              src={scene.sceneVideo}
+              controls
+              autoPlay
+              className="max-w-full max-h-[70vh]"
+              onTimeUpdate={(e) => setVideoTime({ current: e.currentTarget.currentTime * 1000, duration: e.currentTarget.duration * 1000 || 0 })}
+              onLoadedMetadata={(e) => setVideoTime({ current: e.currentTarget.currentTime * 1000, duration: e.currentTarget.duration * 1000 || 0 })}
+            />
           ) : (
             <div className="text-neutral-500 text-xs py-24 text-center px-6">
               {scene ? '이 장면엔 아직 영상이 없습니다' : '이 자막 구간엔 아직 등록된 장면이 없습니다'}
             </div>
+          )}
+          {/* 2026-09-16(19차) 추가 — 브라우저 네이티브 재생시간 표시("0:06 / 0:06")는 밀리초까지
+              못 보여주므로, 같은 정밀도(msToClock)로 별도 텍스트를 얹는다. */}
+          {videoTime && (
+            <span className="absolute top-2 left-2 text-[10px] font-mono text-white bg-black/60 rounded px-1.5 py-0.5 pointer-events-none">
+              {msToClock(videoTime.current)} / {msToClock(videoTime.duration)}
+            </span>
           )}
           {hasNext && (
             <button
@@ -617,34 +639,12 @@ export function SceneVideoModal({
           )}
         </div>
         <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
-          {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
-          {entry.text && (
-            <p className="text-white text-[11px] font-bold leading-relaxed">
-              # {entry.lineIdx !== null ? entry.lineIdx + 1 : ''} {entry.text}
-            </p>
-          )}
-          {scene && <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>}
-          {/* 영상 모달은 이미지프롬프트가 아니라 실제로 이 영상을 만든 영상 프롬프트(video)를
-              보여준다 — 화면에 나오는 결과물과 같은 프롬프트여야 비교가 맞다. 해석을 먼저,
-              원문 영어 프롬프트를 그 아래에 (사용자 요청: "해석을 프롬프트 아래말고 위쪽으로"). */}
-          {scene?.note && (
-            <p className="text-amber-200/80 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
-              💡 {scene.note}
-            </p>
-          )}
-          {scene?.video && (
-            <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
-              <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
-                {scene.video}
-              </p>
-              <CopyButton text={scene.video} />
-            </div>
-          )}
-          {/* 2026-09-16(17차) 추가 — 사용자 요청: "14단계에서 모달을 띄우면 트랙번호 설정,
-              시간설정, 위치설정을 할수 있게" + "현재 모달을 띄우면 현재 설정된 값이 보이면
-              되겠다". 14번(RenderPanel)에서만 clipControl이 넘어온다. */}
+          {/* 2026-09-16(19차) 순서 변경 — 사용자 지적: "14단계는 이기능이 주 기능이니까
+              영상,이미지 바로 아래에 위치해야해~ 다른 텍스트들 위에~~". 트랙/위치 설정 패널을
+              (13번 프롬프트 텍스트들과 달리) 14번의 핵심 기능이므로 영상 바로 아래, 다른 정보
+              텍스트보다 먼저 보이게 맨 위로 옮겼다. */}
           {clipControl?.enabled && (
-            <div className="border-t border-white/10 pt-1.5 mt-1">
+            <div className="pb-1.5 mb-1 border-b border-white/10">
               <p className="text-[10px] font-black text-neutral-400 mb-1">🎬 렌더링 파일(.mlt) 설정</p>
               {!clipControl.mltUrl ? (
                 <p className="text-[10px] text-amber-300">
@@ -666,6 +666,29 @@ export function SceneVideoModal({
                   onSetTrack={clipControl.onSetTrack}
                 />
               )}
+            </div>
+          )}
+          {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
+          {entry.text && (
+            <p className="text-white text-[11px] font-bold leading-relaxed">
+              # {entry.lineIdx !== null ? entry.lineIdx + 1 : ''} {entry.text}
+            </p>
+          )}
+          {scene && <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>}
+          {/* 영상 모달은 이미지프롬프트가 아니라 실제로 이 영상을 만든 영상 프롬프트(video)를
+              보여준다 — 화면에 나오는 결과물과 같은 프롬프트여야 비교가 맞다. 해석을 먼저,
+              원문 영어 프롬프트를 그 아래에 (사용자 요청: "해석을 프롬프트 아래말고 위쪽으로"). */}
+          {scene?.note && (
+            <p className="text-amber-200/80 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
+              💡 {scene.note}
+            </p>
+          )}
+          {scene?.video && (
+            <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
+              <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
+                {scene.video}
+              </p>
+              <CopyButton text={scene.video} />
             </div>
           )}
         </div>
