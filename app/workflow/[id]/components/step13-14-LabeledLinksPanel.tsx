@@ -72,6 +72,24 @@ const DEFAULT_PREVIEW_STYLE: PreviewStyle = { align: 'center', lines: 2, fontSiz
 // 쓰는 "탐색용" 키 목록 — 일반 타이핑 키는 여기 없어서 문자를 입력할 때마다는 동기화가 안 된다.
 const CARET_NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']);
 
+// 2026-09-16(14차) 추가 — 사용자 지적: "지금 12단계에서 시프트+엔터면 줄바꿈이자나? 그럼 그걸
+// srt파일에 적용해줘". 화면 속 자막(contentEditable span)에서 Shift+Enter를 누르면 브라우저가
+// 보통 <br>(또는 블록 요소)을 DOM에 직접 넣어서 "보기엔" 줄이 나뉘지만, 바로 아래
+// updateSelectedCueText가 읽던 e.currentTarget.textContent는 <br>를 완전히 무시한다
+// (예: "가나<br>다라".textContent === "가나다라" — 공백조차 안 남고 그대로 붙어버림). 그 결과
+// 화면에서 Shift+Enter로 줄을 나눠도 포커스를 벗어나 저장되는 순간 그 줄바꿈이 사라지고 두 줄이
+// 공백 없이 붙어버리는 버그가 있었다. <br>와 블록 요소 경계를 실제 개행문자(\n)로 바꾼 뒤 읽어서,
+// 화면에서 나눈 줄바꿈이 실제로 cue.text에 반영되고 serializeSrtCues를 거쳐 SRT 파일에도 그대로
+// 물리적 줄바꿈으로 저장되게 한다.
+function readEditableTextWithBreaks(el: HTMLElement): string {
+  const clone = el.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('br').forEach((br) => br.replaceWith(document.createTextNode('\n')));
+  clone.querySelectorAll('div, p').forEach((block) => {
+    block.insertAdjacentText('beforebegin', '\n');
+  });
+  return (clone.textContent || '').replace(/^\n+/, '');
+}
+
 // 콘텐츠(유닛) 하나의 나레이션 또는 자막 중 한 필드만 다루는 조각 — 링크 붙여넣기와 파일 업로드
 // (uploadSceneMedia 재사용) 둘 다 지원, 라벨(예: "원본"/"1.3배속", "SRT"/"수정본")로 여러 후보를
 // 구분한다. NarrationSubtitlePanel이 유닛 하나당 이 조각을 두 번(나레이션/자막) 나란히 띄운다.
@@ -529,7 +547,7 @@ export function LabeledFieldSection({
                               key={`${selectedCueIdx}-${cues.length}`}
                               contentEditable
                               suppressContentEditableWarning
-                              onBlur={(e) => updateSelectedCueText(e.currentTarget.textContent || '')}
+                              onBlur={(e) => updateSelectedCueText(readEditableTextWithBreaks(e.currentTarget))}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
                                   e.preventDefault();
@@ -547,6 +565,7 @@ export function LabeledFieldSection({
                                 borderRadius: 3,
                                 boxDecorationBreak: 'clone',
                                 WebkitBoxDecorationBreak: 'clone',
+                                whiteSpace: 'pre-line',
                                 cursor: 'text',
                               }}
                             >
@@ -555,8 +574,10 @@ export function LabeledFieldSection({
                           </div>
                         </div>
                         <p className="text-[9px] text-neutral-400">
-                          화면 속 자막을 직접 클릭해서 고치세요 — 다른 곳 클릭하면 저장됩니다. <b>Enter</b>는 커서 뒷부분을 다음 화면으로 넘기고,{' '}
-                          <b>Shift+Enter</b>는 같은 화면 안에서 줄바꿈만 합니다.
+                          화면 속 자막을 직접 클릭해서 고치세요 — 다른 곳 클릭하면 저장됩니다.
+                          <br />• <b>Shift+Enter</b>: 커서 위치에서 줄바꿈(원하는 지점에서 한 줄→두 줄로 표시).
+                          <br />• <b>Enter</b>: 커서 뒷부분을 잘라 다음 자막 화면으로 넘기기(자막 하나를 둘로 분리).
+                          <br />• 아래 <b>&quot;다음 자막 내용 당겨와 합치기&quot;</b> 버튼: Enter로 나눈 것의 반대 — 다음 자막을 지금 자막 뒤로 당겨와 하나로 합치기(시간 구간도 같이 합쳐짐).
                         </p>
                         <button
                           onClick={mergeWithNextCue}
