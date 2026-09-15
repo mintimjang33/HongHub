@@ -43,11 +43,6 @@ function formatTimeWithDuration(time: string): string {
 // 스타일 조정을 한 번도 안 한) 콘텐츠를 위한 안전한 기본값만 여기 남겨둔다.
 const DEFAULT_CAPTION_STYLE: CaptionStyle = { align: 'center', lines: 2, fontSize: 13, bg: '#000000', color: '#ffffff' };
 
-// 2026-09-16(22차) 수정 — export로 변경. 사용자 지적: "클릭해도 다운로드가 안되는데?" — 12번
-// (step13-14-LabeledLinksPanel.tsx)의 "렌더링 파일"/"나레이션"/"자막" 목록이 지금까지 <a
-// target="_blank">만 쓰고 있었는데, Supabase Storage가 내려주는 Content-Type에 따라(특히
-// .mlt는 XML이라) 브라우저가 강제로 저장하지 않고 그대로 새 탭에 표시해버리는 경우가 있었다.
-// 여기 있던 걸 그대로 재사용할 수 있게 export해서, 그 목록에도 같은 강제 다운로드 버튼을 붙인다.
 export async function downloadFile(url: string, filename: string) {
   try {
     const res = await fetch(url);
@@ -285,6 +280,16 @@ function ClipControlFields({
     }
   }
 
+  // 2026-09-16(24차) 추가 — 사용자 요청: "사용구간의 타임도 적용 오른쪽에 계산해서 표시해줘".
+  // 입력칸에 적은 시작~끝만 봐서는 실제로 몇 초짜리 구간인지 바로 계산이 안 되니, 입력값이
+  // 바뀔 때마다(아직 "적용"을 안 눌러도) 그 구간 길이를 미리 계산해서 보여준다.
+  const rangeDurationLabel = (() => {
+    const inMs = clockToMs(inDraft);
+    const outMs = clockToMs(outDraft);
+    if (inMs === null || outMs === null || outMs <= inMs) return null;
+    return `${((outMs - inMs) / 1000).toFixed(3)}s`;
+  })();
+
   async function applyRange() {
     const inMs = clockToMs(inDraft);
     const outMs = clockToMs(outDraft);
@@ -362,6 +367,7 @@ function ClipControlFields({
         <button onClick={applyRange} disabled={savingRange} className="text-[10px] font-black text-blue-400 hover:underline disabled:opacity-40">
           {savingRange ? '적용 중...' : '적용'}
         </button>
+        {rangeDurationLabel && <span className="text-[10px] text-neutral-500">({rangeDurationLabel})</span>}
       </div>
       {err && <p className="text-[10px] text-red-400 font-bold">{err}</p>}
     </div>
@@ -522,7 +528,10 @@ export function SceneImageModal({
           )}
         </div>
         <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
-          {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
+          {/* 2026-09-16(24차) 수정 — 사용자 지적: "아래 타임을 잘보이게 해주고" — 검은 배경
+              위에 text-white/40(40% 불투명도)이라 거의 안 보였다. 다른 시간 표기(사용 구간 등)와
+              비슷한 밝기로 올리고 두껍게 해서 눈에 띄게 한다. */}
+          {timeLabel && <p className="text-white/80 text-[11px] font-bold font-mono">{timeLabel}</p>}
           {/* 2026-09-16(7차) 수정 — 지금 넘어와 있는 자막 줄 텍스트를 눈에 띄게(두껍게) 보여준다
               (사용자 지시: "두껍게"). 예전엔 이 자리에 scene.script(대본 원문)를 옅은 글씨로
               보여줬는데, 이 자막 줄이 이미 그 장면의 실제 최종 자막이라 내용이 겹쳐서
@@ -746,7 +755,10 @@ export function SceneVideoModal({
               )}
             </div>
           )}
-          {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
+          {/* 2026-09-16(24차) 수정 — 사용자 지적: "아래 타임을 잘보이게 해주고" — 검은 배경
+              위에 text-white/40(40% 불투명도)이라 거의 안 보였다. 다른 시간 표기(사용 구간 등)와
+              비슷한 밝기로 올리고 두껍게 해서 눈에 띄게 한다. */}
+          {timeLabel && <p className="text-white/80 text-[11px] font-bold font-mono">{timeLabel}</p>}
           {entry.text && (
             <p className="text-white text-[11px] font-bold leading-relaxed">
               # {entry.lineIdx !== null ? entry.lineIdx + 1 : ''} {entry.text}
