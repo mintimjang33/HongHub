@@ -496,6 +496,190 @@ export function SceneVideoModal({
   );
 }
 
+// 2026-09-16(16차) 추가 — 사용자 지적: "14번에서 모달을 띄우면 13단계와 다르게 있는곳의 영상이나
+// 이미지만 가져와서 쭉 이어져야 하는데~~ 9번 자막장면부터 영상이 없다고 나와~~ 바로 이미지를
+// 이어서 불러와야 하는건데~~". 14번(mergeMediaColumn) 표의 썸네일 열은 이미 "영상 있으면 영상,
+// 없으면 이미지"로 합쳐서 보여주는데, 정작 그 썸네일을 눌러서 여는 모달은 SceneImageModal 아니면
+// SceneVideoModal 둘 중 하나로 고정되고 ‹/›로 다음 자막 줄로 넘어가도 모달 "종류"는 안 바뀌었다
+// — 예: 영상이 있는 장면에서 SceneVideoModal을 열고 ›로 다음 장면(영상은 없고 이미지만 있는
+// 장면)으로 넘어가면, scene.sceneVideo가 비어있으니 그 장면에 실제로 이미지가 있어도 무시하고
+// "이 장면엔 아직 영상이 없습니다"만 보여줬다. 이 모달은 SceneImageModal/SceneVideoModal과 거의
+// 같은 구조지만, 렌더링할 때마다(=자막 줄이 바뀔 때마다) 그 장면에 영상이 있으면 영상을, 없으면
+// 이미지를, 둘 다 없으면 자리표시자를 보여주도록 매번 다시 판단한다 — 13번(mergeMediaColumn
+// 기본값 false)의 SceneImageModal/SceneVideoModal은 이 문제와 무관하므로 그대로 둔다(거기는
+// 애초에 "이 씬이 영상까지 필요한지"를 이미지/영상 모달을 분리해서 보여주는 게 의도된 동작).
+export function SceneMergedModal({
+  scenes,
+  navItems,
+  index,
+  onClose,
+  onNavigate,
+  totalLines,
+  totalScenes,
+  captionStyle,
+}: {
+  scenes: SceneBlock[];
+  navItems: ModalNavItem[];
+  index: number;
+  onClose: () => void;
+  onNavigate: (idx: number) => void;
+  totalLines: number;
+  totalScenes: number;
+  captionStyle?: CaptionStyle;
+}) {
+  const entry = navItems[index];
+  const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
+  const hasPrev = index > 0;
+  const hasNext = index < navItems.length - 1;
+  const hasVideo = !!scene?.sceneVideo;
+  const hasImage = !!scene?.sceneImage;
+
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'ArrowRight' && index < navItems.length - 1) onNavigate(index + 1);
+      else if (e.key === 'ArrowLeft' && index > 0) onNavigate(index - 1);
+      else if (e.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [index, navItems.length, onNavigate, onClose]);
+
+  if (!entry) return null;
+
+  const timeLabel = scene?.time
+    ? formatTimeWithDuration(scene.time)
+    : entry.start !== null && entry.end !== null
+      ? formatTimeWithDuration(`${formatSecToMMSS(entry.start)}-${formatSecToMMSS(entry.end)}`)
+      : '';
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-black rounded-xl overflow-hidden w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
+          <div className="flex items-center gap-2">
+            <span className="text-white/50 text-[11px] font-mono px-1">
+              # {entry.lineIdx !== null ? entry.lineIdx + 1 : '—'} / {totalLines}
+            </span>
+            <span className="text-white/50 text-[11px] font-mono px-1">
+              {scene ? scene.id : '—'} / {totalScenes}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {hasVideo && (
+              <button
+                onClick={() => downloadFile(scene!.sceneVideo, `${scene!.id}.mp4`)}
+                className="text-white/70 hover:text-white text-xs font-black px-2 py-1"
+              >
+                ⬇ 다운로드
+              </button>
+            )}
+            {!hasVideo && hasImage && (
+              <button
+                onClick={() => downloadFile(scene!.sceneImage, `${scene!.id}.jpg`)}
+                className="text-white/70 hover:text-white text-xs font-black px-2 py-1"
+              >
+                ⬇ 다운로드
+              </button>
+            )}
+            <button onClick={onClose} className="text-white/70 hover:text-white text-xs font-black px-2 py-1">
+              ✕ 닫기
+            </button>
+          </div>
+        </div>
+        <div className="relative flex items-center justify-center bg-black min-h-[45vh]">
+          {hasPrev && (
+            <button
+              type="button"
+              onClick={() => onNavigate(index - 1)}
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+              aria-label="이전 자막"
+            >
+              ‹
+            </button>
+          )}
+          {hasVideo ? (
+            <video src={scene!.sceneVideo} controls autoPlay className="max-w-full max-h-[70vh]" />
+          ) : hasImage ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={scene!.sceneImage} alt={scene!.title || scene!.id} className="max-w-full max-h-[70vh] object-contain" />
+          ) : (
+            <div className="text-neutral-500 text-xs py-24 text-center px-6">
+              {scene ? '이 장면엔 아직 이미지·영상이 없습니다' : '이 자막 구간엔 아직 등록된 장면이 없습니다'}
+            </div>
+          )}
+          {hasNext && (
+            <button
+              type="button"
+              onClick={() => onNavigate(index + 1)}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
+              aria-label="다음 자막"
+            >
+              ›
+            </button>
+          )}
+          {entry.text && (() => {
+            const style = captionStyle || DEFAULT_CAPTION_STYLE;
+            return (
+              <div
+                className="absolute bottom-4 inset-x-3 pointer-events-none flex"
+                style={{ justifyContent: style.align === 'left' ? 'flex-start' : style.align === 'right' ? 'flex-end' : 'center' }}
+              >
+                <span
+                  className="font-bold inline-block"
+                  style={{
+                    maxWidth: style.lines === 1 ? '96%' : '75%',
+                    textAlign: style.align,
+                    color: style.color,
+                    backgroundColor: style.bg,
+                    padding: '4px 10px',
+                    borderRadius: 3,
+                    fontSize: style.fontSize,
+                    boxDecorationBreak: 'clone',
+                    WebkitBoxDecorationBreak: 'clone',
+                    whiteSpace: 'pre-line',
+                  }}
+                >
+                  {entry.text}
+                </span>
+              </div>
+            );
+          })()}
+        </div>
+        <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
+          {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
+          {entry.text && (
+            <p className="text-white text-[11px] font-bold leading-relaxed">
+              # {entry.lineIdx !== null ? entry.lineIdx + 1 : ''} {entry.text}
+            </p>
+          )}
+          {scene && <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>}
+          {scene?.note && (
+            <p className="text-amber-200/80 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
+              💡 {scene.note}
+            </p>
+          )}
+          {hasVideo && scene?.video && (
+            <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
+              <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
+                {scene.video}
+              </p>
+              <CopyButton text={scene.video} />
+            </div>
+          )}
+          {!hasVideo && scene?.imagePrompt && (
+            <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
+              <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
+                {scene.imagePrompt}
+              </p>
+              <CopyButton text={scene.imagePrompt} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // 프롬프트 한 줄(CLEAN/INFO/영상)을 클립보드에 복사하는 작은 버튼 — 눌렀을 때만 "복사됨"으로 잠깐 바뀐다.
 // 2026-09-08 추가 — 선택적 label. 한 카드 안에 복사 버튼이 여러 개(예: 11번의 "전체 복사"/"TTS만
 // 복사") 있을 때 전부 "복사"로만 뜨면 뭘 누르는지 구분이 안 돼서, 버튼마다 다른 문구를 넣을 수
@@ -940,7 +1124,7 @@ export function SceneEditorList({
   // 유무 무관) 이미지 썸네일/자리표시자를 보여준다.
   mergeMediaColumn?: boolean;
   // 2026-09-16(15차) 추가 — 유닛의 자막 스타일(정렬/줄수/글자크기/배경·글자색). 아래
-  // SceneImageModal/SceneVideoModal의 캡션 오버레이에 그대로 전달된다.
+  // SceneImageModal/SceneVideoModal/SceneMergedModal의 캡션 오버레이에 그대로 전달된다.
   captionStyle?: CaptionStyle;
 }) {
   const scenes = parseSceneBlocks(scenePrompts);
@@ -948,6 +1132,8 @@ export function SceneEditorList({
   const [editingIndex, setEditingIndex] = useState<number | null>(null); // null=닫힘, -1=새 장면 추가 중
   const [draft, setDraft] = useState<SceneBlock>(EMPTY_SCENE_DRAFT);
   // 2026-09-10 추가 — 장면이미지 썸네일을 클릭하면 이 인덱스로 SceneImageModal을 연다. null=닫힘.
+  // 2026-09-16(16차) — mergeMediaColumn(14번)일 땐 이 인덱스로 SceneMergedModal을 연다(영상/이미지
+  // 구분 없이 이거 하나만 쓴다) — previewVideoIndex는 mergeMediaColumn=false(13번)에서만 쓰인다.
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   // 2026-09-13 추가 — 장면영상 썸네일을 클릭하면 이 인덱스로 SceneVideoModal을 연다. null=닫힘.
   const [previewVideoIndex, setPreviewVideoIndex] = useState<number | null>(null);
@@ -1332,7 +1518,7 @@ export function SceneEditorList({
                               {s.sceneVideo ? (
                                 <button
                                   type="button"
-                                  onClick={() => setPreviewVideoIndex(navIdx)}
+                                  onClick={() => setPreviewIndex(navIdx)}
                                   className="relative block"
                                   title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)"
                                 >
@@ -1530,9 +1716,6 @@ export function SceneEditorList({
                           <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
                             —
                           </td>
-                          <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
-                            —
-                          </td>
                           <td className="px-2 py-1.5" rowSpan={row.span}>
                             {row.group.lines.length > 0 && (
                               <button
@@ -1564,18 +1747,31 @@ export function SceneEditorList({
         </button>
       )}
       {previewIndex !== null && (
-        <SceneImageModal
-          scenes={scenes}
-          navItems={navItems}
-          index={previewIndex}
-          onClose={() => setPreviewIndex(null)}
-          onNavigate={setPreviewIndex}
-          totalLines={srtLines.length}
-          totalScenes={filteredWithIndex.length}
-          captionStyle={captionStyle}
-        />
+        mergeMediaColumn ? (
+          <SceneMergedModal
+            scenes={scenes}
+            navItems={navItems}
+            index={previewIndex}
+            onClose={() => setPreviewIndex(null)}
+            onNavigate={setPreviewIndex}
+            totalLines={srtLines.length}
+            totalScenes={filteredWithIndex.length}
+            captionStyle={captionStyle}
+          />
+        ) : (
+          <SceneImageModal
+            scenes={scenes}
+            navItems={navItems}
+            index={previewIndex}
+            onClose={() => setPreviewIndex(null)}
+            onNavigate={setPreviewIndex}
+            totalLines={srtLines.length}
+            totalScenes={filteredWithIndex.length}
+            captionStyle={captionStyle}
+          />
+        )
       )}
-      {previewVideoIndex !== null && (
+      {previewVideoIndex !== null && !mergeMediaColumn && (
         <SceneVideoModal
           scenes={scenes}
           navItems={navItems}
