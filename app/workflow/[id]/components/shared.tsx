@@ -21,6 +21,16 @@ function formatTimeWithDuration(time: string): string {
   return `${time} (${dur}s)`;
 }
 
+// 2026-09-16(8차) 추가 — 사용자 지적: "원래 자막에서 이건 한줄로 나왔었잖아 그럼 한줄로
+// 표시를 해줘야지". 화면 위 자막 오버레이가 실제 최종 영상(1920px 캔버스, 54pt)과 달리 훨씬
+// 좁은 모달 폭(약 470px) 안에 고정 18px로 그려지다 보니, 원래 한 줄짜리 자막이 줄바꿈되어
+// 두 줄처럼 보이는 문제가 있었다 — 글자 수에 비례해 폰트 크기를 줄여서 항상 한 줄에 들어가게
+// 한다(줄바꿈 자체는 white-space: nowrap으로 막고, 그 폭에 맞게 글자 크기만 줄인다).
+function captionFontSize(text: string): number {
+  const len = text.length || 1;
+  return Math.max(11, Math.min(18, Math.floor(460 / len)));
+}
+
 async function downloadFile(url: string, filename: string) {
   try {
     const res = await fetch(url);
@@ -248,16 +258,15 @@ export function SceneImageModal({
               검은 배경 박스, 화면 하단 중앙)로 지금 이 줄의 자막을 이미지/영상 위에 실제
               캡션처럼 얹어 보여준다. */}
           {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[96%] text-center pointer-events-none">
               <span
                 className="font-bold text-white inline-block"
                 style={{
                   backgroundColor: '#000000',
                   padding: '4px 10px',
                   borderRadius: 3,
-                  fontSize: 18,
-                  boxDecorationBreak: 'clone',
-                  WebkitBoxDecorationBreak: 'clone',
+                  fontSize: captionFontSize(entry.text),
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {entry.text}
@@ -403,16 +412,15 @@ export function SceneVideoModal({
             </button>
           )}
           {entry.text && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[96%] text-center pointer-events-none">
               <span
                 className="font-bold text-white inline-block"
                 style={{
                   backgroundColor: '#000000',
                   padding: '4px 10px',
                   borderRadius: 3,
-                  fontSize: 18,
-                  boxDecorationBreak: 'clone',
-                  WebkitBoxDecorationBreak: 'clone',
+                  fontSize: captionFontSize(entry.text),
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {entry.text}
