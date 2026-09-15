@@ -129,55 +129,79 @@ export function PresetPickerModal({
 // 그대로 쓰지 않고 별도로 만든 이유는, 장면은 캐릭터와 달리 여러 개를 순서대로 이어 보는
 // 용도가 필요하기 때문 — 이미지 아래에 장면 설명(제목/타임)을 같이 보여주고, 좌우 화살표
 // (또는 방향키)로 이전/다음 장면까지 모달을 안 닫고 바로 넘겨볼 수 있게 했다.
-// 2026-09-16(5차) 추가 — 사용자 요청: "모달에 자막번호와 번호별 자막도 표시가 되어야 함".
-// 씬 이미지/영상 모달은 지금까지 그 씬의 title/script/note만 보여줬는데, 한 씬이 SRT 줄
-// 여러 개에 걸쳐 있을 수 있어서(SceneEditorList의 rowSpan 그룹) 정확히 "몇 번 자막들"이
-// 이 씬에 묶여 있는지 모달만 보고는 알 수 없었다. SceneEditorList가 rowGroups에서 이미 계산해
-// 둔 자막 줄 정보(줄 번호 + 원문 텍스트)를 씬과 같은 순서의 배열로 모달에 넘겨서, 여기서
-// "#번호 텍스트" 목록으로 그대로 보여준다.
-type ModalSubLine = { lineIdx: number; text: string };
+// 2026-09-16(7차) 수정 — 사용자 지적: "13단계에 모달이 srt자막 기준이 아니라 씬기준으로
+// 보여지고 있음~ 자막기준으로 바꾸려고 함~". (5차)에서는 씬을 기준으로 넘겨보고 그 씬에 묶인
+// 자막 줄들을 목록으로만 곁들였는데, 사용자가 원한 건 반대 방향 — ‹/›로 한 번에 넘어가는
+// 단위 자체가 "씬"이 아니라 "SRT 자막 줄 하나"여야 한다는 것("자막이 2개가 한 씬이면 장면은
+// 2개(이미지는 화면 넘길때까지 보여주면 됨)" — 같은 씬에 묶인 줄 여러 개를 넘기는 동안은
+// 같은 이미지가 계속 보이면 된다는 뜻). 그래서 모달의 탐색 배열을 SceneBlock[]이 아니라 이
+// ModalNavItem[](자막 줄 하나 = 항목 하나, 그 줄이 속한 씬 인덱스를 같이 들고 있음)로 바꿨다.
+// SRT가 아예 없는(로딩 전이거나 자막 자체가 없는) 유닛에서는 lineIdx/text/start/end를 전부
+// null로 채운 항목을 씬 개수만큼 만들어 예전과 같은 "씬 기준 넘기기"로 그대로 대체한다.
+type ModalNavItem = { lineIdx: number | null; text: string; sceneIdx: number | null; start: number | null; end: number | null };
 
 export function SceneImageModal({
   scenes,
+  navItems,
   index,
   onClose,
   onNavigate,
-  lineGroups,
+  totalLines,
+  totalScenes,
 }: {
   scenes: SceneBlock[];
+  navItems: ModalNavItem[];
   index: number;
   onClose: () => void;
   onNavigate: (idx: number) => void;
-  lineGroups?: ModalSubLine[][];
+  totalLines: number;
+  totalScenes: number;
 }) {
-  const scene = scenes[index];
+  const entry = navItems[index];
+  const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
   const hasPrev = index > 0;
-  const hasNext = index < scenes.length - 1;
-  const lines = lineGroups?.[index] || [];
+  const hasNext = index < navItems.length - 1;
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'ArrowRight' && index < scenes.length - 1) onNavigate(index + 1);
+      if (e.key === 'ArrowRight' && index < navItems.length - 1) onNavigate(index + 1);
       else if (e.key === 'ArrowLeft' && index > 0) onNavigate(index - 1);
       else if (e.key === 'Escape') onClose();
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [index, scenes.length, onNavigate, onClose]);
+  }, [index, navItems.length, onNavigate, onClose]);
 
-  if (!scene) return null;
+  if (!entry) return null;
+
+  // 2026-09-16(7차) 추가 — 씬에 시간이 있으면 그걸 쓰고, 아직 씬이 없는(gap) 자막 줄이면
+  // 그 줄 자신의 시작~끝을 대신 보여준다 — "장면 없음" 구간이어도 최소한 몇 초짜리 구간인지는
+  // 알 수 있게.
+  const timeLabel = scene?.time
+    ? formatTimeWithDuration(scene.time)
+    : entry.start !== null && entry.end !== null
+      ? formatTimeWithDuration(`${formatSecToMMSS(entry.start)}-${formatSecToMMSS(entry.end)}`)
+      : '';
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
-          <span className="text-white/50 text-[11px] font-mono px-1">
-            {scene.id} · {index + 1}/{scenes.length}
-          </span>
+          {/* 2026-09-16(7차) 수정 — 사용자 요청: "상단에 넘버를 자막번호, 씬번호로 =>
+              # 1 / 전체, S01 / 전체". 자막 줄 번호(#)와 씬 번호(S01)를 각자 따로 보여준다 —
+              같은 씬이 여러 줄에 걸쳐 있으면 #만 바뀌고 S01은 그대로 유지된다. */}
+          <div className="flex items-center gap-2">
+            <span className="text-white/50 text-[11px] font-mono px-1">
+              # {entry.lineIdx !== null ? entry.lineIdx + 1 : '—'} / {totalLines}
+            </span>
+            <span className="text-white/50 text-[11px] font-mono px-1">
+              {scene ? scene.id : '—'} / {totalScenes}
+            </span>
+          </div>
           <div className="flex items-center gap-1">
             {/* 2026-09-13 (4차) 추가 — 사용자 요청: "13단계에서 모달을 띄웠을 때 선택한
                 이미지를 다운받을 수 있어야 하는데 다운로드 버튼이 없어 추가해줘". */}
-            {scene.sceneImage && (
+            {scene?.sceneImage && (
               <button
                 onClick={() => downloadFile(scene.sceneImage, `${scene.id}.jpg`)}
                 className="text-white/70 hover:text-white text-xs font-black px-2 py-1"
@@ -196,55 +220,67 @@ export function SceneImageModal({
               type="button"
               onClick={() => onNavigate(index - 1)}
               className="absolute left-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
-              aria-label="이전 장면"
+              aria-label="이전 자막"
             >
               ‹
             </button>
           )}
-          {scene.sceneImage ? (
+          {scene?.sceneImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={scene.sceneImage} alt={scene.title || scene.id} className="max-w-full max-h-[70vh] object-contain" />
           ) : (
-            <div className="text-neutral-500 text-xs py-24">이 장면엔 아직 이미지가 없습니다</div>
+            <div className="text-neutral-500 text-xs py-24 text-center px-6">
+              {scene ? '이 장면엔 아직 이미지가 없습니다' : '이 자막 구간엔 아직 등록된 장면이 없습니다'}
+            </div>
           )}
           {hasNext && (
             <button
               type="button"
               onClick={() => onNavigate(index + 1)}
               className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
-              aria-label="다음 장면"
+              aria-label="다음 자막"
             >
               ›
             </button>
           )}
-        </div>
-        <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
-          {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
-          {/* 2026-09-16(5차) 추가 — 이 씬에 묶인 SRT 자막 줄 번호 + 각 번호의 원문 텍스트.
-              13번 표에서 rowSpan으로 합쳐 보이던 줄들을 모달에서도 그대로 확인할 수 있게
-              한다(사용자 요청: "모달에 자막번호와 번호별 자막도 표시가 되어야 함"). */}
-          {lines.length > 0 && (
-            <div className="space-y-0.5">
-              {lines.map((l) => (
-                <p key={l.lineIdx} className="text-white/50 text-[10px] leading-relaxed">
-                  <span className="font-mono text-white/30">#{l.lineIdx + 1}</span> {l.text}
-                </p>
-              ))}
+          {/* 2026-09-16(7차) 추가 — 사용자 요청: "12단계에 보여진 자막형태로 화면위에
+              보여줘". step13-14-LabeledLinksPanel.tsx의 캡션 미리보기와 같은 스타일(흰 글씨 +
+              검은 배경 박스, 화면 하단 중앙)로 지금 이 줄의 자막을 이미지/영상 위에 실제
+              캡션처럼 얹어 보여준다. */}
+          {entry.text && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+              <span
+                className="font-bold text-white inline-block"
+                style={{
+                  backgroundColor: '#000000',
+                  padding: '4px 10px',
+                  borderRadius: 3,
+                  fontSize: 18,
+                  boxDecorationBreak: 'clone',
+                  WebkitBoxDecorationBreak: 'clone',
+                }}
+              >
+                {entry.text}
+              </span>
             </div>
           )}
-          <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
-          {/* 2026-09-13 (8차) 추가 — 사용자 지적: "지금 스샷에 있는 문구와 대본은 전혀 다른
-              느낌" — title(장면 요약)만 보이고 실제 나레이션(대본)은 안 보여서, 화면 문구와
-              대본이 다르게 느껴지는 혼란이 있었다. 실제 대본 문장을 같이 보여준다. */}
-          {scene.script && (
-            <p className="text-white/70 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
-              {scene.script}
+        </div>
+        <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
+          {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
+          {/* 2026-09-16(7차) 수정 — 지금 넘어와 있는 자막 줄 텍스트를 눈에 띄게(두껍게) 보여준다
+              (사용자 지시: "두껍게"). 예전엔 이 자리에 scene.script(대본 원문)를 옅은 글씨로
+              보여줬는데, 이 자막 줄이 이미 그 장면의 실제 최종 자막이라 내용이 겹쳐서
+              scene.script 문단은 없앴다(사용자 지시: "삭제"). */}
+          {entry.text && (
+            <p className="text-white text-[11px] font-bold leading-relaxed">
+              # {entry.lineIdx !== null ? entry.lineIdx + 1 : ''} {entry.text}
             </p>
           )}
+          {scene && <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>}
           {/* 2026-09-13 (9차) 추가, (10차) 순서 변경 — 사용자 요청: "해석을 프롬프트 아래말고
               위쪽으로" — 한국어 해석을 먼저 읽고 나서 원문 영어 프롬프트를 보게 순서를
               바꿨다(note="해석" 필드, 기존에 있었지만 안 쓰이고 있던 필드). */}
-          {scene.note && (
+          {scene?.note && (
             <p className="text-amber-200/80 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
               💡 {scene.note}
             </p>
@@ -253,7 +289,7 @@ export function SceneImageModal({
               지금까지는 표에서만(CopyButton, 아래 SceneEditorList) 프롬프트를 복사할 수 있고
               모달에선 눈으로 보고 직접 드래그해서 복사해야 했다. 다른 곳(표)과 같은
               CopyButton을 그대로 재사용한다. */}
-          {scene.imagePrompt && (
+          {scene?.imagePrompt && (
             <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
               <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
                 {scene.imagePrompt}
@@ -274,43 +310,58 @@ export function SceneImageModal({
 // 분리했다.
 export function SceneVideoModal({
   scenes,
+  navItems,
   index,
   onClose,
   onNavigate,
-  lineGroups,
+  totalLines,
+  totalScenes,
 }: {
   scenes: SceneBlock[];
+  navItems: ModalNavItem[];
   index: number;
   onClose: () => void;
   onNavigate: (idx: number) => void;
-  lineGroups?: ModalSubLine[][];
+  totalLines: number;
+  totalScenes: number;
 }) {
-  const scene = scenes[index];
+  const entry = navItems[index];
+  const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
   const hasPrev = index > 0;
-  const hasNext = index < scenes.length - 1;
-  const lines = lineGroups?.[index] || [];
+  const hasNext = index < navItems.length - 1;
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'ArrowRight' && index < scenes.length - 1) onNavigate(index + 1);
+      if (e.key === 'ArrowRight' && index < navItems.length - 1) onNavigate(index + 1);
       else if (e.key === 'ArrowLeft' && index > 0) onNavigate(index - 1);
       else if (e.key === 'Escape') onClose();
     }
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [index, scenes.length, onNavigate, onClose]);
+  }, [index, navItems.length, onNavigate, onClose]);
 
-  if (!scene) return null;
+  if (!entry) return null;
+
+  const timeLabel = scene?.time
+    ? formatTimeWithDuration(scene.time)
+    : entry.start !== null && entry.end !== null
+      ? formatTimeWithDuration(`${formatSecToMMSS(entry.start)}-${formatSecToMMSS(entry.end)}`)
+      : '';
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
-          <span className="text-white/50 text-[11px] font-mono px-1">
-            {scene.id} · {index + 1}/{scenes.length}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-white/50 text-[11px] font-mono px-1">
+              # {entry.lineIdx !== null ? entry.lineIdx + 1 : '—'} / {totalLines}
+            </span>
+            <span className="text-white/50 text-[11px] font-mono px-1">
+              {scene ? scene.id : '—'} / {totalScenes}
+            </span>
+          </div>
           <div className="flex items-center gap-1">
-            {scene.sceneVideo && (
+            {scene?.sceneVideo && (
               <button
                 onClick={() => downloadFile(scene.sceneVideo, `${scene.id}.mp4`)}
                 className="text-white/70 hover:text-white text-xs font-black px-2 py-1"
@@ -329,53 +380,63 @@ export function SceneVideoModal({
               type="button"
               onClick={() => onNavigate(index - 1)}
               className="absolute left-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
-              aria-label="이전 장면"
+              aria-label="이전 자막"
             >
               ‹
             </button>
           )}
-          {scene.sceneVideo ? (
+          {scene?.sceneVideo ? (
             <video src={scene.sceneVideo} controls autoPlay className="max-w-full max-h-[70vh]" />
           ) : (
-            <div className="text-neutral-500 text-xs py-24">이 장면엔 아직 영상이 없습니다</div>
+            <div className="text-neutral-500 text-xs py-24 text-center px-6">
+              {scene ? '이 장면엔 아직 영상이 없습니다' : '이 자막 구간엔 아직 등록된 장면이 없습니다'}
+            </div>
           )}
           {hasNext && (
             <button
               type="button"
               onClick={() => onNavigate(index + 1)}
               className="absolute right-1.5 top-1/2 -translate-y-1/2 text-white/80 hover:text-white text-2xl font-black w-9 h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-full"
-              aria-label="다음 장면"
+              aria-label="다음 자막"
             >
               ›
             </button>
           )}
-        </div>
-        <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
-          {scene.time && <p className="text-white/40 text-[10px] font-mono">{scene.time}</p>}
-          {lines.length > 0 && (
-            <div className="space-y-0.5">
-              {lines.map((l) => (
-                <p key={l.lineIdx} className="text-white/50 text-[10px] leading-relaxed">
-                  <span className="font-mono text-white/30">#{l.lineIdx + 1}</span> {l.text}
-                </p>
-              ))}
+          {entry.text && (
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 max-w-[90%] text-center pointer-events-none">
+              <span
+                className="font-bold text-white inline-block"
+                style={{
+                  backgroundColor: '#000000',
+                  padding: '4px 10px',
+                  borderRadius: 3,
+                  fontSize: 18,
+                  boxDecorationBreak: 'clone',
+                  WebkitBoxDecorationBreak: 'clone',
+                }}
+              >
+                {entry.text}
+              </span>
             </div>
           )}
-          <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>
-          {scene.script && (
-            <p className="text-white/70 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
-              {scene.script}
+        </div>
+        <div className="px-3 py-2 bg-neutral-900 space-y-1 max-h-[30vh] overflow-y-auto">
+          {timeLabel && <p className="text-white/40 text-[10px] font-mono">{timeLabel}</p>}
+          {entry.text && (
+            <p className="text-white text-[11px] font-bold leading-relaxed">
+              # {entry.lineIdx !== null ? entry.lineIdx + 1 : ''} {entry.text}
             </p>
           )}
+          {scene && <p className="text-white text-[12px] font-bold leading-relaxed">{scene.title || '(장면 설명 없음)'}</p>}
           {/* 영상 모달은 이미지프롬프트가 아니라 실제로 이 영상을 만든 영상 프롬프트(video)를
               보여준다 — 화면에 나오는 결과물과 같은 프롬프트여야 비교가 맞다. 해석을 먼저,
               원문 영어 프롬프트를 그 아래에 (사용자 요청: "해석을 프롬프트 아래말고 위쪽으로"). */}
-          {scene.note && (
+          {scene?.note && (
             <p className="text-amber-200/80 text-[11px] leading-relaxed whitespace-pre-wrap border-t border-white/10 pt-1 mt-1">
               💡 {scene.note}
             </p>
           )}
-          {scene.video && (
+          {scene?.video && (
             <div className="flex items-start gap-1 border-t border-white/10 pt-1 mt-1">
               <p className="flex-1 min-w-0 text-cyan-300/70 text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
                 {scene.video}
@@ -986,8 +1047,6 @@ export function SceneEditorList({
       if (effectiveFilterTab === 'multi') return m.length >= 2;
       return m.includes(Number(effectiveFilterTab));
     });
-  const previewScenes = filteredWithIndex.map((f) => f.s);
-
   // 2026-09-16(2차) 추가 — SRT 줄이 표의 기준(행)이 되도록 재구성. 처음엔 "장면 기준 행 + 겹치는
   // SRT 텍스트 이어붙이기"로 만들었는데, 사용자가 확인 후 "왼쪽 자막에 다른것들을 맞춘게 아니고
   // 기존 씬에 자막을 맞췄네???"라고 지적 — 반대 방향(SRT가 기준, 장면이 거기 딸려옴)을 원한
@@ -1029,17 +1088,6 @@ export function SceneEditorList({
     return groups;
   })();
 
-  // 2026-09-16(5차) 추가 — 원본 씬 인덱스 → 그 씬에 묶인 자막 줄들(줄 번호+텍스트) 매핑.
-  // 모달은 previewScenes(필터링된 배열) 순서로 열리므로, previewScenes와 같은 순서의
-  // 배열로 다시 뽑아서 SceneImageModal/SceneVideoModal에 그대로 넘긴다.
-  const linesBySceneIdx = new Map<number, LineEntry[]>();
-  rowGroups.forEach((group) => {
-    if (group.sceneIdx !== null) linesBySceneIdx.set(group.sceneIdx, group.lines);
-  });
-  const previewLineGroups: ModalSubLine[][] = filteredWithIndex.map(({ idx }) =>
-    (linesBySceneIdx.get(idx) || []).map((e) => ({ lineIdx: e.lineIdx, text: e.line.text }))
-  );
-
   type FlatRow = { key: string; entry?: LineEntry; sceneIdx: number | null; isFirst: boolean; span: number; group: RowGroup };
   const flatRows: FlatRow[] = [];
   rowGroups.forEach((group, gi) => {
@@ -1052,6 +1100,31 @@ export function SceneEditorList({
       });
     }
   });
+
+  // 2026-09-16(7차) 추가 — 사용자 지적: "13단계에 모달이 srt자막 기준이 아니라 씬기준으로
+  // 보여지고 있음~ 자막기준으로 바꾸려고 함~". 모달의 ‹/›가 넘기는 단위를 씬이 아니라 flatRows와
+  // 완전히 같은 순서의 "자막 줄 하나"로 맞춘다 — 표에서 보이는 순서 그대로 모달에서도 한 줄씩
+  // 넘어간다(같은 씬에 묶인 줄 여러 개를 넘기는 동안은 같은 이미지가 계속 보인다). SRT가 아직
+  // 없는 유닛(entry가 전혀 없는 fallback)에서는 예전처럼 씬 하나당 항목 하나로 대체한다.
+  const navItems: ModalNavItem[] =
+    srtLines.length > 0
+      ? flatRows
+          .filter((r) => !!r.entry)
+          .map((r) => ({
+            lineIdx: r.entry!.lineIdx,
+            text: r.entry!.line.text,
+            sceneIdx: r.sceneIdx,
+            start: r.entry!.line.start,
+            end: r.entry!.line.end,
+          }))
+      : filteredWithIndex.map(({ idx }) => ({ lineIdx: null, text: '', sceneIdx: idx, start: null, end: null }));
+
+  // 표의 특정 행(row)에서 모달을 열 때, 그 행이 navItems 배열 안에서 몇 번째인지 찾는다 —
+  // SRT가 있으면 그 행의 자막 줄 번호로, 없으면(폴백) 그 행의 씬 인덱스로 찾는다.
+  function navIndexForRow(row: FlatRow): number {
+    if (row.entry) return navItems.findIndex((n) => n.lineIdx === row.entry!.lineIdx);
+    return navItems.findIndex((n) => n.sceneIdx === row.sceneIdx);
+  }
 
   // 2026-09-07, 사용자 지시로 13번을 스토리보드 표 형태로 재구성: 타임 / 장면이미지 / 이미지
   // 프롬프트 / 영상프롬프트 or 전환프롬프트 4개 열. 수정 중인 행만 SceneDraftForm으로 펼치고,
@@ -1140,7 +1213,7 @@ export function SceneEditorList({
                   );
                 }
                 const s = row.sceneIdx !== null ? scenes[row.sceneIdx] : null;
-                const pos = row.sceneIdx !== null ? filteredWithIndex.findIndex((f) => f.idx === row.sceneIdx) : -1;
+                const navIdx = navIndexForRow(row);
                 return (
                   <tr key={row.key} className="border-t border-neutral-100 align-top">
                     {/* 2026-09-16(3차) 추가 — 확인용 번호 + 결합/분리용 체크박스. entry가 없으면
@@ -1185,7 +1258,7 @@ export function SceneEditorList({
                                 자리표시자를 눌러서 대본/프롬프트/해석은 미리 확인할 수 있게, 자리
                                 표시자도 버튼으로 바꿔 항상 모달을 연다. */}
                             {s.sceneImage ? (
-                              <button type="button" onClick={() => setPreviewIndex(pos)} className="block" title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)">
+                              <button type="button" onClick={() => setPreviewIndex(navIdx)} className="block" title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)">
                                 <img
                                   src={s.sceneImage}
                                   alt={s.title}
@@ -1195,7 +1268,7 @@ export function SceneEditorList({
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => setPreviewIndex(pos)}
+                                onClick={() => setPreviewIndex(navIdx)}
                                 className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
                                 title="클릭하면 대본·프롬프트·해석 보기 (이미지는 아직 없음)"
                               >
@@ -1210,9 +1283,9 @@ export function SceneEditorList({
                             {s.sceneVideo ? (
                               <button
                                 type="button"
-                                onClick={() => setPreviewVideoIndex(pos)}
+                                onClick={() => setPreviewVideoIndex(navIdx)}
                                 className="relative block"
-                                title="클릭하면 크게 보기 (이 분류 안에서 연달아 볼 수 있어요)"
+                                title="클릭하면 크게 보기 (자막 줄 단위로 이어서 볼 수 있어요)"
                               >
                                 <video
                                   src={s.sceneVideo}
@@ -1226,7 +1299,7 @@ export function SceneEditorList({
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => setPreviewVideoIndex(pos)}
+                                onClick={() => setPreviewVideoIndex(navIdx)}
                                 className="w-14 h-14 rounded-md bg-neutral-50 border border-neutral-200 flex items-center justify-center text-neutral-300 text-[9px] text-center leading-tight hover:border-neutral-300"
                                 title="클릭하면 대본·프롬프트·해석 보기 (영상은 아직 없음)"
                               >
@@ -1370,10 +1443,26 @@ export function SceneEditorList({
         </button>
       )}
       {previewIndex !== null && (
-        <SceneImageModal scenes={previewScenes} index={previewIndex} onClose={() => setPreviewIndex(null)} onNavigate={setPreviewIndex} lineGroups={previewLineGroups} />
+        <SceneImageModal
+          scenes={scenes}
+          navItems={navItems}
+          index={previewIndex}
+          onClose={() => setPreviewIndex(null)}
+          onNavigate={setPreviewIndex}
+          totalLines={srtLines.length}
+          totalScenes={filteredWithIndex.length}
+        />
       )}
       {previewVideoIndex !== null && (
-        <SceneVideoModal scenes={previewScenes} index={previewVideoIndex} onClose={() => setPreviewVideoIndex(null)} onNavigate={setPreviewVideoIndex} lineGroups={previewLineGroups} />
+        <SceneVideoModal
+          scenes={scenes}
+          navItems={navItems}
+          index={previewVideoIndex}
+          onClose={() => setPreviewVideoIndex(null)}
+          onNavigate={setPreviewVideoIndex}
+          totalLines={srtLines.length}
+          totalScenes={filteredWithIndex.length}
+        />
       )}
     </div>
   );
