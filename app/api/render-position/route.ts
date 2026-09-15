@@ -88,7 +88,13 @@ function findVideoClipPlaylists(xml: string): PlaylistInfo[] {
   return all;
 }
 
-export type ClipPosition = { file: string; positionMs: number; durationMs: number; trackNumber: number };
+// 2026-09-16(20차) 추가 — 사용자 요청: "앞쪽 1초를 자르고 싶은데 영상 편집기능은 없으니까".
+// 위치(blank)는 "이 클립이 타임라인 어디서 시작하는지"고, inMs는 "그 클립이 소스 영상의 몇 초
+// 지점부터 재생을 시작하는지"다 — 이 값을 늘리면(예: 0→1초) 소스 영상의 앞부분 1초를 건너뛰고
+// 재생하게 되므로 "앞부분 자르기"와 동일한 효과를 낸다. out은 그대로 두므로(대부분의 클립은
+// 이미 소스 전체를 다 쓰고 있어 뒤로 늘릴 여유가 없다), 자른 만큼 클립이 짧아진다 — 실제
+// Shotcut에서 클립 왼쪽 가장자리를 드래그해서 자르는 것과 같은 결과.
+export type ClipPosition = { file: string; positionMs: number; durationMs: number; trackNumber: number; inMs: number };
 
 function clipsFromPlaylists(xml: string, playlists: PlaylistInfo[]): ClipPosition[] {
   return playlists.map((p, i) => {
@@ -99,6 +105,7 @@ function clipsFromPlaylists(xml: string, playlists: PlaylistInfo[]): ClipPositio
       positionMs: blankMatch ? timecodeToMs(blankMatch[1]) : 0,
       durationMs: timecodeToMs(entryMatch[2]) - timecodeToMs(entryMatch[1]),
       trackNumber: i + 1,
+      inMs: timecodeToMs(entryMatch[1]),
     };
   });
 }
@@ -155,6 +162,25 @@ function setClipTrack(xml: string, targetFile: string, newTrackNumber: number): 
   );
 }
 
+// 클립의 소스 트림 시작점(in)만 바꾼다 — out과 위치(blank)는 절대 안 건드린다. newInMs가
+// out보다 크거나 같으면(재생할 내용이 안 남으면) 거부한다.
+function setClipTrimIn(xml: string, targetFile: string, newInMs: number): string | null {
+  const playlists = findVideoClipPlaylists(xml);
+  const target = playlists.find((p) => p.fileName === targetFile.toLowerCase());
+  if (!target) return null;
+
+  const entryMatch = target.body.match(/<entry producer="[^"]+" in="([^"]+)" out="([^"]+)"\s*\/>/);
+  if (!entryMatch) return null;
+  const outMs = timecodeToMs(entryMatch[2]);
+  if (newInMs < 0 || newInMs >= outMs) return null;
+
+  const newInTc = msToTimecode(newInMs);
+  const oldEntryTag = entryMatch[0];
+  const newEntryTag = oldEntryTag.replace(/ in="[^"]+"/, ` in="${newInTc}"`);
+  const newBlock = target.body.replace(oldEntryTag, newEntryTag);
+  return xml.slice(0, target.start) + `<playlist id="${target.id}">${newBlock}</playlist>` + xml.slice(target.end);
+}
+
 async function fetchAndUpload(mltUrl: string, transform: (xml: string) => string | null) {
   const fileRes = await fetch(mltUrl);
   if (!fileRes.ok) return { error: `mlt 파일을 불러오지 못했습니다 (HTTP ${fileRes.status})`, status: 502 } as const;
@@ -188,7 +214,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { mltUrl, file, action } = body as { mltUrl?: string; file?: string; action?: 'position' | 'track' };
+  const { mltUrl, file, action } = body as { mltUrl?: string; file?: string; action?: 'position' | 'track' | 'trim' };
   if (!mltUrl || !file) return NextResponse.json({ error: 'mltUrl, file이 필요합니다.' }, { status: 400 });
 
   let result;
@@ -198,6 +224,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'trackNumber(1 이상)가 필요합니다.' }, { status: 400 });
     }
     result = await fetchAndUpload(mltUrl, (xml) => setClipTrack(xml, file, trackNumber));
+  } else if (action === 'trim') {
+    const inMs = Number((body as { inMs?: number }).inMs);
+    if (!Number.isFinite(inMs) || inMs < 0) {
+      return NextResponse.json({ error: 'inMs(0 이상)가 필요합니다.' }, { status: 400 });
+    }
+    result = await fetchAndUpload(mltUrl, (xml) => setClipTrimIn(xml, file, inMs));
   } else {
     const positionMs = Number((body as { positionMs?: number }).positionMs);
     if (!Number.isFinite(positionMs) || positionMs < 0) {
@@ -206,6 +238,12 @@ export async function POST(request: Request) {
     result = await fetchAndUpload(mltUrl, (xml) => setClipPosition(xml, file, positionMs));
   }
 
-  if ('error' in result) return NextResponse.json({ error: result.error }, { status: result.status });
+  if ('error' in result) {
+    const message =
+      action === 'trim' && result.status === 404
+        ? '이 값으로 자르면 남는 영상이 없습니다(클립 길이보다 작아야 합니다) — 또는 클립을 찾지 못했습니다.'
+        : result.error;
+    return NextResponse.json({ error: message }, { status: result.status });
+  }
   return NextResponse.json({ ok: true, ...parseClipPositions(result.xml) });
 }
