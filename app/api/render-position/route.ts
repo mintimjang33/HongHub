@@ -64,6 +64,16 @@ function getTrackOrder(xml: string): string[] {
   return [...tractorMatch[1].matchAll(/<track producer="([^"]+)"[^/]*\/>/g)].map((m) => m[1]);
 }
 
+// 2026-09-16(21차) 추가 — 사용자 요청: "영상의 몇초부토 몇초까지만 사용하고 싶은지 정할수
+// 있어?". entry의 in/out은 "타임라인에 걸린 구간"일 뿐이고, 실제로 그 파일에서 쓸 수 있는
+// 최대 길이는 <chain>/<producer> 태그 자체의 out 속성(원본 파일 전체 길이)이다 — 구간을
+// 늘리려면(예: out을 뒤로 미루기) 이 최대치를 넘을 수 없다.
+function getSourceMaxMs(xml: string, producerId: string): number {
+  const re = new RegExp(`<(?:chain|producer) id="${producerId}"[^>]*\\bout="([^"]+)"`);
+  const m = xml.match(re);
+  return m ? timecodeToMs(m[1]) : Infinity;
+}
+
 type PlaylistInfo = { id: string; body: string; start: number; end: number; producerId: string | null; fileName: string | null };
 
 // 모든 playlist를 훑어서, "영상 클립 트랙"(entry가 정확히 1개이고 그 producer가 영상 파일인
@@ -89,23 +99,35 @@ function findVideoClipPlaylists(xml: string): PlaylistInfo[] {
 }
 
 // 2026-09-16(20차) 추가 — 사용자 요청: "앞쪽 1초를 자르고 싶은데 영상 편집기능은 없으니까".
-// 위치(blank)는 "이 클립이 타임라인 어디서 시작하는지"고, inMs는 "그 클립이 소스 영상의 몇 초
-// 지점부터 재생을 시작하는지"다 — 이 값을 늘리면(예: 0→1초) 소스 영상의 앞부분 1초를 건너뛰고
-// 재생하게 되므로 "앞부분 자르기"와 동일한 효과를 낸다. out은 그대로 두므로(대부분의 클립은
-// 이미 소스 전체를 다 쓰고 있어 뒤로 늘릴 여유가 없다), 자른 만큼 클립이 짧아진다 — 실제
-// Shotcut에서 클립 왼쪽 가장자리를 드래그해서 자르는 것과 같은 결과.
-export type ClipPosition = { file: string; positionMs: number; durationMs: number; trackNumber: number; inMs: number };
+// (21차) 확장 — 사용자 요청: "영상의 몇초부토 몇초까지만 사용하고 싶은지 정할수 있어?" — 앞만
+// 자르는 게 아니라 시작/끝 구간 전체를 지정하도록 넓혔다. 위치(blank)는 "이 클립이 타임라인
+// 어디서 시작하는지"고, inMs/outMs는 "그 클립이 소스 영상의 몇 초~몇 초 구간을 재생하는지"다.
+// sourceMaxMs는 그 소스 파일이 실제로 가진 최대 길이(<chain>의 out 속성) — outMs는 이걸 넘을
+// 수 없다(원본에 없는 구간을 만들어낼 수는 없으므로).
+export type ClipPosition = {
+  file: string;
+  positionMs: number;
+  durationMs: number;
+  trackNumber: number;
+  inMs: number;
+  outMs: number;
+  sourceMaxMs: number;
+};
 
 function clipsFromPlaylists(xml: string, playlists: PlaylistInfo[]): ClipPosition[] {
   return playlists.map((p, i) => {
     const entryMatch = p.body.match(/<entry producer="[^"]+" in="([^"]+)" out="([^"]+)"\s*\/>/)!;
     const blankMatch = p.body.match(/<blank length="([^"]+)"\s*\/>/);
+    const inMs = timecodeToMs(entryMatch[1]);
+    const outMs = timecodeToMs(entryMatch[2]);
     return {
       file: p.fileName!,
       positionMs: blankMatch ? timecodeToMs(blankMatch[1]) : 0,
-      durationMs: timecodeToMs(entryMatch[2]) - timecodeToMs(entryMatch[1]),
+      durationMs: outMs - inMs,
       trackNumber: i + 1,
-      inMs: timecodeToMs(entryMatch[1]),
+      inMs,
+      outMs,
+      sourceMaxMs: getSourceMaxMs(xml, p.producerId!),
     };
   });
 }
@@ -162,21 +184,23 @@ function setClipTrack(xml: string, targetFile: string, newTrackNumber: number): 
   );
 }
 
-// 클립의 소스 트림 시작점(in)만 바꾼다 — out과 위치(blank)는 절대 안 건드린다. newInMs가
-// out보다 크거나 같으면(재생할 내용이 안 남으면) 거부한다.
-function setClipTrimIn(xml: string, targetFile: string, newInMs: number): string | null {
+// 클립이 소스 영상에서 사용하는 구간(in~out)을 통째로 바꾼다 — 위치(blank)는 절대 안
+// 건드린다. newOutMs가 소스 파일의 실제 최대 길이(sourceMaxMs)를 넘거나, newInMs가 newOutMs
+// 이상이면 거부한다(원본에 없는 구간을 만들 수는 없고, 구간이 뒤집힐 수도 없으므로).
+function setClipRange(xml: string, targetFile: string, newInMs: number, newOutMs: number): string | null {
   const playlists = findVideoClipPlaylists(xml);
   const target = playlists.find((p) => p.fileName === targetFile.toLowerCase());
   if (!target) return null;
 
   const entryMatch = target.body.match(/<entry producer="[^"]+" in="([^"]+)" out="([^"]+)"\s*\/>/);
-  if (!entryMatch) return null;
-  const outMs = timecodeToMs(entryMatch[2]);
-  if (newInMs < 0 || newInMs >= outMs) return null;
+  if (!entryMatch || !target.producerId) return null;
+  const sourceMaxMs = getSourceMaxMs(xml, target.producerId);
+  if (newInMs < 0 || newOutMs <= newInMs || newOutMs > sourceMaxMs) return null;
 
   const newInTc = msToTimecode(newInMs);
+  const newOutTc = msToTimecode(newOutMs);
   const oldEntryTag = entryMatch[0];
-  const newEntryTag = oldEntryTag.replace(/ in="[^"]+"/, ` in="${newInTc}"`);
+  const newEntryTag = oldEntryTag.replace(/ in="[^"]+"/, ` in="${newInTc}"`).replace(/ out="[^"]+"/, ` out="${newOutTc}"`);
   const newBlock = target.body.replace(oldEntryTag, newEntryTag);
   return xml.slice(0, target.start) + `<playlist id="${target.id}">${newBlock}</playlist>` + xml.slice(target.end);
 }
@@ -214,7 +238,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { mltUrl, file, action } = body as { mltUrl?: string; file?: string; action?: 'position' | 'track' | 'trim' };
+  const { mltUrl, file, action } = body as { mltUrl?: string; file?: string; action?: 'position' | 'track' | 'range' };
   if (!mltUrl || !file) return NextResponse.json({ error: 'mltUrl, file이 필요합니다.' }, { status: 400 });
 
   let result;
@@ -224,12 +248,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'trackNumber(1 이상)가 필요합니다.' }, { status: 400 });
     }
     result = await fetchAndUpload(mltUrl, (xml) => setClipTrack(xml, file, trackNumber));
-  } else if (action === 'trim') {
+  } else if (action === 'range') {
     const inMs = Number((body as { inMs?: number }).inMs);
-    if (!Number.isFinite(inMs) || inMs < 0) {
-      return NextResponse.json({ error: 'inMs(0 이상)가 필요합니다.' }, { status: 400 });
+    const outMs = Number((body as { outMs?: number }).outMs);
+    if (!Number.isFinite(inMs) || inMs < 0 || !Number.isFinite(outMs) || outMs <= inMs) {
+      return NextResponse.json({ error: 'inMs(0 이상), outMs(inMs보다 커야 함)가 필요합니다.' }, { status: 400 });
     }
-    result = await fetchAndUpload(mltUrl, (xml) => setClipTrimIn(xml, file, inMs));
+    result = await fetchAndUpload(mltUrl, (xml) => setClipRange(xml, file, inMs, outMs));
   } else {
     const positionMs = Number((body as { positionMs?: number }).positionMs);
     if (!Number.isFinite(positionMs) || positionMs < 0) {
@@ -240,8 +265,8 @@ export async function POST(request: Request) {
 
   if ('error' in result) {
     const message =
-      action === 'trim' && result.status === 404
-        ? '이 값으로 자르면 남는 영상이 없습니다(클립 길이보다 작아야 합니다) — 또는 클립을 찾지 못했습니다.'
+      action === 'range' && result.status === 404
+        ? '이 구간은 설정할 수 없습니다(끝이 원본 영상 길이를 넘거나 시작보다 앞섭니다) — 또는 클립을 찾지 못했습니다.'
         : result.error;
     return NextResponse.json({ error: message }, { status: result.status });
   }
