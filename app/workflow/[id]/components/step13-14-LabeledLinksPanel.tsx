@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Site, ContentUnit, LabeledItem, LabeledField } from '../types';
 import { normalizeLabeledItems, uploadSceneMedia } from '../utils';
-import { CopyButton } from './shared';
+import { CopyButton, downloadFile } from './shared';
 
 // SRT 타임코드("00:00:04,000")를 초 단위 숫자로 변환.
 function srtTimeToSeconds(t: string): number {
@@ -88,6 +88,19 @@ function readEditableTextWithBreaks(el: HTMLElement): string {
     block.insertAdjacentText('beforebegin', '\n');
   });
   return (clone.textContent || '').replace(/^\n+/, '');
+}
+
+// 2026-09-16(22차) 추가 — 사용자 지적: "클릭해도 다운로드가 안되는데?" — 이 목록의 파일 링크가
+// <a href target="_blank">뿐이라, Supabase Storage 응답의 Content-Type에 따라 브라우저가
+// 다운로드 대신 새 탭에 그대로 열어버리는 경우(.mlt는 XML이라 특히 그렇다)가 있었다. 13/14번
+// 모달의 이미지·영상 다운로드 버튼(shared.tsx의 downloadFile — fetch로 받아 blob URL을 만들어
+// 강제로 저장)과 같은 방식을 여기 파일 목록에도 적용한다. 파일명은 라벨이 있으면
+// "라벨+원래 확장자", 없으면 URL의 원래 파일명을 그대로 쓴다.
+function filenameForItem(item: LabeledItem): string {
+  const urlName = item.url.split('/').pop()?.split('?')[0] || 'file';
+  const extMatch = urlName.match(/\.[a-zA-Z0-9]+$/);
+  const ext = extMatch ? extMatch[0] : '';
+  return item.label ? `${item.label}${ext}` : urlName;
 }
 
 // 콘텐츠(유닛) 하나의 나레이션 또는 자막 중 한 필드만 다루는 조각 — 링크 붙여넣기와 파일 업로드
@@ -461,6 +474,17 @@ export function LabeledFieldSection({
                   {item.url}
                 </a>
                 <CopyButton text={item.url} />
+                {/* 2026-09-16(22차) 추가 — 사용자 지적: "클릭해도 다운로드가 안되는데?" — 위
+                    링크는 target="_blank"라 새 탭에서 열릴 뿐, 파일 형식(.mlt 등 XML)에 따라
+                    브라우저가 그대로 표시해버려 실제 저장은 안 되는 경우가 있었다. 모달의
+                    이미지·영상 다운로드와 같은 방식(fetch → blob → 강제 저장)을 여기도 적용. */}
+                <button
+                  onClick={() => downloadFile(item.url, filenameForItem(item))}
+                  title="다운로드"
+                  className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-blue-600"
+                >
+                  ⬇
+                </button>
                 {/* 2026-09-16 추가 — 최종 선택 체크박스(위 setFinalSelection 주석 참고). title로
                     이 체크가 다음 단계에서 실제로 쓰인다는 걸 명시해서, 그냥 표시용 체크가 아니라
                     실제 동작이 있다는 걸 알 수 있게 한다. */}
