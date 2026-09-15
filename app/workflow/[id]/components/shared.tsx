@@ -367,7 +367,11 @@ function ClipControlFields({
         <button onClick={applyRange} disabled={savingRange} className="text-[10px] font-black text-blue-400 hover:underline disabled:opacity-40">
           {savingRange ? '적용 중...' : '적용'}
         </button>
-        {rangeDurationLabel && <span className="text-[10px] text-neutral-500">({rangeDurationLabel})</span>}
+        {/* 2026-09-16(25차) 수정 — 사용자 지적: "너무 안보여" — text-neutral-500는 어두운
+            모달 배경 위에서 대비가 너무 낮았다. 다른 계산값(원본 길이 등)과 달리 이건 사용자가
+            방금 요청해서 새로 넣은 정보라 눈에 띄어야 하므로, 밝은 에메랄드색+굵게로 확실히
+            보이게 한다. */}
+        {rangeDurationLabel && <span className="text-[11px] font-bold text-emerald-400">({rangeDurationLabel})</span>}
       </div>
       {err && <p className="text-[10px] text-red-400 font-bold">{err}</p>}
     </div>
