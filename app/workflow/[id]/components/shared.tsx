@@ -28,10 +28,14 @@ function formatTimeWithDuration(time: string): string {
 // "13단계에서 글씨 크기가 장면마다 달라~ 12단계에서 그렇게 안했거든~ 1줄은 1줄, 크기 모든곳에서
 // 동일"). 12번(나레이션·자막)의 캡션 미리보기는 애초에 글자 수와 무관하게 고정 크기 하나만
 // 쓰고, 그 크기에 안 들어가는 긴 줄은 그냥 자연스럽게 줄바꿈되도록 둔다 — 여기도 그 방식을
-// 그대로 따른다: 동적 계산 없이 고정 폰트 크기(12번 기본값과 동일한 15px)를 쓰고, nowrap을
-// 없애 길면 자연스럽게 줄바꿈되게 한다. 대신 12번과 동일하게 boxDecorationBreak: 'clone'을
-// 줘서 줄바꿈되더라도 각 줄마다 독립된 배경 박스가 붙는 실제 자막 느낌을 유지한다.
-const CAPTION_FONT_SIZE = 15;
+// 그대로 따른다: 동적 계산 없이 고정 폰트 크기를 쓰고, nowrap을 없애 길면 자연스럽게
+// 줄바꿈되게 한다. 대신 12번과 동일하게 boxDecorationBreak: 'clone'을 줘서 줄바꿈되더라도
+// 각 줄마다 독립된 배경 박스가 붙는 실제 자막 느낌을 유지한다.
+// 2026-09-16(13차) 수정 — 사용자 지적: "글씨크기가 13으로 고정이었는데". 12번의 글자크기는
+// 코드 기본값(DEFAULT_PREVIEW_STYLE.fontSize=15)이 아니라 유닛별로 사용자가 직접 조절해서
+// localStorage에 저장해둔 값이라, 실제로 이 콘텐츠에서 쓰던 크기는 13이었다 — 코드 기본값이
+// 아니라 사용자가 실제로 보고 있던 값에 맞춘다.
+const CAPTION_FONT_SIZE = 13;
 
 async function downloadFile(url: string, filename: string) {
   try {
