@@ -5,6 +5,7 @@ import { callAi } from '../../../lib/aiProviders';
 import { fetchOgMeta, detectChannelPlatform } from '../../../lib/ogMeta';
 import { getConfigValue } from '../../../lib/remoteConfig';
 import { searchShorts, resolveChannelId, getChannelTopVideos, fmtCount } from '../../../lib/youtubeSearch';
+import { parseClipPositions, setClipPosition, setClipTrack, setClipRange, fetchAndUpload } from '../../../lib/mltClipPosition';
 
 const urlArg = z.union([z.string(), z.array(z.string())]).optional().describe('URL 하나 또는 여러 개(배열)');
 
@@ -1262,6 +1263,69 @@ ${PLATFORM_GUIDE[target_platform]}
 
         const { data } = supabase.storage.from('honghub-files').getPublicUrl(path);
         return { content: [{ type: 'text', text: JSON.stringify({ url: data.publicUrl }, null, 2) }] };
+      }
+    );
+
+    // 2026-09-17 신설 — 사용자 지적: "기능 추가하면 mcp를 같이 추가하게끔 하라고 했는데" —
+    // 14번(렌더링) 모달의 트랙번호/타임라인 위치/사용 구간 설정 기능(app/api/render-position)이
+    // 웹 API로만 있어서, 로그인 세션 쿠키가 없으면(=MCP에서는) 손댈 방법이 없었다. 같은 로직을
+    // lib/mltClipPosition.ts로 공유해서 여기서도 그대로 쓴다.
+    server.registerTool(
+      'get_mlt_clip_positions',
+      {
+        description:
+          'Shotcut 프로젝트(.mlt) 파일 안의 영상 클립들의 트랙 번호·타임라인 위치(position)·사용 구간(in/out)·원본 최대 길이(sourceMaxMs)를 조회한다. ' +
+          'mltUrl은 해당 콘텐츠 유닛의 renderFiles에 등록된 .mlt 공개 URL(list_sites/run_sql로 script_draft.units[].renderFiles에서 확인).',
+        inputSchema: z.object({ mltUrl: z.string().describe('공개 .mlt 파일 URL (honghub-files Storage, https://.../object/public/honghub-files/*.mlt)') }),
+      },
+      async ({ mltUrl }) => {
+        const fileRes = await fetch(mltUrl);
+        if (!fileRes.ok) return { content: [{ type: 'text', text: `mlt 파일을 불러오지 못했습니다 (HTTP ${fileRes.status})` }] };
+        const xml = await fileRes.text();
+        return { content: [{ type: 'text', text: JSON.stringify(parseClipPositions(xml), null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'set_mlt_clip_position',
+      {
+        description:
+          'Shotcut 프로젝트(.mlt) 파일 안의 영상 클립 하나의 타임라인 위치(action=position)/트랙 번호(action=track)/소스 영상 사용 구간(action=range, in~out)을 ' +
+          '수정하고 Storage에 즉시 덮어쓴다. 웹 UI 14번 모달의 트랙/위치/구간 설정과 동일한 기능을 로그인 세션 없이 실행한다. ' +
+          '⚠️ 자막(SRT) 기준으로 클립을 배치할 때는 반드시 position(타임라인 위치=클립이 시작하는 지점)만 그 자막 줄의 시작 시각에 맞추고, ' +
+          'range(그 클립이 소스 영상에서 실제로 쓰는 구간·길이)는 건드리지 말 것 — 클립 자체의 길이/트리밍은 사용자가 직접 편집하는 영역이다 ' +
+          '(사용자 지시, 2026-09-17: "자체 영상 길이는 내가 수정하는 영역이고, 넌 처음 셋팅을 할 때 자막 기준의 타임라인 위치에 시작점을 맞춰서 배치를 셋팅하라고"). ' +
+          'range는 사용자가 명시적으로 구간 조정을 요청했을 때만 쓸 것.',
+        inputSchema: z.object({
+          mltUrl: z.string().describe('공개 .mlt 파일 URL (honghub-files Storage)'),
+          file: z.string().describe('대상 클립 파일명(예: S01B.mp4) — 확장자 무관, 대소문자 무관 매칭'),
+          action: z.enum(['position', 'track', 'range']),
+          positionMs: z.number().optional().describe("action='position'일 때 필수 — 타임라인 위치(밀리초). 자막 기준 배치는 이 필드만 쓸 것"),
+          trackNumber: z.number().optional().describe("action='track'일 때 필수 — 이동할 트랙 번호(1부터, get_mlt_clip_positions의 totalTracks 이내)"),
+          inMs: z.number().optional().describe("action='range'일 때 필수 — 소스 영상 사용 시작(밀리초). 사용자가 명시적으로 요청했을 때만 쓸 것"),
+          outMs: z.number().optional().describe("action='range'일 때 필수 — 소스 영상 사용 끝(밀리초, sourceMaxMs 이하). 사용자가 명시적으로 요청했을 때만 쓸 것"),
+        }),
+      },
+      async ({ mltUrl, file, action, positionMs, trackNumber, inMs, outMs }) => {
+        let result;
+        if (action === 'track') {
+          if (typeof trackNumber !== 'number' || !Number.isFinite(trackNumber) || trackNumber < 1) {
+            return { content: [{ type: 'text', text: 'trackNumber(1 이상)가 필요합니다.' }] };
+          }
+          result = await fetchAndUpload(mltUrl, (xml) => setClipTrack(xml, file, trackNumber));
+        } else if (action === 'range') {
+          if (typeof inMs !== 'number' || !Number.isFinite(inMs) || inMs < 0 || typeof outMs !== 'number' || !Number.isFinite(outMs) || outMs <= inMs) {
+            return { content: [{ type: 'text', text: 'inMs(0 이상), outMs(inMs보다 커야 함)가 필요합니다.' }] };
+          }
+          result = await fetchAndUpload(mltUrl, (xml) => setClipRange(xml, file, inMs, outMs));
+        } else {
+          if (typeof positionMs !== 'number' || !Number.isFinite(positionMs) || positionMs < 0) {
+            return { content: [{ type: 'text', text: 'positionMs(0 이상)가 필요합니다.' }] };
+          }
+          result = await fetchAndUpload(mltUrl, (xml) => setClipPosition(xml, file, positionMs));
+        }
+        if ('error' in result) return { content: [{ type: 'text', text: `에러: ${result.error}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(parseClipPositions(result.xml), null, 2) }] };
       }
     );
   },
