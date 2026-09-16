@@ -746,6 +746,13 @@ export function SceneVideoModal({
               ‹
             </button>
           )}
+          {/* 2026-09-17(8차) 수정 — 사용자 지적: "14단계에 원래 나오던 이미지가 안나오네???" —
+              표의 "화면" 열은 needsVideoClip인 씬에 sceneVideo가 아직 없으면 sceneImage를
+              썸네일(🎬 오버레이)로 보여주는데, 정작 이 모달을 열면 sceneVideo만 확인하고
+              sceneImage는 아예 보지 않아서 방금 썸네일로 보이던 이미지가 모달에서는 사라지고
+              "이 장면엔 아직 영상이 없습니다"라는 빈 텍스트만 떴다. sceneVideo가 없을 때
+              sceneImage로 대체 표시하도록 순서를 하나 늘린다(정지 이미지라는 걸 알 수 있게
+              작은 안내 배지를 얹는다) — 둘 다 없을 때만 원래의 안내 문구를 보여준다. */}
           {scene?.sceneVideo ? (
             <video
               src={scene.sceneVideo}
@@ -755,6 +762,14 @@ export function SceneVideoModal({
               onTimeUpdate={(e) => setVideoTime({ current: e.currentTarget.currentTime * 1000, duration: e.currentTarget.duration * 1000 || 0 })}
               onLoadedMetadata={(e) => setVideoTime({ current: e.currentTarget.currentTime * 1000, duration: e.currentTarget.duration * 1000 || 0 })}
             />
+          ) : scene?.sceneImage ? (
+            <div className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={scene.sceneImage} alt={scene.title || scene.id} className="max-w-full max-h-[70vh] object-contain" />
+              <span className="absolute top-1.5 left-1.5 text-[10px] font-black text-white bg-black/60 rounded px-1.5 py-0.5">
+                🎬 정지 이미지 — 아직 영상 없음
+              </span>
+            </div>
           ) : (
             <div className="text-neutral-500 text-xs py-24 text-center px-6">
               {scene ? '이 장면엔 아직 영상이 없습니다' : '이 자막 구간엔 아직 등록된 장면이 없습니다'}
