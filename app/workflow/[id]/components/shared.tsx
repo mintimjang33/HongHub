@@ -1672,14 +1672,14 @@ export function SceneEditorList({
                 {/* 2026-09-16(2차) — 이제 이 열이 표 전체의 행 기준이다: SRT 줄 하나 = 한 행.
                     같은 장면에 걸리는 연속된 줄들은 오른쪽 장면 칸들을 rowSpan으로 합쳐서
                     한 번만 보여준다(사용자 확정: "SRT 줄 기준(권장)", "자막은 다 보여야해"). */}
-                <th className="text-left font-black px-2 py-1.5 w-44">자막(SRT)</th>
-                {/* 2026-09-17 수정 — 사용자 지적: "좌우 공간이 너무 좁아서 답답해 보이니까 14단계에서
-                    타임과 장면을 합쳐줘봐". mergeMediaColumn(14번)이면 장면/타임을 한 칸으로 합쳐서
-                    가로 폭을 줄이고, 13번은 기존처럼 두 칸을 그대로 유지한다. */}
+                {/* 2026-09-17(2차) 수정 — 사용자 요청: "자막/장면/타임을 합쳐죠". mergeMediaColumn
+                    (14번)이면 자막·장면·타임을 전부 한 칸으로 합친다(가로 폭을 더 줄임). 13번은
+                    기존처럼 세 칸을 그대로 유지한다. */}
                 {mergeMediaColumn ? (
-                  <th className="text-left font-black px-2 py-1.5 w-32">장면/타임</th>
+                  <th className="text-left font-black px-2 py-1.5 w-56">자막/장면</th>
                 ) : (
                   <>
+                    <th className="text-left font-black px-2 py-1.5 w-44">자막(SRT)</th>
                     <th className="text-left font-black px-2 py-1.5 w-28">장면</th>
                     <th className="text-left font-black px-2 py-1.5 w-20">타임</th>
                   </>
@@ -1705,7 +1705,7 @@ export function SceneEditorList({
                   if (!row.isFirst) return null;
                   return (
                     <tr key={row.key}>
-                      <td colSpan={mergeMediaColumn ? 7 : 9} className="p-1.5 bg-neutral-50">
+                      <td colSpan={mergeMediaColumn ? 6 : 9} className="p-1.5 bg-neutral-50">
                         <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
                       </td>
                     </tr>
@@ -1732,7 +1732,30 @@ export function SceneEditorList({
                       )}
                     </td>
                     {/* SRT 줄 하나 = 이 행 하나. 전체를 그대로 보여준다(축약·생략 없음). */}
+                    {/* 2026-09-17(2차) 수정 — 사용자 요청: "자막/장면/타임을 합쳐죠". mergeMediaColumn
+                        (14번)이면 이 칸 안에 자막 텍스트와 함께, 그 장면의 첫 자막 줄에만 장면 정보
+                        (id/제목/시간, 또는 장면이 없으면 그 구간 시간)를 위쪽에 같이 보여준다 —
+                        rowSpan 대신 매 줄 렌더링이라 첫 줄에서만 조건부로 얹는다. 13번은 자막
+                        텍스트만 그대로 담는다. */}
                     <td className="px-2 py-1.5">
+                      {mergeMediaColumn &&
+                        row.isFirst &&
+                        (s ? (
+                          <div className="mb-1 pb-1 border-b border-neutral-100">
+                            <span className="font-mono text-neutral-400">{s.id}</span>
+                            {s.title && <div className="font-bold truncate max-w-[10rem]">{s.title}</div>}
+                            <div className="font-mono text-neutral-500 whitespace-nowrap">{s.time ? formatTimeWithDuration(s.time) : '—'}</div>
+                          </div>
+                        ) : (
+                          <div className="mb-1 pb-1 border-b border-neutral-100 text-neutral-300">
+                            (장면 없음)
+                            <div className="font-mono text-neutral-400 whitespace-nowrap">
+                              {row.group.lines.length > 0
+                                ? `${formatSecToMMSS(row.group.lines[0].line.start)}-${formatSecToMMSS(row.group.lines[row.group.lines.length - 1].line.end)}`
+                                : '—'}
+                            </div>
+                          </div>
+                        ))}
                       {row.entry ? (
                         <p className="text-neutral-600 leading-relaxed">{row.entry.line.text}</p>
                       ) : srtText ? (
@@ -1744,14 +1767,9 @@ export function SceneEditorList({
                     {row.isFirst &&
                       (s ? (
                         <>
-                          {/* 2026-09-17 수정 — 장면/타임을 한 칸으로 합침(위 헤더 주석 참고). */}
-                          {mergeMediaColumn ? (
-                            <td className="px-2 py-1.5" rowSpan={row.span}>
-                              <span className="font-mono text-neutral-400">{s.id}</span>
-                              {s.title && <div className="font-bold truncate max-w-[7rem]">{s.title}</div>}
-                              <div className="font-mono text-neutral-500 whitespace-nowrap">{s.time ? formatTimeWithDuration(s.time) : '—'}</div>
-                            </td>
-                          ) : (
+                          {/* 2026-09-17(2차) 수정 — 장면/타임 정보가 이제 왼쪽 자막 칸 안으로
+                              옮겨감(위 참고) — mergeMediaColumn이면 여기선 그릴 게 없다. */}
+                          {!mergeMediaColumn && (
                             <>
                               <td className="px-2 py-1.5" rowSpan={row.span}>
                                 <span className="font-mono text-neutral-400">{s.id}</span>
@@ -1979,17 +1997,9 @@ export function SceneEditorList({
                         // 그 구간의 실제 시작~끝을 보여주고, "+ 장면 추가"로 바로 그 시간이 채워진
                         // 장면 등록 폼을 연다(startAddForGap).
                         <>
-                          {/* 2026-09-17 수정 — 장면/타임을 한 칸으로 합침(위 헤더 주석 참고). */}
-                          {mergeMediaColumn ? (
-                            <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
-                              (장면 없음)
-                              <div className="font-mono text-neutral-400 whitespace-nowrap">
-                                {row.group.lines.length > 0
-                                  ? `${formatSecToMMSS(row.group.lines[0].line.start)}-${formatSecToMMSS(row.group.lines[row.group.lines.length - 1].line.end)}`
-                                  : '—'}
-                              </div>
-                            </td>
-                          ) : (
+                          {/* 2026-09-17(2차) 수정 — 장면/타임 정보가 이제 왼쪽 자막 칸 안으로
+                              옮겨감(위 참고) — mergeMediaColumn이면 여기선 그릴 게 없다. */}
+                          {!mergeMediaColumn && (
                             <>
                               <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
                                 (장면 없음)
