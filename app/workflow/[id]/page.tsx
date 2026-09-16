@@ -33,13 +33,18 @@ function WorkflowPageInner() {
     router.replace(`/workflow/${id}?step=${i + 1}`, { scroll: false });
   }
 
+  // 2026-09-17 수정 — 사용자 지적: "최종결정 누르고 반응이 엄청 느리네". 이 화면 안 어딘가에서
+  // (렌더링 파일 선택, 자막 선택 등) 작은 걸 하나 저장할 때마다 onRefresh로 이 함수가 불렸는데,
+  // 지금까지 GET /api/sites(사이트 전체 목록)를 통째로 받아와서 그중 id가 맞는 것만 골라 썼다 —
+  // 이 파이프라인 하나만 있는 게 아니라 다른 파이프라인들 데이터까지 매번 같이 내려받은 셈이라,
+  // 사이트가 늘어날수록 사소한 저장 하나에도 갈수록 느려지는 구조였다. GET /api/sites/[id]로
+  // 이 사이트 하나만 불러오도록 바꾼다.
   function loadSite() {
-    fetch('/api/sites')
+    fetch(`/api/sites/${id}`)
       .then((r) => r.json())
       .then((d) => {
-        const found = (d.sites || []).find((s: Site) => s.id === id);
-        setSite(found || null);
-        setContent(found?.workflow_content || '');
+        setSite(d.site || null);
+        setContent(d.site?.workflow_content || '');
       });
   }
 
