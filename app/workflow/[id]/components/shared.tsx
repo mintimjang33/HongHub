@@ -761,10 +761,13 @@ export function SceneVideoModal({
             </div>
           )}
           {/* 2026-09-16(19차) 추가 — 브라우저 네이티브 재생시간 표시("0:06 / 0:06")는 밀리초까지
-              못 보여주므로, 같은 정밀도(msToClock)로 별도 텍스트를 얹는다. */}
+              못 보여주므로, 같은 정밀도(msToClock)로 별도 텍스트를 얹는다.
+              2026-09-17(5차) 수정 — 사용자 지적: "이게 원본영상의 길이인거지? 글씨를 키워주고
+              원본길이라고 표시해줘" — 뒤 숫자(duration)가 원본 영상 길이라는 게 숫자만 보고는
+              헷갈렸다. 글씨를 키우고, 앞은 "재생", 뒤는 "원본길이"라고 이름을 붙여 구분한다. */}
           {videoTime && (
-            <span className="absolute top-2 left-2 text-[10px] font-mono text-white bg-black/60 rounded px-1.5 py-0.5 pointer-events-none">
-              {msToClock(videoTime.current)} / {msToClock(videoTime.duration)}
+            <span className="absolute top-2 left-2 text-[13px] font-mono font-bold text-white bg-black/60 rounded px-2 py-1 pointer-events-none">
+              재생 {msToClock(videoTime.current)} / 원본길이 {msToClock(videoTime.duration)}
             </span>
           )}
           {hasNext && (
