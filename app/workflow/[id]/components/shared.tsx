@@ -12,13 +12,19 @@ import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBl
 // 2026-09-13 (6차) 추가 — 사용자 요청: "한 장면당 타임도 적어줘 예) 0:00~0:09 (9s) 이런 방식으로".
 // "0:00-0:09" 형태의 time 문자열에서 초 단위 길이를 계산해 뒤에 "(Ns)"로 덧붙인다. 형식이 안
 // 맞으면(자유 텍스트로 남긴 옛 데이터 등) 원문 그대로 돌려준다.
+// 2026-09-16(27차) 수정 — 사용자 지적: "왜 이렇게 된거야? 자막이 5초인데?" — 이 필드가 정수 초만
+// 담을 수 있어서, 자막(SRT)의 5.5초 같은 실측값을 반올림(5.5→6)해서 저장할 수밖에 없었다.
+// "시간"은 자막(실제 나레이션) 기준이어야 하고 편집도 거기 맞춰야 하는 값이므로, 반올림으로
+// 정보를 잃으면 안 된다 — 초 자리에 소수점 한 자리까지 담을 수 있도록 정규식을 확장한다(정수
+// 초만 있는 기존 데이터는 그대로 계속 읽힌다 — 하위호환).
 function formatTimeWithDuration(time: string): string {
-  const m = time.match(/^(\d+):(\d+)\s*[-~]\s*(\d+):(\d+)$/);
+  const m = time.match(/^(\d+):(\d+(?:\.\d+)?)\s*[-~]\s*(\d+):(\d+(?:\.\d+)?)$/);
   if (!m) return time;
-  const start = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-  const end = parseInt(m[3], 10) * 60 + parseInt(m[4], 10);
+  const start = parseInt(m[1], 10) * 60 + parseFloat(m[2]);
+  const end = parseInt(m[3], 10) * 60 + parseFloat(m[4]);
   const dur = end - start;
-  return `${time} (${dur}s)`;
+  const durStr = Number.isInteger(dur) ? String(dur) : dur.toFixed(1);
+  return `${time} (${durStr}s)`;
 }
 
 // 2026-09-16(8차) 추가 — 사용자 지적: "원래 자막에서 이건 한줄로 나왔었잖아 그럼 한줄로
@@ -1200,11 +1206,13 @@ function parseSrtLines(srt: string): SrtLine[] {
 }
 
 // 장면의 time 문자열("0:00-0:04", formatTimeWithDuration이 읽는 것과 같은 형식)을 초 단위로 변환.
+// 2026-09-16(27차) 수정 — formatTimeWithDuration과 같은 이유로 소수점 초를 허용하도록 확장
+// (반올림 없이 자막 실측값과 정확히 매칭시키기 위함). 정수 초만 있는 기존 데이터도 그대로 읽힌다.
 function parseSceneTimeRange(time: string): [number, number] | null {
-  const m = time.match(/^(\d+):(\d+)\s*[-~]\s*(\d+):(\d+)$/);
+  const m = time.match(/^(\d+):(\d+(?:\.\d+)?)\s*[-~]\s*(\d+):(\d+(?:\.\d+)?)$/);
   if (!m) return null;
-  const start = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-  const end = parseInt(m[3], 10) * 60 + parseInt(m[4], 10);
+  const start = parseInt(m[1], 10) * 60 + parseFloat(m[2]);
+  const end = parseInt(m[3], 10) * 60 + parseFloat(m[4]);
   return [start, end];
 }
 
@@ -1214,11 +1222,19 @@ function parseSceneTimeRange(time: string): [number, number] | null {
 // 옆에 붙이는 것(사용자 선택: "SRT 줄 기준(권장)"). subtitleForSceneTime(장면→자막 방향)은 이제
 // 안 쓰여서 제거하고, 초를 "0:00" 형식으로 되돌리는 포맷터만 추가한다(아래 startAddForGap이
 // 자막 구간에 맞는 장면을 새로 추가할 때 draft.time을 채우는 데 씀).
+// 2026-09-16(27차) 수정 — 사용자 지적: "자막이 5초인데? 자막에 맞추라고 했는데?" — 여태 초
+// 단위로 반올림(Math.round)해서 저장했는데, 자막(SRT) 실측값은 5.5초처럼 소수점을 갖는 경우가
+// 흔해서 반올림하면 "5초"가 "6초"로 뒤바뀌는 등 실제 자막과 눈에 띄게 어긋났다. "시간"은 자막
+// (실제 나레이션) 기준으로 편집이 맞춰져야 하는 값이라 정보 손실이 있으면 안 된다 — 반올림 없이
+// 소수점 첫째 자리까지 보존하고, 정수 초면(.0이면) 예전처럼 소수점 없이 깔끔하게 표시한다.
 function formatSecToMMSS(sec: number): string {
-  const total = Math.max(0, Math.round(sec));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+  const totalTenths = Math.max(0, Math.round(sec * 10));
+  const m = Math.floor(totalTenths / 600);
+  const secTenths = totalTenths % 600;
+  const wholeSec = Math.floor(secTenths / 10);
+  const tenth = secTenths % 10;
+  const secStr = tenth === 0 ? String(wholeSec).padStart(2, '0') : `${String(wholeSec).padStart(2, '0')}.${tenth}`;
+  return `${m}:${secStr}`;
 }
 
 // 6번 장면 프롬프트 편집 UI — 예전엔 전체를 통짜 텍스트로 붙여넣는 방식뿐이었는데, 장면 하나씩
