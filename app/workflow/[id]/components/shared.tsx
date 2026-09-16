@@ -496,8 +496,12 @@ export function SceneImageModal({
       ? formatTimeWithDuration(`${formatSecToMMSS(entry.start)}-${formatSecToMMSS(entry.end)}`)
       : '';
 
+  // 2026-09-17(4차) 수정 — 사용자 지적: "모달을 띄우면 백그라운드 화면이 어두워져서 안보이자나?
+  // 꼭 어두워져야해?" — 모달을 드래그로 옮길 수 있게 해놨는데, 배경을 어둡게 덮어버리면
+  // 옮겨봤자 뒤에 있는 표가 안 보여서 의미가 없었다. 오버레이의 어두운 배경색만 없앤다 —
+  // 바깥을 클릭하면 닫히는 기능은 이 div가 여전히 화면 전체를 덮고 있어서 그대로 유지된다.
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
         className="bg-black rounded-xl overflow-hidden w-full max-w-lg"
         style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
@@ -696,8 +700,12 @@ export function SceneVideoModal({
       ? formatTimeWithDuration(`${formatSecToMMSS(entry.start)}-${formatSecToMMSS(entry.end)}`)
       : '';
 
+  // 2026-09-17(4차) 수정 — 사용자 지적: "모달을 띄우면 백그라운드 화면이 어두워져서 안보이자나?
+  // 꼭 어두워져야해?" — 모달을 드래그로 옮길 수 있게 해놨는데, 배경을 어둡게 덮어버리면
+  // 옮겨봤자 뒤에 있는 표가 안 보여서 의미가 없었다. 오버레이의 어두운 배경색만 없앤다 —
+  // 바깥을 클릭하면 닫히는 기능은 이 div가 여전히 화면 전체를 덮고 있어서 그대로 유지된다.
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div
         className="bg-black rounded-xl overflow-hidden w-full max-w-lg"
         style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
