@@ -1,8 +1,39 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SceneBlock, Site, Step, CaptionStyle } from '../types';
 import { EMPTY_SCENE_DRAFT, uploadSceneMedia, parseSceneBlocks, serializeSceneBlocks, nextSceneId, sortScenesById } from '../utils';
+
+// 2026-09-17(3차) 추가 — 사용자 요청: "현재 모달 위치를 못 옮기는데 옮길 수 있게 해주고". 씬
+// 이미지/영상 미리보기 모달(SceneImageModal/SceneVideoModal)의 상단 바를 드래그해서 모달을
+// 화면 안에서 옮길 수 있게 하는 작은 훅 — 두 모달이 구조가 같아서 공용으로 뺐다. 오프셋은
+// 화면 중앙(기본 위치) 기준 상대 이동량이라, transform: translate로 얹기만 하면 된다.
+function useDraggableModal() {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+
+  useEffect(() => {
+    function handleMove(e: MouseEvent) {
+      if (!dragRef.current) return;
+      setOffset({ x: dragRef.current.baseX + (e.clientX - dragRef.current.startX), y: dragRef.current.baseY + (e.clientY - dragRef.current.startY) });
+    }
+    function handleUp() {
+      dragRef.current = null;
+    }
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, []);
+
+  function startDrag(e: React.MouseEvent) {
+    dragRef.current = { startX: e.clientX, startY: e.clientY, baseX: offset.x, baseY: offset.y };
+  }
+
+  return { offset, startDrag };
+}
 
 // 2026-09-13 (4차) 추가 — 사용자 요청: "13단계에서 모달을 띄웠을 때 선택한 이미지를 다운받을
 // 수 있어야 하는데 다운로드 버튼이 없어 추가해줘". Supabase Storage 공개 URL은 HongHub와
@@ -441,6 +472,8 @@ export function SceneImageModal({
   const scene = entry && entry.sceneIdx !== null ? scenes[entry.sceneIdx] : null;
   const hasPrev = index > 0;
   const hasNext = index < navItems.length - 1;
+  // 2026-09-17(3차) 추가 — 사용자 요청: "현재 모달 위치를 못 옮기는데 옮길수 있게 해주고".
+  const { offset, startDrag } = useDraggableModal();
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -465,8 +498,13 @@ export function SceneImageModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
+      <div
+        className="bg-black rounded-xl overflow-hidden w-full max-w-lg"
+        style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 2026-09-17(3차) 추가 — 이 바를 드래그하면 모달이 옮겨진다(cursor-move로 표시). */}
+        <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900 cursor-move" onMouseDown={startDrag}>
           {/* 2026-09-16(7차) 수정 — 사용자 요청: "상단에 넘버를 자막번호, 씬번호로 =>
               # 1 / 전체, S01 / 전체". 자막 줄 번호(#)와 씬 번호(S01)를 각자 따로 보여준다 —
               같은 씬이 여러 줄에 걸쳐 있으면 #만 바뀌고 S01은 그대로 유지된다. */}
@@ -523,7 +561,7 @@ export function SceneImageModal({
               ›
             </button>
           )}
-          {/* 2026-09-16(7차) 추가 — 사용자 요청: "12단계에 보여진 자막형태로 화면위에
+          {/* 2026-09-16(7차) 추가 — 사용자 요청: "12번에 보여진 자막형태로 화면위에
               보여줘". step13-14-LabeledLinksPanel.tsx의 캡션 미리보기와 같은 스타일(흰 글씨 +
               검은 배경 박스, 화면 하단 중앙)로 지금 이 줄의 자막을 이미지/영상 위에 실제
               캡션처럼 얹어 보여준다. */}
@@ -637,6 +675,8 @@ export function SceneVideoModal({
   useEffect(() => {
     setVideoTime(null);
   }, [scene?.sceneVideo]);
+  // 2026-09-17(3차) 추가 — 사용자 요청: "현재 모달 위치를 못 옮기는데 옮길수 있게 해주고".
+  const { offset, startDrag } = useDraggableModal();
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -658,8 +698,13 @@ export function SceneVideoModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-black rounded-xl overflow-hidden w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900">
+      <div
+        className="bg-black rounded-xl overflow-hidden w-full max-w-lg"
+        style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 2026-09-17(3차) 추가 — 이 바를 드래그하면 모달이 옮겨진다(cursor-move로 표시). */}
+        <div className="flex justify-between items-center px-2 py-1.5 bg-neutral-900 cursor-move" onMouseDown={startDrag}>
           <div className="flex items-center gap-2">
             <span className="text-white/50 text-[11px] font-mono px-1">
               # {entry.lineIdx !== null ? entry.lineIdx + 1 : '—'} / {totalLines}
@@ -1672,18 +1717,10 @@ export function SceneEditorList({
                 {/* 2026-09-16(2차) — 이제 이 열이 표 전체의 행 기준이다: SRT 줄 하나 = 한 행.
                     같은 장면에 걸리는 연속된 줄들은 오른쪽 장면 칸들을 rowSpan으로 합쳐서
                     한 번만 보여준다(사용자 확정: "SRT 줄 기준(권장)", "자막은 다 보여야해"). */}
-                {/* 2026-09-17(2차) 수정 — 사용자 요청: "자막/장면/타임을 합쳐죠". mergeMediaColumn
-                    (14번)이면 자막·장면·타임을 전부 한 칸으로 합친다(가로 폭을 더 줄임). 13번은
-                    기존처럼 세 칸을 그대로 유지한다. */}
-                {mergeMediaColumn ? (
-                  <th className="text-left font-black px-2 py-1.5 w-56">자막/장면</th>
-                ) : (
-                  <>
-                    <th className="text-left font-black px-2 py-1.5 w-44">자막(SRT)</th>
-                    <th className="text-left font-black px-2 py-1.5 w-28">장면</th>
-                    <th className="text-left font-black px-2 py-1.5 w-20">타임</th>
-                  </>
-                )}
+                {/* 2026-09-17(3차) 수정 — 사용자 요청: "2번스샷의 13단계 리스트의 '자막/장면/
+                    타임' 부분도 합쳐주고". 이제 13/14번 둘 다 자막·장면·타임을 한 칸으로 합친다
+                    (예전엔 mergeMediaColumn=14번일 때만 합쳤었다). */}
+                <th className="text-left font-black px-2 py-1.5 w-56">자막/장면/타임</th>
                 {/* 2026-09-16(11차) — mergeMediaColumn(14번)이면 "화면" 한 칸, 아니면(13번)
                     기존처럼 이미지/영상 두 칸을 따로 보여준다. */}
                 {mergeMediaColumn ? (
@@ -1705,7 +1742,7 @@ export function SceneEditorList({
                   if (!row.isFirst) return null;
                   return (
                     <tr key={row.key}>
-                      <td colSpan={mergeMediaColumn ? 6 : 9} className="p-1.5 bg-neutral-50">
+                      <td colSpan={mergeMediaColumn ? 6 : 7} className="p-1.5 bg-neutral-50">
                         <SceneDraftForm draft={draft} setDraft={setDraft} onCancel={cancel} onSave={saveDraft} saving={saving} />
                       </td>
                     </tr>
@@ -1732,22 +1769,32 @@ export function SceneEditorList({
                       )}
                     </td>
                     {/* SRT 줄 하나 = 이 행 하나. 전체를 그대로 보여준다(축약·생략 없음). */}
-                    {/* 2026-09-17(2차) 수정 — 사용자 요청: "자막/장면/타임을 합쳐죠". mergeMediaColumn
-                        (14번)이면 이 칸 안에 자막 텍스트와 함께, 그 장면의 첫 자막 줄에만 장면 정보
-                        (id/제목/시간, 또는 장면이 없으면 그 구간 시간)를 위쪽에 같이 보여준다 —
-                        rowSpan 대신 매 줄 렌더링이라 첫 줄에서만 조건부로 얹는다. 13번은 자막
-                        텍스트만 그대로 담는다. */}
+                    {/* 2026-09-17(3차) 수정 — 사용자 요청: "자막/장면/타임이라고 표시해주고
+                        자막을 제일 위로 옮겨줘" + "13단계 리스트의 '자막/장면/타임' 부분도
+                        합쳐주고". 13/14번 둘 다 이 칸 안에 자막 텍스트를 먼저, 그 장면의 첫
+                        자막 줄에만 장면 정보(id/제목/시간, 또는 장면이 없으면 그 구간 시간)를
+                        아래에 같이 보여준다 — rowSpan 대신 매 줄 렌더링이라 첫 줄에서만
+                        조건부로 얹는다. */}
                     <td className="px-2 py-1.5">
-                      {mergeMediaColumn &&
-                        row.isFirst &&
+                      {/* 2026-09-17(3차) 수정 — 사용자 요청: "자막을 제일 위로 옮겨줘". 자막
+                          텍스트를 먼저 보여주고, 장면 정보(id/제목/시간)는 그 아래에 구분선과
+                          함께 보여준다(13/14번 둘 다 항상 합쳐서 보여줌 — 위 헤더 참고). */}
+                      {row.entry ? (
+                        <p className="text-neutral-600 leading-relaxed">{row.entry.line.text}</p>
+                      ) : srtText ? (
+                        <span className="text-neutral-300">(매칭 없음)</span>
+                      ) : (
+                        <span className="text-neutral-300">—</span>
+                      )}
+                      {row.isFirst &&
                         (s ? (
-                          <div className="mb-1 pb-1 border-b border-neutral-100">
+                          <div className="mt-1 pt-1 border-t border-neutral-100">
                             <span className="font-mono text-neutral-400">{s.id}</span>
                             {s.title && <div className="font-bold truncate max-w-[10rem]">{s.title}</div>}
                             <div className="font-mono text-neutral-500 whitespace-nowrap">{s.time ? formatTimeWithDuration(s.time) : '—'}</div>
                           </div>
                         ) : (
-                          <div className="mb-1 pb-1 border-b border-neutral-100 text-neutral-300">
+                          <div className="mt-1 pt-1 border-t border-neutral-100 text-neutral-300">
                             (장면 없음)
                             <div className="font-mono text-neutral-400 whitespace-nowrap">
                               {row.group.lines.length > 0
@@ -1756,30 +1803,10 @@ export function SceneEditorList({
                             </div>
                           </div>
                         ))}
-                      {row.entry ? (
-                        <p className="text-neutral-600 leading-relaxed">{row.entry.line.text}</p>
-                      ) : srtText ? (
-                        <span className="text-neutral-300">(매칭 없음)</span>
-                      ) : (
-                        <span className="text-neutral-300">—</span>
-                      )}
                     </td>
                     {row.isFirst &&
                       (s ? (
                         <>
-                          {/* 2026-09-17(2차) 수정 — 장면/타임 정보가 이제 왼쪽 자막 칸 안으로
-                              옮겨감(위 참고) — mergeMediaColumn이면 여기선 그릴 게 없다. */}
-                          {!mergeMediaColumn && (
-                            <>
-                              <td className="px-2 py-1.5" rowSpan={row.span}>
-                                <span className="font-mono text-neutral-400">{s.id}</span>
-                                {s.title && <div className="font-bold truncate max-w-[7rem]">{s.title}</div>}
-                              </td>
-                              <td className="px-2 py-1.5 font-mono text-neutral-500 whitespace-nowrap" rowSpan={row.span}>
-                                {s.time ? formatTimeWithDuration(s.time) : '—'}
-                              </td>
-                            </>
-                          )}
                           {/* 2026-09-16(11차) 수정 — 사용자 지적: "14단계에선 이미지,영상
                               분류하는게 아니고~ 앞부분은 영상만 있고 자막 9~10번부터
                               이미지자나? 그럼 있는것만 셋팅해서 보여줘야해". mergeMediaColumn이
@@ -1997,20 +2024,8 @@ export function SceneEditorList({
                         // 그 구간의 실제 시작~끝을 보여주고, "+ 장면 추가"로 바로 그 시간이 채워진
                         // 장면 등록 폼을 연다(startAddForGap).
                         <>
-                          {/* 2026-09-17(2차) 수정 — 장면/타임 정보가 이제 왼쪽 자막 칸 안으로
-                              옮겨감(위 참고) — mergeMediaColumn이면 여기선 그릴 게 없다. */}
-                          {!mergeMediaColumn && (
-                            <>
-                              <td className="px-2 py-1.5 text-neutral-300" rowSpan={row.span}>
-                                (장면 없음)
-                              </td>
-                              <td className="px-2 py-1.5 font-mono text-neutral-400 whitespace-nowrap" rowSpan={row.span}>
-                                {row.group.lines.length > 0
-                                  ? `${formatSecToMMSS(row.group.lines[0].line.start)}-${formatSecToMMSS(row.group.lines[row.group.lines.length - 1].line.end)}`
-                                  : '—'}
-                              </td>
-                            </>
-                          )}
+                          {/* 2026-09-17(3차) 수정 — 장면/타임 정보가 이제 왼쪽 자막 칸 안으로
+                              옮겨감(위 참고) — 13/14번 둘 다 여기선 그릴 게 없다. */}
                           {/* 2026-09-16(11차) — mergeMediaColumn(14번)이면 화면 칸 하나만,
                               아니면(13번) 이미지/영상 두 칸을 그대로 유지한다 — 위 헤더/유
                               칼럼 수와 맞춰야 한다. */}
