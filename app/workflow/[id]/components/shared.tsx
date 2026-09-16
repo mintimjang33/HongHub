@@ -762,12 +762,17 @@ export function SceneVideoModal({
           )}
           {/* 2026-09-16(19차) 추가 — 브라우저 네이티브 재생시간 표시("0:06 / 0:06")는 밀리초까지
               못 보여주므로, 같은 정밀도(msToClock)로 별도 텍스트를 얹는다.
-              2026-09-17(5차) 수정 — 사용자 지적: "이게 원본영상의 길이인거지? 글씨를 키워주고
-              원본길이라고 표시해줘" — 뒤 숫자(duration)가 원본 영상 길이라는 게 숫자만 보고는
-              헷갈렸다. 글씨를 키우고, 앞은 "재생", 뒤는 "원본길이"라고 이름을 붙여 구분한다. */}
+              2026-09-17(6차) 수정 — 사용자 지적: "상단에 원본이 몇초라고 적혀있어?" — (5차)에서
+              이 값을 "원본길이"라고 이름 붙였는데, 이건 브라우저 <video>가 읽은 "파일 전체
+              재생 길이"(오디오 트랙 포함, 컨테이너 기준)일 뿐이다. 반면 아래 "사용 구간"이 실제로
+              막는 최대치(ClipControlFields의 sourceMaxMs)는 .mlt에 등록된 "영상 프레임 기준
+              마지막 프레임 위치"라서 보통 이보다 짧다(예: 파일 전체 6.016초여도 실제 쓸 수 있는
+              구간은 5.960초까지). 같은 화면에 "원본길이"라는 같은 말로 서로 다른 두 숫자를
+              보여줘서 사용자가 혼란스러워했다 — 여기 라벨을 "파일길이"로 바꿔서 아래 사용 구간의
+              "원본 영상 길이"(진짜 상한선)와 다른 값임을 구분되게 한다. */}
           {videoTime && (
             <span className="absolute top-2 left-2 text-[13px] font-mono font-bold text-white bg-black/60 rounded px-2 py-1 pointer-events-none">
-              재생 {msToClock(videoTime.current)} / 원본길이 {msToClock(videoTime.duration)}
+              재생 {msToClock(videoTime.current)} / 파일길이 {msToClock(videoTime.duration)}
             </span>
           )}
           {hasNext && (
