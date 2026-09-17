@@ -80,7 +80,7 @@ export function ThumbnailPanel({ site, onRefresh }: { site: Site; onRefresh: () 
                         <div key={idx} className="border border-neutral-200 rounded-lg p-1.5">
                           <a href={it.url} target="_blank" rel="noopener noreferrer" className="block">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={it.url} alt={it.label || ''} className="w-full aspect-video object-cover rounded-lg" />
+                            <img src={it.url} alt={it.label || ''} className="w-full max-w-xs mx-auto aspect-video object-cover rounded-lg" />
                           </a>
                           {/* 2026-09-18 추가 — 사용자 지적: "프롬프트는 안올려놨네???". label을
                               <img alt>로만 넣었더니 화면에 안 보여서 저장 안 된 것처럼 보였다.
