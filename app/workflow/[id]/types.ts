@@ -140,6 +140,21 @@ export type DeployTarget = {
   // 실제 업로드 시스템이 요구하는 최소 필드라 여기 맞춰서 추가한다.
   tags?: string[];
   visibility?: 'public' | 'unlisted' | 'private';
+  // 2026-09-18(2차) 추가 — 사용자 재지적: "업로드할때 필요한 정보가 이게 다야???". 태그/공개범위만
+  // 으로는 실제 유튜브 업로드가 안 된다 — 카테고리(YouTube Data API videos.insert의
+  // snippet.categoryId)와 아동용 대상 여부(status.selfDeclaredMadeForKids, COPPA 관련이라
+  // 업로드 화면에서 답변을 건너뛸 수 없는 필수 항목)는 실제로 빠지면 업로드 자체가 안 되거나
+  // 법적 문제가 생기는 항목이라 추가한다.
+  categoryId?: string;
+  madeForKids?: boolean;
+  // 2026-09-18(3차) 추가 — 사용자 요청: "다른채널들 보고 어떤 정보 적는지 파악해봐". 벤치마크
+  // 채널 실제 영상 3개(삼성/사우디/미용실 소재)의 설명란을 직접 열어 확인한 결과, 공통으로
+  // 들어가는데 지금까지 이 파이프라인엔 없던 두 가지: ①"[Timestamp]" 챕터 목록(00:00 형식 —
+  // 유튜브가 이 형식 그대로 붙여넣으면 자동으로 챕터 내비게이션을 만들어준다), ②"콘텐츠가
+  // 변경되었거나 합성되었음" AI 생성 콘텐츠 고지(유튜브 스튜디오 업로드 화면의 실제 체크박스 —
+  // 이 파이프라인 영상은 전부 AI로 만들어지므로 사실상 필수).
+  timeline?: string;
+  containsAltered?: boolean;
 };
 export type ScriptDraft = {
   category?: UnitCategory;
