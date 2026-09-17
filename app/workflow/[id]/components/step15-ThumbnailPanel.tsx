@@ -75,12 +75,18 @@ export function ThumbnailPanel({ site, onRefresh }: { site: Site; onRefresh: () 
                     {copiedId === u.id ? '✓ 복사됨' : '🔍 썸네일 분석·제작 프롬프트 복사'}
                   </button>
                   {thumbItems.length > 0 && (
-                    <div className="grid grid-cols-3 gap-1.5">
+                    <div className="space-y-2">
                       {thumbItems.map((it, idx) => (
-                        <a key={idx} href={it.url} target="_blank" rel="noopener noreferrer" className="block">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={it.url} alt={it.label || ''} className="w-full aspect-video object-cover rounded-lg border border-neutral-200" />
-                        </a>
+                        <div key={idx} className="border border-neutral-200 rounded-lg p-1.5">
+                          <a href={it.url} target="_blank" rel="noopener noreferrer" className="block">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={it.url} alt={it.label || ''} className="w-full aspect-video object-cover rounded-lg" />
+                          </a>
+                          {/* 2026-09-18 추가 — 사용자 지적: "프롬프트는 안올려놨네???". label을
+                              <img alt>로만 넣었더니 화면에 안 보여서 저장 안 된 것처럼 보였다.
+                              프롬프트/라벨 텍스트를 이미지 바로 밑에 항상 보이게 렌더링한다. */}
+                          {it.label && <p className="text-[10px] text-neutral-500 mt-1 whitespace-pre-wrap break-words">{it.label}</p>}
+                        </div>
                       ))}
                     </div>
                   )}
