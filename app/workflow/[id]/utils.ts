@@ -320,6 +320,14 @@ export function isRenderStep(step: Step): boolean {
   return step.name.trim() === '렌더링';
 }
 
+// 15번(계정/콘텐츠 설정) — 2026-09-17 신설, 사용자 요청: "15단계에 셋팅을 추가하자~ 계정 설명
+// 등을 셋팅하거나, 계정이 셋팅되어있으면 해당 컨텐츠 설명 등을 셋팅하는 곳". exact match로
+// 좁힌다 — 이름에 "콘텐츠"가 들어있어서 좁히지 않으면 아래 stepLink() 폴백 정규식(/생성|콘텐츠/)에
+// 그대로 걸려버린다(실제로 걸렸던 사고, 아래 stepLink 주석 참고).
+export function isAccountSettingsStep(step: Step): boolean {
+  return step.name.trim() === '계정/콘텐츠 설정';
+}
+
 // 단계 이름/내용에 등장하는 키워드로 실제 작업 페이지 바로가기 링크를 만들어준다.
 // "채널 발굴"(1번), "소재 수집"(2번), "대본 수집"(3번) 단계는 이 페이지에서 바로 처리할 수 있게
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
@@ -332,6 +340,11 @@ export function isRenderStep(step: Step): boolean {
 // 2026-09-16(6차) 수정 — 같은 이유로 isRenderStep도 제외 목록에 추가: 14번(렌더링) desc에
 // "생성"이라는 단어(`draft_content.json`을 코드로 "생성"해서)가 들어있어서, 이제 막 연결한
 // RenderPanel 밑에 똑같이 엉뚱한 "🎯 소스 발굴 → 콘텐츠 생성 탭" 링크가 겹쳐 뜨는 걸 미리 방지.
+// 2026-09-17 수정 — 같은 이유로 isAccountSettingsStep도 제외: 15번(계정/콘텐츠 설정)은 이름
+// 자체에 "콘텐츠"가 들어있어서 아래 폴백 정규식에 바로 걸렸다(사용자 지적: "단계를 추가할때
+// 왜자꾸 이게 같이 들어가는거야?"). 새 단계를 추가할 때 이름/desc에 "생성"이나 "콘텐츠"가
+// 우연히 섞이면 매번 같은 사고가 나므로, 전용 판별 함수가 생기는 단계는 반드시 여기 제외
+// 목록에도 같이 추가할 것 — 잊으면 이 버그가 또 재발한다.
 export function stepLink(step: Step): { href: string; label: string } | null {
   const text = `${step.name} ${step.desc}`;
   if (
@@ -349,7 +362,8 @@ export function stepLink(step: Step): { href: string; label: string } | null {
     isNarrationStep(step) ||
     isSubtitleStep(step) ||
     isImageVideoStep(step) ||
-    isRenderStep(step)
+    isRenderStep(step) ||
+    isAccountSettingsStep(step)
   )
     return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
