@@ -106,8 +106,22 @@ export type ContentUnit = {
   // 2026-09-16(15차) 추가 — 자막 표시 스타일(정렬/줄수/글자크기/배경·글자색). 위 CaptionStyle
   // 주석 참고 — 12번 편집기가 여기 저장/로드하고, 13/14번 미리보기가 그대로 읽어서 적용한다.
   captionStyle?: CaptionStyle;
+  // 2026-09-17 신설 — 15번(계정/콘텐츠 설정) 단계. 이 콘텐츠를 배포할 계정(hub_social_accounts
+  // 참고, 메인화면 "🔐 플랫폼 계정 관리" 섹션에서 등록)을 고르고, 그 계정들에 올릴 제목/설명을
+  // 정해두는 곳 — 실제 발행(16번 일괄배포, U-OneShot)은 여기서 안 하고, 배포 직전 준비만 한다.
+  // accountId가 여기 배열에 있으면 "이 계정에 올릴 예정"이라는 뜻 — U-OneShot의
+  // uos_publish_targets와 같은 모양(계정별로 title/body를 따로 가짐)을 미리 맞춰뒀다, 나중에
+  // 실제 발행 연동 시 그대로 옮겨 쓸 수 있게.
+  deployTargets?: DeployTarget[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
+};
+export type DeployTarget = {
+  accountId: string;
+  platform: string;
+  accountName: string;
+  title: string;
+  body: string;
 };
 export type ScriptDraft = {
   category?: UnitCategory;
