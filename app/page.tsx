@@ -75,35 +75,135 @@ type SocialAccount = {
 // 입력 설명 적어놨어?" — placeholder 안에 설명을 욱여넣었더니 칸이 좁아 잘리고, 클릭해서
 // 타이핑을 시작하면 아예 사라져서 설명 역할을 못 했다. label은 짧게 placeholder로 쓰고,
 // 자세한 설명(어디서 발급받는지 등)은 입력칸 밑에 별도 문구로 항상 보이게 한다).
-const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; help: string }[]> = {
+// 2026-09-17(5차) 수정 — 사용자 지적: "설명서가 족같은데 어떻게 발급해?" / "링크도 없고".
+// 발급 "이유"만 적혀있고 정작 어느 화면에서 어떤 버튼을 눌러야 하는지가 없어 실제로 못 따라
+// 했다. 실제로 화면을 같이 보며 진행해본 순서(유튜브는 이 세션에서 실증 완료)를 그대로
+// 단계별로 적고, 그 발급 사이트로 바로 이동하는 link를 추가해서 help 박스 안에 "바로가기"
+// 버튼이 뜨게 한다.
+const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; help: string; link?: string }[]> = {
   youtube: [
-    { key: 'client_id', label: 'OAuth Client ID', help: '구글 클라우드 콘솔(console.cloud.google.com) → API 및 서비스 → 사용자 인증 정보에서 발급' },
-    { key: 'client_secret', label: 'OAuth Client Secret', help: '위 Client ID와 같은 화면에서 같이 발급됩니다' },
-    { key: 'refresh_token', label: 'Refresh Token', help: '이 채널 계정으로 최초 1회 로그인·동의(OAuth 승인)를 거쳐야 발급됩니다 — 자동화가 대신 로그인할 수 없어 직접 하셔야 합니다' },
-    { key: 'channel_id', label: '채널 ID', help: 'YouTube Studio → 설정 → 채널 → 고급 설정에서 확인. 예: UCxxxxxxxxxxxxxxxx' },
+    {
+      key: 'client_id',
+      label: 'OAuth Client ID',
+      help: 'Google Cloud Console → 좌측 "클라이언트" → "+ 클라이언트 만들기" → 유형 "웹 애플리케이션" → "승인된 리디렉션 URI"에 https://developers.google.com/oauthplayground 추가 → 만들기. 뜨는 즉시 복사(나중에 다시 못 봅니다)',
+      link: 'https://console.cloud.google.com/auth/clients',
+    },
+    {
+      key: 'client_secret',
+      label: 'OAuth Client Secret',
+      help: '위 Client ID와 같은 화면에서 동시에 발급됩니다 — 그 자리에서 바로 복사(재조회 불가). 나중에 필요하면 그 클라이언트 화면에서 "+ Add secret"으로 새로 발급(최대 2개)',
+      link: 'https://console.cloud.google.com/auth/clients',
+    },
+    {
+      key: 'refresh_token',
+      label: 'Refresh Token',
+      help: 'OAuth Playground에서 발급 → 우측 상단 ⚙ → "Use your own OAuth credentials" 체크 → 위 Client ID/Secret 입력 → 왼쪽에서 "YouTube Data API v3" 선택 → "Authorize APIs" → 이 채널 운영 계정으로 로그인·동의 → "Exchange authorization code for tokens" 클릭 → 나온 값 복사',
+      link: 'https://developers.google.com/oauthplayground',
+    },
+    {
+      key: 'channel_id',
+      label: '채널 ID',
+      help: 'YouTube Studio(같은 계정으로 로그인) → 좌측 "설정" → "채널" → "고급 설정" 탭에서 확인(UC로 시작)',
+      link: 'https://studio.youtube.com',
+    },
   ],
   instagram: [
-    { key: 'app_id', label: 'Meta App ID', help: 'developers.facebook.com/apps 에서 앱 생성 후 발급 — 인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다' },
-    { key: 'app_secret', label: 'Meta App Secret', help: '위 App ID와 같은 앱 대시보드의 "설정 → 기본 설정"에서 확인' },
-    { key: 'ig_business_id', label: 'Instagram 비즈니스 계정 ID', help: '인스타그램 계정을 비즈니스/크리에이터 계정으로 전환하고 페이스북 페이지와 연결해야 발급됩니다' },
-    { key: 'access_token', label: 'Access Token', help: '이 계정 전용 장기 액세스 토큰 — 앱 대시보드에서 이 계정으로 로그인 승인 후 발급' },
+    {
+      key: 'app_id',
+      label: 'Meta App ID',
+      help: 'Meta for Developers → "앱 만들기" → 유형 선택해 생성 → 대시보드 상단에 표시됨 (인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다)',
+      link: 'https://developers.facebook.com/apps',
+    },
+    {
+      key: 'app_secret',
+      label: 'Meta App Secret',
+      help: '같은 앱 대시보드 → 좌측 "설정" → "기본 설정" → "앱 시크릿 코드" 옆 "표시" 클릭',
+      link: 'https://developers.facebook.com/apps',
+    },
+    {
+      key: 'ig_business_id',
+      label: 'Instagram 비즈니스 계정 ID',
+      help: '먼저 인스타 계정을 프로페셔널(비즈니스/크리에이터) 전환 + 페이스북 페이지 연결 → Graph API 탐색기에서 앱 선택 후 "GET /me/accounts" 호출하면 연결된 인스타 계정 ID가 응답에 포함됨',
+      link: 'https://developers.facebook.com/tools/explorer',
+    },
+    {
+      key: 'access_token',
+      label: 'Access Token',
+      help: 'Graph API 탐색기 → 이 앱 선택 → 권한(instagram_basic, instagram_content_publish 등) 추가 → "Access Token 생성" → 이 계정으로 로그인·동의 → 발급된 토큰을 "액세스 토큰 디버거"에서 장기 토큰으로 교환',
+      link: 'https://developers.facebook.com/tools/explorer',
+    },
   ],
   threads: [
-    { key: 'app_id', label: 'Meta App ID', help: 'developers.facebook.com/apps 에서 앱 생성 후 발급 — 인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다' },
-    { key: 'app_secret', label: 'Meta App Secret', help: '위 App ID와 같은 앱 대시보드의 "설정 → 기본 설정"에서 확인' },
-    { key: 'threads_user_id', label: 'Threads 사용자 ID', help: '이 계정으로 앱에 로그인 승인한 뒤 발급되는 사용자 ID' },
-    { key: 'access_token', label: 'Access Token', help: '이 계정 전용 토큰 — threads_content_publish 등 필요한 권한(scope)을 승인받아야 함' },
+    {
+      key: 'app_id',
+      label: 'Meta App ID',
+      help: 'Meta for Developers → "앱 만들기" → 유형 선택해 생성 → 대시보드 상단에 표시됨 (인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다)',
+      link: 'https://developers.facebook.com/apps',
+    },
+    {
+      key: 'app_secret',
+      label: 'Meta App Secret',
+      help: '같은 앱 대시보드 → 좌측 "설정" → "기본 설정" → "앱 시크릿 코드" 옆 "표시" 클릭',
+      link: 'https://developers.facebook.com/apps',
+    },
+    {
+      key: 'threads_user_id',
+      label: 'Threads 사용자 ID',
+      help: '앱 대시보드에 "Threads API 액세스" 사용 사례 추가 → 이 계정으로 OAuth 인가 진행 → 발급된 액세스 토큰으로 "GET https://graph.threads.net/v1.0/me" 호출하면 응답에 사용자 ID 포함',
+      link: 'https://developers.facebook.com/apps',
+    },
+    {
+      key: 'access_token',
+      label: 'Access Token',
+      help: '앱 대시보드 → "Threads API 액세스" 사용 사례 → 필요 권한(threads_content_publish 등) 포함해 이 계정으로 OAuth 인가 → 콜백으로 받은 코드를 액세스 토큰으로 교환',
+      link: 'https://developers.facebook.com/apps',
+    },
   ],
   facebook: [
-    { key: 'app_id', label: 'Meta App ID', help: 'developers.facebook.com/apps 에서 앱 생성 후 발급 — 인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다' },
-    { key: 'app_secret', label: 'Meta App Secret', help: '위 App ID와 같은 앱 대시보드의 "설정 → 기본 설정"에서 확인' },
-    { key: 'page_id', label: '페이지 ID', help: '올릴 페이스북 페이지의 "페이지 정보 → 페이지 투명성"에서 확인' },
-    { key: 'page_access_token', label: 'Page Access Token', help: '이 페이지 전용 액세스 토큰 — Graph API 탐색기 등에서 발급' },
+    {
+      key: 'app_id',
+      label: 'Meta App ID',
+      help: 'Meta for Developers → "앱 만들기" → 유형 선택해 생성 → 대시보드 상단에 표시됨 (인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다)',
+      link: 'https://developers.facebook.com/apps',
+    },
+    {
+      key: 'app_secret',
+      label: 'Meta App Secret',
+      help: '같은 앱 대시보드 → 좌측 "설정" → "기본 설정" → "앱 시크릿 코드" 옆 "표시" 클릭',
+      link: 'https://developers.facebook.com/apps',
+    },
+    {
+      key: 'page_id',
+      label: '페이지 ID',
+      help: '관리 중인 페이스북 페이지 → "페이지 정보"(또는 "정보") 탭에서 페이지 ID 확인',
+      link: 'https://www.facebook.com/pages/?category=your_pages',
+    },
+    {
+      key: 'page_access_token',
+      label: 'Page Access Token',
+      help: 'Graph API 탐색기 → 이 앱 선택 → "Access Token 생성"(사용자 토큰, 로그인) → "GET /me/accounts" 호출 → 응답에서 이 페이지 줄의 access_token 값이 페이지 전용 토큰',
+      link: 'https://developers.facebook.com/tools/explorer',
+    },
   ],
   tiktok: [
-    { key: 'client_key', label: 'Client Key', help: 'developers.tiktok.com에서 앱 등록 후 발급(Content Posting API는 별도 승인 필요)' },
-    { key: 'client_secret', label: 'Client Secret', help: '위 Client Key와 같은 화면에서 같이 발급' },
-    { key: 'access_token', label: 'Access Token', help: '이 계정으로 로그인 승인 후 발급되는 토큰' },
+    {
+      key: 'client_key',
+      label: 'Client Key',
+      help: 'TikTok for Developers → "Manage apps" → "Create an app" → 앱 생성 후 대시보드에 표시됨 (실제 업로드용 Content Posting API는 별도 심사·승인 필요)',
+      link: 'https://developers.tiktok.com/apps',
+    },
+    {
+      key: 'client_secret',
+      label: 'Client Secret',
+      help: '위 Client Key와 같은 앱 대시보드에서 같이 발급',
+      link: 'https://developers.tiktok.com/apps',
+    },
+    {
+      key: 'access_token',
+      label: 'Access Token',
+      help: '등록한 앱의 Login Kit으로 이 계정 OAuth 인가 진행 → 콜백으로 받은 code를 access_token으로 교환 (TikTok Login Kit 문서 절차)',
+      link: 'https://developers.tiktok.com/apps',
+    },
   ],
   naver_blog: [], // 공식 포스팅 API 없음 — 아래 UI에서 안내 문구만 표시
 };
@@ -587,17 +687,29 @@ export default function Home() {
                                   </button>
                                 </div>
                                 {isHelpOpen && (
-                                  <div className="flex items-start justify-between gap-2 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1.5 mt-1">
-                                    <p className="text-[10px] text-blue-700 leading-relaxed">
-                                      <span className="font-black">{field.label}</span> — {field.help}
-                                    </p>
-                                    <button
-                                      type="button"
-                                      onClick={() => toggleHelp(helpKey)}
-                                      className="shrink-0 text-[11px] font-black text-blue-400 hover:text-blue-700"
-                                    >
-                                      ✕
-                                    </button>
+                                  <div className="bg-blue-50 border border-blue-100 rounded-lg px-2 py-1.5 mt-1">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <p className="text-[10px] text-blue-700 leading-relaxed">
+                                        <span className="font-black">{field.label}</span> — {field.help}
+                                      </p>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleHelp(helpKey)}
+                                        className="shrink-0 text-[11px] font-black text-blue-400 hover:text-blue-700"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                    {field.link && (
+                                      <a
+                                        href={field.link}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-block mt-1.5 text-[10px] font-black text-blue-600 hover:underline"
+                                      >
+                                        🔗 발급 사이트 바로가기 ↗
+                                      </a>
+                                    )}
                                   </div>
                                 )}
                               </div>
