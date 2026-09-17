@@ -106,13 +106,18 @@ export type ContentUnit = {
   // 2026-09-16(15차) 추가 — 자막 표시 스타일(정렬/줄수/글자크기/배경·글자색). 위 CaptionStyle
   // 주석 참고 — 12번 편집기가 여기 저장/로드하고, 13/14번 미리보기가 그대로 읽어서 적용한다.
   captionStyle?: CaptionStyle;
-  // 2026-09-17 신설 — 15번(계정/콘텐츠 설정) 단계. 이 콘텐츠를 배포할 계정(hub_social_accounts
-  // 참고, 메인화면 "🔐 플랫폼 계정 관리" 섹션에서 등록)을 고르고, 그 계정들에 올릴 제목/설명을
-  // 정해두는 곳 — 실제 발행(16번 일괄배포, U-OneShot)은 여기서 안 하고, 배포 직전 준비만 한다.
-  // accountId가 여기 배열에 있으면 "이 계정에 올릴 예정"이라는 뜻 — U-OneShot의
-  // uos_publish_targets와 같은 모양(계정별로 title/body를 따로 가짐)을 미리 맞춰뒀다, 나중에
-  // 실제 발행 연동 시 그대로 옮겨 쓸 수 있게.
+  // 2026-09-17 신설 — 16번(계정/콘텐츠 설정) 단계(2026-09-17 15번(썸네일 제작) 신설로 15→16
+  // 밀림). 이 콘텐츠를 배포할 계정(hub_social_accounts 참고, 메인화면 "🔐 플랫폼 계정 관리"
+  // 섹션에서 등록)을 고르고, 그 계정들에 올릴 제목/설명을 정해두는 곳 — 실제 발행(17번
+  // 일괄배포, U-OneShot)은 여기서 안 하고, 배포 직전 준비만 한다. accountId가 여기 배열에
+  // 있으면 "이 계정에 올릴 예정"이라는 뜻 — U-OneShot의 uos_publish_targets와 같은 모양
+  // (계정별로 title/body를 따로 가짐)을 미리 맞춰뒀다, 나중에 실제 발행 연동 시 그대로 옮겨
+  // 쓸 수 있게.
   deployTargets?: DeployTarget[];
+  // 2026-09-17 신설 — 15번(썸네일 제작) 단계. 롱폼 콘텐츠 전용 — 벤치마크 썸네일 분석을
+  // 바탕으로 만든 썸네일 이미지를 올려두는 곳. renderFiles와 완전히 같은 구조(라벨 붙은
+  // 링크/파일 여러 개)라 LabeledFieldSection을 그대로 재사용한다(step15-ThumbnailPanel.tsx).
+  thumbnailFiles?: LabeledItem[];
   status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
 };
@@ -224,7 +229,7 @@ export type SceneBlock = {
 export type LabeledItem = { label: string; url: string; selected?: boolean };
 // 2026-09-16(6차) 추가 — renderFiles(14번 렌더링 단계의 Shotcut 프로젝트/최종 영상 파일)도
 // narrationUrls/subtitleUrls와 같은 LabeledFieldSection 컴포넌트를 재사용하므로 이 유니언에 추가.
-export type LabeledField = 'narrationUrls' | 'subtitleUrls' | 'renderFiles';
+export type LabeledField = 'narrationUrls' | 'subtitleUrls' | 'renderFiles' | 'thumbnailFiles';
 
 // 2026-09-11 추가 — 13번 화풍 선택 프리셋. 사용자가 같은 씬(약사 스틱맨+무너지는 PHARMACY 네온사인)을
 // Flow에서 여러 화풍으로 직접 만들어 비교 확정한 뒤 추가됨. promptStyle은 4대 핵심 원칙 1번(비주얼
