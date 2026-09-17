@@ -30,6 +30,13 @@ export type AnalysisResult = {
   // 사용자 확정: "우선 경제학만 우선 해보자"). 값이 있으면 shared.tsx의 StepDocSection이 이걸
   // 깔끔하게 렌더링하고, 없으면 기존 workflow_content 원문을 접어서(details) 보여준다.
   stepDocs?: Record<string, string>;
+  // 2026-09-18 추가 — 16번(계정/콘텐츠 설정) 단계. 사용자 지적: "16단계에 계정 선택을 현재
+  // 컨텐츠마다 선택하는걸로 해뒀는데~ 상단으로 올려서 파이프라인에서 선택하는걸로 해줘~~".
+  // imageStyle/characterStyle과 같은 이유(콘텐츠마다 매번 고르지 않고 파이프라인 전체가
+  // 공유) — 이 워크플로우에서 만들어지는 모든 콘텐츠는 여기서 고른 계정(hub_social_accounts.id)
+  // 들에 업로드된다. 콘텐츠(ContentUnit)별로는 이제 계정을 고르지 않고 제목/설명/태그/공개범위만
+  // 정한다(DeployTarget 참고).
+  deployAccountIds?: string[];
 };
 // 5번은 소재 하나마다 별개의 완성 콘텐츠라서, 작업 중인 것 하나(소재→제목→대본 위저드)와
 // 별개로 완성된 것들을 units 배열에 콘텐츠 단위로 저장한다. 나중에 6~9번(영상/TTS/자막/렌더링)도
@@ -127,6 +134,12 @@ export type DeployTarget = {
   accountName: string;
   title: string;
   body: string;
+  // 2026-09-18 추가 — 사용자 요청: "컨텐츠 => 등록할때 어떤것들이 필요한지 다른 채널들 보고
+  // 파악해서 필요한거 있으면 추가해줘". U-OneShot의 실제 발행 대상 테이블(uos_publish_targets:
+  // title, body, visibility, options)을 그대로 참고 — 태그(options)와 공개범위(visibility)는
+  // 실제 업로드 시스템이 요구하는 최소 필드라 여기 맞춰서 추가한다.
+  tags?: string[];
+  visibility?: 'public' | 'unlisted' | 'private';
 };
 export type ScriptDraft = {
   category?: UnitCategory;
