@@ -155,6 +155,15 @@ export type DeployTarget = {
   // 이 파이프라인 영상은 전부 AI로 만들어지므로 사실상 필수).
   timeline?: string;
   containsAltered?: boolean;
+  // 2026-09-19 추가 — 사용자 지적: "17단계도 각 컨텐츠별로 배포를 했는지에 대한 결과 체크
+  // 리스트가 있어야 할꺼 아니야???". 17번(일괄배포)은 실제 업로드를 U-OneShot이라는 별도
+  // 앱에서 하기 때문에(stepDocs["17"] 참고) HongHub가 API로 그 결과를 자동으로 알 방법이
+  // 없다 — 그래서 지금까지 "누가 뭘 실제로 올렸는지"를 확인할 화면 자체가 없었다. U-OneShot에서
+  // 실제로 올리고 나서 여기 와서 수동으로 체크해두는 결과 기록 필드. U-OneShot의
+  // uos_publish_targets.status/platform_post_id와 같은 목적의 필드를 그대로 맞춘다.
+  publishStatus?: 'pending' | 'published' | 'failed';
+  publishedUrl?: string;
+  publishedAt?: string;
 };
 export type ScriptDraft = {
   category?: UnitCategory;
