@@ -22,6 +22,7 @@ import {
   isRenderStep,
   isAccountSettingsStep,
   isThumbnailStep,
+  isDeployStep,
 } from '../utils';
 import { ChannelPanel } from './step01-ChannelPanel';
 import { MaterialPanel } from './step02-MaterialPanel';
@@ -39,6 +40,7 @@ import { ImageVideoPanel } from './step16-17-ImageVideoPanel';
 import { RenderPanel } from './step14-RenderPanel';
 import { AccountSettingsPanel } from './step15-AccountSettingsPanel';
 import { ThumbnailPanel } from './step15-ThumbnailPanel';
+import { DeployChecklistPanel } from './step17-DeployChecklistPanel';
 import { StepDocSection } from './shared';
 
 export function FlowChart({
@@ -167,6 +169,7 @@ export function FlowChart({
           {isRenderStep(active) && <RenderPanel site={site} onRefresh={onRefreshSite} />}
           {isAccountSettingsStep(active) && <AccountSettingsPanel site={site} onRefresh={onRefreshSite} />}
           {isThumbnailStep(active) && <ThumbnailPanel site={site} onRefresh={onRefreshSite} />}
+          {isDeployStep(active) && <DeployChecklistPanel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
