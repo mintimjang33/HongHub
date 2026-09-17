@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       setting_note: body.setting_note || null,
       admin_email: body.admin_email || null,
       site_id: body.site_id || null,
+      credentials: body.credentials || null,
     })
     .select()
     .single();
