@@ -334,7 +334,7 @@ export default function Home() {
   // 조회까지 한 번에 하고, 결과 채널 ID를 이미 입력해둔 channel_id와 비교해서 일치 여부까지
   // 보여준다.
   const [verifyingToken, setVerifyingToken] = useState(false);
-  const [verifyResult, setVerifyResult] = useState<{ channelId: string; channelTitle: string | null } | { error: string } | null>(null);
+  const [verifyResult, setVerifyResult] = useState<{ channelId: string; channelTitle: string | null; verifiedAt: string } | { error: string } | null>(null);
   async function verifyYoutubeRefreshToken() {
     const { client_id, client_secret, refresh_token } = accountForm.credentials;
     if (!client_id || !client_secret || !refresh_token) {
@@ -350,8 +350,32 @@ export default function Home() {
         body: JSON.stringify({ client_id, client_secret, refresh_token }),
       });
       const data = await res.json();
-      if (!res.ok) setVerifyResult({ error: data.error || '확인 실패' });
-      else setVerifyResult({ channelId: data.channelId, channelTitle: data.channelTitle });
+      if (!res.ok) {
+        setVerifyResult({ error: data.error || '확인 실패' });
+        return;
+      }
+      const verifiedAt = new Date().toISOString();
+      setVerifyResult({ channelId: data.channelId, channelTitle: data.channelTitle, verifiedAt });
+      // 2026-09-17(9차) 추가 — 사용자 요청: "현재날짜 시간까지해서 저장해줘". 확인 결과를
+      // 화면에만 잠깐 띄우던 걸, credentials jsonb에 _verified_* 키로 같이 저장한다(새
+      // 마이그레이션 없이 기존 컬럼 재사용). 이미 저장된 계정(editingAccountId 있음)이면
+      // "저장" 버튼을 안 눌러도 확인 즉시 DB에 반영 — 그래야 "확인은 했는데 저장을 안 눌러서
+      // 날짜가 날아갔다"는 일이 안 생긴다.
+      const nextCredentials = {
+        ...accountForm.credentials,
+        _verified_at: verifiedAt,
+        _verified_channel_id: data.channelId,
+        _verified_channel_title: data.channelTitle || '',
+      };
+      setAccountForm((f) => ({ ...f, credentials: nextCredentials }));
+      if (editingAccountId) {
+        await fetch(`/api/social-accounts/${editingAccountId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials: nextCredentials }),
+        });
+        loadAccounts();
+      }
     } catch {
       setVerifyResult({ error: '요청 중 오류가 발생했습니다.' });
     } finally {
@@ -485,8 +509,16 @@ export default function Home() {
                               ? '⚠️ 입력된 채널 ID와 다릅니다 — '
                               : '✅ '}
                             확인된 채널: {verifyResult.channelTitle || '(이름 없음)'} ({verifyResult.channelId})
+                            <br />
+                            <span className="text-neutral-400">🕐 {new Date(verifyResult.verifiedAt).toLocaleString('ko-KR')} 확인·저장됨</span>
                           </p>
                         )
+                      )}
+                      {!verifyResult && accountForm.credentials._verified_at && (
+                        <p className="text-[10px] text-neutral-400 mt-1">
+                          🕐 마지막 확인: {new Date(accountForm.credentials._verified_at).toLocaleString('ko-KR')} — {accountForm.credentials._verified_channel_title || '(이름 없음)'} (
+                          {accountForm.credentials._verified_channel_id})
+                        </p>
                       )}
                     </div>
                   )}
