@@ -182,6 +182,30 @@ export default function Home() {
       return next;
     });
   }
+  // 2026-09-17(4차) 추가 — 사용자 요청: "눈 표시 하고 복사버튼 추가해줘". API 자격증명
+  // 칸이 기본으로 평문 노출돼있어서 어깨너머로 보이기 쉬웠던 것을 password 타입으로
+  // 가려두고, 👁 버튼으로 필요할 때만 토글해서 보게 했다. 값을 직접 드래그해서 복사하기
+  // 불편하니 📋 버튼으로 클립보드 복사도 같이 추가.
+  const [visibleCredKeys, setVisibleCredKeys] = useState<Set<string>>(new Set());
+  function toggleCredVisible(key: string) {
+    setVisibleCredKeys((cur) => {
+      const next = new Set(cur);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  const [copiedCredKey, setCopiedCredKey] = useState<string | null>(null);
+  async function copyCredValue(key: string, value: string) {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedCredKey(key);
+      setTimeout(() => setCopiedCredKey((cur) => (cur === key ? null : cur)), 1500);
+    } catch {
+      // 클립보드 권한 없는 환경(예: http)에서는 조용히 무시 — 수동 드래그 복사는 여전히 가능
+    }
+  }
 
   function load() {
     fetch('/api/sites')
@@ -521,15 +545,36 @@ export default function Home() {
                           {CREDENTIAL_FIELDS[l.platform].map((field) => {
                             const helpKey = `${l.platform}:${field.key}`;
                             const isHelpOpen = openHelpKeys.has(helpKey);
+                            const isCredVisible = visibleCredKeys.has(helpKey);
+                            const credValue = accountForm.credentials[field.key] || '';
                             return (
                               <div key={field.key}>
                                 <div className="flex items-center gap-1">
                                   <input
-                                    value={accountForm.credentials[field.key] || ''}
+                                    type={isCredVisible ? 'text' : 'password'}
+                                    value={credValue}
                                     onChange={(e) => setCredentialField(field.key, e.target.value)}
                                     placeholder={field.label}
                                     className="flex-1 min-w-0 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
                                   />
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleCredVisible(helpKey)}
+                                    title={isCredVisible ? '값 가리기' : '값 보기'}
+                                    className="shrink-0 w-6 h-6 rounded-full text-[11px] flex items-center justify-center bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+                                  >
+                                    {isCredVisible ? '🙈' : '👁'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => copyCredValue(helpKey, credValue)}
+                                    title="값 복사"
+                                    className={`shrink-0 w-6 h-6 rounded-full text-[11px] flex items-center justify-center ${
+                                      copiedCredKey === helpKey ? 'bg-green-100 text-green-600' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+                                    }`}
+                                  >
+                                    {copiedCredKey === helpKey ? '✓' : '📋'}
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => toggleHelp(helpKey)}
