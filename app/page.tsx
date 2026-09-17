@@ -58,6 +58,49 @@ type SocialAccount = {
   setting_note: string | null;
   admin_email: string | null;
   site_id: string | null;
+  credentials: Record<string, string> | null;
+};
+
+// 2026-09-17 신설 — 사용자 지적: "계정 채널명 이런걸 니가 다 셋팅을 해줘야해" /
+// "그걸 셋팅하려면 뭐가 필요한지를 만들어야 정보를 입력해두지". 플랫폼마다 실제 API 연동에
+// 필요한 자격증명 종류가 다르다(/docs/API_SETUP_GUIDE.md 실전 기록 기반) — 유튜브는 구글
+// 클라우드 콘솔 OAuth Client ID/Secret+채널별 Refresh Token, 인스타/쓰레드/페이스북은 전부
+// 메타(Meta for Developers) 앱 하나를 공유하므로 App ID/Secret은 여러 계정이 같이 쓰고
+// 계정별로는 Access Token+계정 고유 ID(IG 비즈니스ID/쓰레드 유저ID/페이지ID)만 다르다,
+// 틱톡은 Client Key/Secret+Access Token. 네이버 블로그는 공식 포스팅 API가 없어서(검색·
+// 쇼핑 API만 있음, 위 가이드 문서 참고) 자격증명 칸 자체를 안 보여주고 안내 문구만 띄운다.
+// key는 credentials jsonb에 그대로 저장되는 필드명이다.
+const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; placeholder: string }[]> = {
+  youtube: [
+    { key: 'client_id', label: 'OAuth Client ID', placeholder: '구글 클라우드 콘솔에서 발급' },
+    { key: 'client_secret', label: 'OAuth Client Secret', placeholder: '' },
+    { key: 'refresh_token', label: 'Refresh Token', placeholder: '이 채널로 최초 1회 로그인 동의 후 발급' },
+    { key: 'channel_id', label: '채널 ID', placeholder: '예: UCxxxxxxxxxxxxxxxx' },
+  ],
+  instagram: [
+    { key: 'app_id', label: 'Meta App ID', placeholder: 'developers.facebook.com — 인스타/쓰레드/페북 공용' },
+    { key: 'app_secret', label: 'Meta App Secret', placeholder: '' },
+    { key: 'ig_business_id', label: 'Instagram 비즈니스 계정 ID', placeholder: '' },
+    { key: 'access_token', label: 'Access Token', placeholder: '이 계정 전용 장기 토큰' },
+  ],
+  threads: [
+    { key: 'app_id', label: 'Meta App ID', placeholder: 'developers.facebook.com — 인스타/쓰레드/페북 공용' },
+    { key: 'app_secret', label: 'Meta App Secret', placeholder: '' },
+    { key: 'threads_user_id', label: 'Threads 사용자 ID', placeholder: '' },
+    { key: 'access_token', label: 'Access Token', placeholder: '이 계정 전용 토큰' },
+  ],
+  facebook: [
+    { key: 'app_id', label: 'Meta App ID', placeholder: 'developers.facebook.com — 인스타/쓰레드/페북 공용' },
+    { key: 'app_secret', label: 'Meta App Secret', placeholder: '' },
+    { key: 'page_id', label: '페이지 ID', placeholder: '' },
+    { key: 'page_access_token', label: 'Page Access Token', placeholder: '' },
+  ],
+  tiktok: [
+    { key: 'client_key', label: 'Client Key', placeholder: '' },
+    { key: 'client_secret', label: 'Client Secret', placeholder: '' },
+    { key: 'access_token', label: 'Access Token', placeholder: '' },
+  ],
+  naver_blog: [], // 공식 포스팅 API 없음 — 아래 UI에서 안내 문구만 표시
 };
 
 const GUIDE_DOCS = [
@@ -112,7 +155,12 @@ export default function Home() {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [addingPlatform, setAddingPlatform] = useState<string | null>(null);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
-  const [accountForm, setAccountForm] = useState({ account_name: '', setting_note: '', admin_email: '' });
+  const [accountForm, setAccountForm] = useState<{ account_name: string; setting_note: string; admin_email: string; credentials: Record<string, string> }>({
+    account_name: '',
+    setting_note: '',
+    admin_email: '',
+    credentials: {},
+  });
   const [savingAccount, setSavingAccount] = useState(false);
 
   function load() {
@@ -139,18 +187,27 @@ export default function Home() {
   function startAddAccount(platform: string) {
     setAddingPlatform(platform);
     setEditingAccountId(null);
-    setAccountForm({ account_name: '', setting_note: '', admin_email: '' });
+    setAccountForm({ account_name: '', setting_note: '', admin_email: '', credentials: {} });
   }
 
   function startEditAccount(a: SocialAccount) {
     setAddingPlatform(a.platform);
     setEditingAccountId(a.id);
-    setAccountForm({ account_name: a.account_name, setting_note: a.setting_note || '', admin_email: a.admin_email || '' });
+    setAccountForm({
+      account_name: a.account_name,
+      setting_note: a.setting_note || '',
+      admin_email: a.admin_email || '',
+      credentials: a.credentials || {},
+    });
   }
 
   function cancelAccountForm() {
     setAddingPlatform(null);
     setEditingAccountId(null);
+  }
+
+  function setCredentialField(key: string, value: string) {
+    setAccountForm((f) => ({ ...f, credentials: { ...f.credentials, [key]: value } }));
   }
 
   async function saveAccount(platform: string) {
@@ -406,19 +463,41 @@ export default function Home() {
                       <input
                         value={accountForm.account_name}
                         onChange={(e) => setAccountForm((f) => ({ ...f, account_name: e.target.value }))}
-                        placeholder="계정/채널명"
-                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
-                      />
-                      <input
-                        value={accountForm.setting_note}
-                        onChange={(e) => setAccountForm((f) => ({ ...f, setting_note: e.target.value }))}
-                        placeholder="API 연동 상태·설정 문구 등 메모 (선택)"
+                        placeholder="계정/채널명 (같은 관리 이메일 아래 채널을 여러 개 등록해도 됩니다)"
                         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
                       />
                       <input
                         value={accountForm.admin_email}
                         onChange={(e) => setAccountForm((f) => ({ ...f, admin_email: e.target.value }))}
                         placeholder="관리 이메일 (선택)"
+                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                      />
+                      {/* 2026-09-17 신설 — 사용자 지적: "그걸 셋팅하려면 뭐가 필요한지를 만들어야
+                          정보를 입력해두지". 플랫폼마다 실제 API 연동에 필요한 자격증명이 달라서
+                          (/docs/API_SETUP_GUIDE.md 참고) CREDENTIAL_FIELDS로 플랫폼별 입력칸을
+                          다르게 그린다. 네이버 블로그는 공식 포스팅 API가 없어서 안내만 띄운다. */}
+                      {CREDENTIAL_FIELDS[l.platform].length > 0 ? (
+                        <div className="space-y-1.5 border border-dashed border-neutral-200 rounded-lg p-2">
+                          <p className="text-[10px] font-black text-neutral-400">🔑 API 연동 정보</p>
+                          {CREDENTIAL_FIELDS[l.platform].map((field) => (
+                            <input
+                              key={field.key}
+                              value={accountForm.credentials[field.key] || ''}
+                              onChange={(e) => setCredentialField(field.key, e.target.value)}
+                              placeholder={`${field.label}${field.placeholder ? ` — ${field.placeholder}` : ''}`}
+                              className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
+                          ⚠️ 네이버 블로그는 공식 포스팅 API가 없습니다 — 수동 업로드 또는 브라우저 자동화로만 가능합니다.
+                        </p>
+                      )}
+                      <input
+                        value={accountForm.setting_note}
+                        onChange={(e) => setAccountForm((f) => ({ ...f, setting_note: e.target.value }))}
+                        placeholder="그 외 메모 (선택)"
                         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
                       />
                       <div className="flex justify-end gap-1.5">
