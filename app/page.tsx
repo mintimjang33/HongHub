@@ -326,6 +326,16 @@ export default function Home() {
     }
   }
 
+  function safeParseChannels(json: string | undefined): { id: string; title: string | null }[] {
+    if (!json) return [];
+    try {
+      const parsed = JSON.parse(json);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
   // 2026-09-17(8차) 추가 — 사용자 지적: "해당 리프레시 토큰이 해당 채널의 업로드에 맞는건지
   // 알수가 있어?" — 지금까지는 새 탭 열어서 access_token을 URL에 직접 붙여 수동으로
   // 확인했는데, 이걸 화면 안에서 버튼 하나로 할 수 있게 한다. client_secret이 필요해서
@@ -334,7 +344,7 @@ export default function Home() {
   // 조회까지 한 번에 하고, 결과 채널 ID를 이미 입력해둔 channel_id와 비교해서 일치 여부까지
   // 보여준다.
   const [verifyingToken, setVerifyingToken] = useState(false);
-  const [verifyResult, setVerifyResult] = useState<{ channelId: string; channelTitle: string | null; verifiedAt: string } | { error: string } | null>(null);
+  const [verifyResult, setVerifyResult] = useState<{ channels: { id: string; title: string | null }[]; verifiedAt: string } | { error: string } | null>(null);
   async function verifyYoutubeRefreshToken() {
     const { client_id, client_secret, refresh_token } = accountForm.credentials;
     if (!client_id || !client_secret || !refresh_token) {
@@ -355,17 +365,18 @@ export default function Home() {
         return;
       }
       const verifiedAt = new Date().toISOString();
-      setVerifyResult({ channelId: data.channelId, channelTitle: data.channelTitle, verifiedAt });
+      setVerifyResult({ channels: data.channels, verifiedAt });
       // 2026-09-17(9차) 추가 — 사용자 요청: "현재날짜 시간까지해서 저장해줘". 확인 결과를
       // 화면에만 잠깐 띄우던 걸, credentials jsonb에 _verified_* 키로 같이 저장한다(새
       // 마이그레이션 없이 기존 컬럼 재사용). 이미 저장된 계정(editingAccountId 있음)이면
       // "저장" 버튼을 안 눌러도 확인 즉시 DB에 반영 — 그래야 "확인은 했는데 저장을 안 눌러서
-      // 날짜가 날아갔다"는 일이 안 생긴다.
+      // 날짜가 날아갔다"는 일이 안 생긴다. credentials는 Record<string,string>이라 배열을
+      // 그대로 못 넣어서 JSON 문자열로 저장한다(2차 수정 — mine=true가 여러 채널을 배열로
+      // 줄 수 있다는 걸 알게 된 뒤로 단일 채널이 아니라 목록 전체를 저장해야 함).
       const nextCredentials = {
         ...accountForm.credentials,
         _verified_at: verifiedAt,
-        _verified_channel_id: data.channelId,
-        _verified_channel_title: data.channelTitle || '',
+        _verified_channels: JSON.stringify(data.channels),
       };
       setAccountForm((f) => ({ ...f, credentials: nextCredentials }));
       if (editingAccountId) {
@@ -498,27 +509,54 @@ export default function Home() {
                         'error' in verifyResult ? (
                           <p className="text-[10px] text-red-600 mt-1">❌ {verifyResult.error}</p>
                         ) : (
-                          <p
-                            className={`text-[10px] mt-1 ${
-                              accountForm.credentials.channel_id && verifyResult.channelId !== accountForm.credentials.channel_id
-                                ? 'text-amber-600'
-                                : 'text-green-600'
-                            }`}
-                          >
-                            {accountForm.credentials.channel_id && verifyResult.channelId !== accountForm.credentials.channel_id
-                              ? '⚠️ 입력된 채널 ID와 다릅니다 — '
-                              : '✅ '}
-                            확인된 채널: {verifyResult.channelTitle || '(이름 없음)'} ({verifyResult.channelId})
-                            <br />
-                            <span className="text-neutral-400">🕐 {new Date(verifyResult.verifiedAt).toLocaleString('ko-KR')} 확인·저장됨</span>
-                          </p>
+                          <div className="mt-1 bg-neutral-50 border border-neutral-200 rounded-lg p-1.5">
+                            <p className="text-[10px] font-bold text-neutral-500 mb-1">
+                              이 토큰으로 접근 가능한 채널 {verifyResult.channels.length}개 (🕐 {new Date(verifyResult.verifiedAt).toLocaleString('ko-KR')} 확인·저장됨)
+                            </p>
+                            <div className="space-y-1">
+                              {verifyResult.channels.map((ch) => {
+                                const isMatch = ch.id === accountForm.credentials.channel_id;
+                                return (
+                                  <div key={ch.id} className="flex items-center justify-between gap-2">
+                                    <p className={`text-[10px] truncate ${isMatch ? 'text-green-700 font-bold' : 'text-neutral-600'}`}>
+                                      {isMatch ? '✅' : '⚪'} {ch.title || '(이름 없음)'}{' '}
+                                      <span className="text-neutral-400 font-mono">({ch.id})</span>
+                                    </p>
+                                    {!isMatch && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setCredentialField('channel_id', ch.id)}
+                                        className="shrink-0 text-[9px] font-bold text-blue-600 hover:underline"
+                                      >
+                                        이 ID 쓰기
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {accountForm.credentials.channel_id && !verifyResult.channels.some((c) => c.id === accountForm.credentials.channel_id) && (
+                              <p className="text-[10px] text-amber-600 mt-1">⚠️ 입력해둔 채널 ID가 위 목록에 없습니다 — 위에서 원하는 채널의 "이 ID 쓰기"를 눌러주세요.</p>
+                            )}
+                          </div>
                         )
                       )}
-                      {!verifyResult && accountForm.credentials._verified_at && (
-                        <p className="text-[10px] text-neutral-400 mt-1">
-                          🕐 마지막 확인: {new Date(accountForm.credentials._verified_at).toLocaleString('ko-KR')} — {accountForm.credentials._verified_channel_title || '(이름 없음)'} (
-                          {accountForm.credentials._verified_channel_id})
-                        </p>
+                      {!verifyResult && accountForm.credentials._verified_channels && (
+                        <div className="mt-1 bg-neutral-50 border border-neutral-200 rounded-lg p-1.5">
+                          <p className="text-[10px] font-bold text-neutral-400 mb-1">
+                            🕐 마지막 확인: {accountForm.credentials._verified_at ? new Date(accountForm.credentials._verified_at).toLocaleString('ko-KR') : '-'}
+                          </p>
+                          <div className="space-y-1">
+                            {safeParseChannels(accountForm.credentials._verified_channels).map((ch) => {
+                              const isMatch = ch.id === accountForm.credentials.channel_id;
+                              return (
+                                <p key={ch.id} className={`text-[10px] truncate ${isMatch ? 'text-green-700 font-bold' : 'text-neutral-500'}`}>
+                                  {isMatch ? '✅' : '⚪'} {ch.title || '(이름 없음)'} <span className="text-neutral-400 font-mono">({ch.id})</span>
+                                </p>
+                              );
+                            })}
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}
