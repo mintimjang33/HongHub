@@ -2189,12 +2189,23 @@ function renderStepDocInline(line: string, keyPrefix: string) {
 
 // 마크다운 전체 파서가 아니라, 이 문서들이 실제로 쓰는 표기(굵게/인라인코드/<br> 줄바꿈/빈 줄
 // 단락 구분/"- "·숫자. 목록)만 처리하는 가벼운 렌더러 — 새 npm 의존성을 추가하지 않기 위함.
+// 2026-09-17 추가 — 사용자 지적: "이미지는 어디에 있어???" — 썸네일 분석 설명서에
+// ![라벨](URL) 형태로 이미지를 넣었더니 지원 안 되는 문법이라 글자 그대로 찍혀서 나왔다.
+// 이미지 단독으로만 있는 줄을 감지해서 <img>로 렌더링하는 걸 추가한다(다른 텍스트와 섞인
+// 인라인 이미지는 아직 미지원 — 이 문서들은 항상 이미지를 독립된 줄로 쓴다).
+const IMAGE_LINE_RE = /^!\[([^\]]*)\]\((\S+)\)$/;
+
 function renderStepDoc(text: string) {
   const normalized = text.replace(/<br\s*\/?>/gi, '\n');
   const paragraphs = normalized.split(/\n{2,}/);
   return paragraphs.map((para, pi) => {
     const lines = para.split('\n').filter((l) => l.trim() !== '');
     if (lines.length === 0) return null;
+    const imageMatch = lines.length === 1 ? lines[0].trim().match(IMAGE_LINE_RE) : null;
+    if (imageMatch) {
+      // eslint-disable-next-line @next/next/no-img-element
+      return <img key={pi} src={imageMatch[2]} alt={imageMatch[1]} className="max-w-full rounded-lg border border-neutral-200 mb-3" />;
+    }
     const isList = lines.every((l) => /^\s*([-•]|\d+\.)\s/.test(l));
     if (isList) {
       return (
