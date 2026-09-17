@@ -358,7 +358,6 @@ export function isThumbnailStep(step: Step): boolean {
 // 우연히 섞이면 매번 같은 사고가 나므로, 전용 판별 함수가 생기는 단계는 반드시 여기 제외
 // 목록에도 같이 추가할 것 — 잊으면 이 버그가 또 재발한다.
 export function stepLink(step: Step): { href: string; label: string } | null {
-  const text = `${step.name} ${step.desc}`;
   if (
     isChannelStep(step) ||
     isMaterialStep(step) ||
@@ -379,7 +378,11 @@ export function stepLink(step: Step): { href: string; label: string } | null {
     isThumbnailStep(step)
   )
     return null;
-  if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
+  // 2026-09-17(4차) — "🎯 소스 발굴 → 콘텐츠 생성 탭" 폴백 링크를 완전히 제거했다(사용자
+  // 지적: "소스발굴이라는게 왜 계속 생기냐고" — 새 단계를 추가할 때마다 위 제외 목록에
+  // 하나씩 추가하는 땜질을 반복해왔는데, 애초에 1~18번 전 단계가 이미 각자 전용 패널을
+  // 갖고 있어서 이 링크가 필요한 단계 자체가 하나도 없었다). 앞으로 전용 패널 없는 새 단계가
+  // 생기면, 이 함수에 다시 링크를 추가하지 말고 그 단계 전용 패널을 만들 것.
   return null;
 }
 
