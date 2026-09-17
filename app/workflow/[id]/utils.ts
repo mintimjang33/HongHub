@@ -340,6 +340,14 @@ export function isThumbnailStep(step: Step): boolean {
   return step.name.trim() === '썸네일 제작';
 }
 
+// 17번(일괄배포) — 2026-09-19 신설, 사용자 지적: "17단계도 각 컨텐츠별로 배포를 했는지에
+// 대한 결과 체크 리스트가 있어야 할꺼 아니야???". 지금까지 이 단계는 stepDocs 설명서(U-OneShot
+// 아키텍처 설명)만 있고 실제 화면(패널)이 없었다 — 콘텐츠별로 16번에서 등록해둔 배포 대상들이
+// 실제로 업로드됐는지 결과를 기록/확인하는 DeployChecklistPanel을 연결한다.
+export function isDeployStep(step: Step): boolean {
+  return step.name.trim() === '일괄배포';
+}
+
 // 단계 이름/내용에 등장하는 키워드로 실제 작업 페이지 바로가기 링크를 만들어준다.
 // "채널 발굴"(1번), "소재 수집"(2번), "대본 수집"(3번) 단계는 이 페이지에서 바로 처리할 수 있게
 // 만들어서(ChannelPanel/MaterialPanel/TranscriptPanel) 별도 링크가 필요 없다.
