@@ -1328,6 +1328,90 @@ ${PLATFORM_GUIDE[target_platform]}
         return { content: [{ type: 'text', text: JSON.stringify(parseClipPositions(result.xml), null, 2) }] };
       }
     );
+
+    // 2026-09-17 신설 — 사용자 요청: "홍허브 메인화면 플랫폼 버튼들이 그냥 외부 링크만 있는데,
+    // 계정 채널 셋팅(API/설정 문구 등)을 하게 해두자". hub_social_accounts 테이블(웹 UI의
+    // app/api/social-accounts와 동일 테이블)을 MCP에서도 직접 조회/등록/수정/삭제할 수 있게
+    // 한다 — [[feedback_add_mcp_with_feature]] 원칙에 따라 새 기능은 항상 MCP 짝을 같이 만든다.
+    server.registerTool(
+      'list_social_accounts',
+      {
+        description: '홍허브 메인화면에 등록된 플랫폼별 계정(유튜브/인스타/쓰레드/페이스북/틱톡/네이버블로그 등) 목록을 조회한다.',
+        inputSchema: z.object({ platform: z.string().optional().describe('예: youtube, instagram, threads, facebook, tiktok, naver_blog — 비우면 전체 조회') }),
+      },
+      async ({ platform }) => {
+        const supabase = getSupabaseServerClient();
+        let query = supabase.from('hub_social_accounts').select('*').order('platform').order('sort_order').order('created_at');
+        if (platform) query = query.eq('platform', platform);
+        const { data, error } = await query;
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message} (hub_social_accounts 테이블이 없으면 _migration_16_social_accounts.sql 실행 필요)` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'add_social_account',
+      {
+        description: '새 플랫폼 계정을 등록한다(홍허브 메인화면 계정 관리 섹션에 표시됨).',
+        inputSchema: z.object({
+          platform: z.string().describe('예: youtube, instagram, threads, facebook, tiktok, naver_blog'),
+          account_name: z.string().describe('계정/채널명(예: "경제학 똑똑", "@mintimjang33")'),
+          setting_note: z.string().optional().describe('API 연동 상태, 설정 문구 등 자유 메모 — 실제 비밀키/토큰은 여기 쓰지 말 것(app_config 사용)'),
+          admin_email: z.string().optional().describe('이 계정을 관리하는 구글 계정(선택)'),
+          site_id: z.string().optional().describe('특정 파이프라인 전용 계정이면 그 사이트 id(선택, list_sites로 확인)'),
+        }),
+      },
+      async (args) => {
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase
+          .from('hub_social_accounts')
+          .insert({
+            platform: args.platform,
+            account_name: args.account_name,
+            setting_note: args.setting_note || null,
+            admin_email: args.admin_email || null,
+            site_id: args.site_id || null,
+          })
+          .select()
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'update_social_account',
+      {
+        description: '등록된 플랫폼 계정을 수정한다(id 기준, 넘긴 필드만 갱신).',
+        inputSchema: z.object({
+          id: z.string().describe('수정할 계정의 id (list_social_accounts로 확인)'),
+          platform: z.string().optional(),
+          account_name: z.string().optional(),
+          setting_note: z.string().optional(),
+          admin_email: z.string().optional(),
+          site_id: z.string().optional(),
+        }),
+      },
+      async ({ id, ...fields }) => {
+        const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        for (const [k, v] of Object.entries(fields)) if (v !== undefined) update[k] = v;
+        const supabase = getSupabaseServerClient();
+        const { data, error } = await supabase.from('hub_social_accounts').update(update).eq('id', id).select().single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      }
+    );
+
+    server.registerTool(
+      'delete_social_account',
+      { description: '등록된 플랫폼 계정을 삭제한다.', inputSchema: z.object({ id: z.string().describe('삭제할 계정의 id') }) },
+      async ({ id }) => {
+        const supabase = getSupabaseServerClient();
+        const { error } = await supabase.from('hub_social_accounts').delete().eq('id', id);
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: '삭제됨' }] };
+      }
+    );
   },
   { verboseLogs: true }
 );
