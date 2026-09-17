@@ -326,6 +326,137 @@ export default function Home() {
     }
   }
 
+  // 2026-09-17(7차) 추출 — 사용자 지적: "수정을 클릭하면 가장 아래에 표시가 되는데~ 해당
+  // 계정 정보 바로 아래에 표시 되었으면 좋겠어". 원래는 폼 하나를 플랫폼 카드 맨 밑에 고정
+  // 렌더링해서, 계정이 여러 개 쌓인 카드에서 "수정"을 누르면 화면 밑까지 스크롤해야 폼이
+  // 보였다. 폼 JSX를 함수로 뽑아서 "수정 중인 계정 바로 밑"과 "새 계정 추가용(카드 맨 밑)"
+  // 두 군데에서 재사용한다 — 상태(accountForm 등)는 그대로 하나뿐이라 여러 폼이 동시에
+  // 열리는 게 아니라 위치만 editingAccountId 유무에 따라 달라진다.
+  function renderAccountForm(platform: string) {
+    return (
+      <div className="mt-2 space-y-1.5 border-t border-neutral-100 pt-2">
+        <input
+          value={accountForm.admin_email}
+          onChange={(e) => setAccountForm((f) => ({ ...f, admin_email: e.target.value }))}
+          placeholder="관리 이메일 (선택 — 같은 이메일로 채널을 여러 개 등록할 수 있습니다)"
+          className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+        />
+        <input
+          value={accountForm.account_name}
+          onChange={(e) => setAccountForm((f) => ({ ...f, account_name: e.target.value }))}
+          placeholder="계정/채널명 (채널 하나당 여기서 한 건씩 등록)"
+          className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+        />
+        <input
+          value={accountForm.admin_phone}
+          onChange={(e) => setAccountForm((f) => ({ ...f, admin_phone: e.target.value }))}
+          placeholder="관리 전화번호 (선택 — 이 채널 담당자 연락처)"
+          className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+        />
+        {CREDENTIAL_FIELDS[platform].length > 0 ? (
+          <div className="space-y-1.5 border border-dashed border-neutral-200 rounded-lg p-2">
+            <p className="text-[10px] font-black text-neutral-400">🔑 API 연동 정보</p>
+            {CREDENTIAL_FIELDS[platform].map((field) => {
+              const helpKey = `${platform}:${field.key}`;
+              const isHelpOpen = openHelpKeys.has(helpKey);
+              const isCredVisible = visibleCredKeys.has(helpKey);
+              const credValue = accountForm.credentials[field.key] || '';
+              return (
+                <div key={field.key}>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type={isCredVisible ? 'text' : 'password'}
+                      value={credValue}
+                      onChange={(e) => setCredentialField(field.key, e.target.value)}
+                      placeholder={field.label}
+                      className="flex-1 min-w-0 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => toggleCredVisible(helpKey)}
+                      title={isCredVisible ? '값 가리기' : '값 보기'}
+                      className="shrink-0 w-6 h-6 rounded-full text-[11px] flex items-center justify-center bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+                    >
+                      {isCredVisible ? '🙈' : '👁'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copyCredValue(helpKey, credValue)}
+                      title="값 복사"
+                      className={`shrink-0 w-6 h-6 rounded-full text-[11px] flex items-center justify-center ${
+                        copiedCredKey === helpKey ? 'bg-green-100 text-green-600' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+                      }`}
+                    >
+                      {copiedCredKey === helpKey ? '✓' : '📋'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleHelp(helpKey)}
+                      title="이 항목 설명 보기"
+                      className={`shrink-0 w-6 h-6 rounded-full text-[11px] font-black flex items-center justify-center ${
+                        isHelpOpen ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-400 hover:bg-neutral-200'
+                      }`}
+                    >
+                      ⓘ
+                    </button>
+                  </div>
+                  {isHelpOpen && (
+                    <div className="bg-blue-50 border border-blue-100 rounded-lg px-2 py-1.5 mt-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-[10px] text-blue-700 leading-relaxed">
+                          <span className="font-black">{field.label}</span> — {field.help}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => toggleHelp(helpKey)}
+                          className="shrink-0 text-[11px] font-black text-blue-400 hover:text-blue-700"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      {field.link && (
+                        <a
+                          href={field.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block mt-1.5 text-[10px] font-black text-blue-600 hover:underline"
+                        >
+                          🔗 발급 사이트 바로가기 ↗
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
+            ⚠️ 네이버 블로그는 공식 포스팅 API가 없습니다 — 수동 업로드 또는 브라우저 자동화로만 가능합니다.
+          </p>
+        )}
+        <input
+          value={accountForm.setting_note}
+          onChange={(e) => setAccountForm((f) => ({ ...f, setting_note: e.target.value }))}
+          placeholder="그 외 메모 (선택)"
+          className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+        />
+        <div className="flex justify-end gap-1.5">
+          <button onClick={cancelAccountForm} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+            취소
+          </button>
+          <button
+            onClick={() => saveAccount(platform)}
+            disabled={savingAccount || !accountForm.account_name.trim()}
+            className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+          >
+            {savingAccount ? '저장 중...' : '저장'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   function load() {
     fetch('/api/sites')
       .then((r) => r.json())
@@ -621,23 +752,26 @@ export default function Home() {
                           )}
                           <div className="space-y-1.5">
                             {group.accounts.map((a) => (
-                              <div key={a.id} className="flex items-start justify-between gap-2 bg-neutral-50 rounded-lg px-2 py-1.5">
-                                <div className="min-w-0">
-                                  <p className="text-[11px] font-bold truncate">{a.account_name}</p>
-                                  {!group.email && a.admin_email && (
-                                    <p className="text-[10px] text-neutral-400 truncate">✉️ {a.admin_email}</p>
-                                  )}
-                                  {a.admin_phone && <p className="text-[10px] text-neutral-400 truncate">📞 {a.admin_phone}</p>}
-                                  {a.setting_note && <p className="text-[10px] text-neutral-400 truncate">{a.setting_note}</p>}
+                              <div key={a.id}>
+                                <div className="flex items-start justify-between gap-2 bg-neutral-50 rounded-lg px-2 py-1.5">
+                                  <div className="min-w-0">
+                                    <p className="text-[11px] font-bold truncate">{a.account_name}</p>
+                                    {!group.email && a.admin_email && (
+                                      <p className="text-[10px] text-neutral-400 truncate">✉️ {a.admin_email}</p>
+                                    )}
+                                    {a.admin_phone && <p className="text-[10px] text-neutral-400 truncate">📞 {a.admin_phone}</p>}
+                                    {a.setting_note && <p className="text-[10px] text-neutral-400 truncate">{a.setting_note}</p>}
+                                  </div>
+                                  <div className="flex gap-1.5 shrink-0">
+                                    <button onClick={() => startEditAccount(a)} className="text-[10px] font-bold text-blue-600 hover:underline">
+                                      수정
+                                    </button>
+                                    <button onClick={() => deleteAccount(a.id)} className="text-[10px] font-bold text-red-500 hover:underline">
+                                      삭제
+                                    </button>
+                                  </div>
                                 </div>
-                                <div className="flex gap-1.5 shrink-0">
-                                  <button onClick={() => startEditAccount(a)} className="text-[10px] font-bold text-blue-600 hover:underline">
-                                    수정
-                                  </button>
-                                  <button onClick={() => deleteAccount(a.id)} className="text-[10px] font-bold text-red-500 hover:underline">
-                                    삭제
-                                  </button>
-                                </div>
+                                {editingAccountId === a.id && renderAccountForm(l.platform)}
                               </div>
                             ))}
                           </div>
@@ -645,132 +779,7 @@ export default function Home() {
                       ))}
                     </div>
                   )}
-                  {isFormOpen && (
-                    <div className="mt-2 space-y-1.5 border-t border-neutral-100 pt-2">
-                      <input
-                        value={accountForm.admin_email}
-                        onChange={(e) => setAccountForm((f) => ({ ...f, admin_email: e.target.value }))}
-                        placeholder="관리 이메일 (선택 — 같은 이메일로 채널을 여러 개 등록할 수 있습니다)"
-                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
-                      />
-                      <input
-                        value={accountForm.account_name}
-                        onChange={(e) => setAccountForm((f) => ({ ...f, account_name: e.target.value }))}
-                        placeholder="계정/채널명 (채널 하나당 여기서 한 건씩 등록)"
-                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
-                      />
-                      <input
-                        value={accountForm.admin_phone}
-                        onChange={(e) => setAccountForm((f) => ({ ...f, admin_phone: e.target.value }))}
-                        placeholder="관리 전화번호 (선택 — 이 채널 담당자 연락처)"
-                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
-                      />
-                      {/* 2026-09-17 신설 — 사용자 지적: "그걸 셋팅하려면 뭐가 필요한지를 만들어야
-                          정보를 입력해두지". 플랫폼마다 실제 API 연동에 필요한 자격증명이 달라서
-                          (/docs/API_SETUP_GUIDE.md 참고) CREDENTIAL_FIELDS로 플랫폼별 입력칸을
-                          다르게 그린다. 네이버 블로그는 공식 포스팅 API가 없어서 안내만 띄운다. */}
-                      {CREDENTIAL_FIELDS[l.platform].length > 0 ? (
-                        <div className="space-y-1.5 border border-dashed border-neutral-200 rounded-lg p-2">
-                          <p className="text-[10px] font-black text-neutral-400">🔑 API 연동 정보</p>
-                          {CREDENTIAL_FIELDS[l.platform].map((field) => {
-                            const helpKey = `${l.platform}:${field.key}`;
-                            const isHelpOpen = openHelpKeys.has(helpKey);
-                            const isCredVisible = visibleCredKeys.has(helpKey);
-                            const credValue = accountForm.credentials[field.key] || '';
-                            return (
-                              <div key={field.key}>
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type={isCredVisible ? 'text' : 'password'}
-                                    value={credValue}
-                                    onChange={(e) => setCredentialField(field.key, e.target.value)}
-                                    placeholder={field.label}
-                                    className="flex-1 min-w-0 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleCredVisible(helpKey)}
-                                    title={isCredVisible ? '값 가리기' : '값 보기'}
-                                    className="shrink-0 w-6 h-6 rounded-full text-[11px] flex items-center justify-center bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
-                                  >
-                                    {isCredVisible ? '🙈' : '👁'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => copyCredValue(helpKey, credValue)}
-                                    title="값 복사"
-                                    className={`shrink-0 w-6 h-6 rounded-full text-[11px] flex items-center justify-center ${
-                                      copiedCredKey === helpKey ? 'bg-green-100 text-green-600' : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
-                                    }`}
-                                  >
-                                    {copiedCredKey === helpKey ? '✓' : '📋'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleHelp(helpKey)}
-                                    title="이 항목 설명 보기"
-                                    className={`shrink-0 w-6 h-6 rounded-full text-[11px] font-black flex items-center justify-center ${
-                                      isHelpOpen ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-400 hover:bg-neutral-200'
-                                    }`}
-                                  >
-                                    ⓘ
-                                  </button>
-                                </div>
-                                {isHelpOpen && (
-                                  <div className="bg-blue-50 border border-blue-100 rounded-lg px-2 py-1.5 mt-1">
-                                    <div className="flex items-start justify-between gap-2">
-                                      <p className="text-[10px] text-blue-700 leading-relaxed">
-                                        <span className="font-black">{field.label}</span> — {field.help}
-                                      </p>
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleHelp(helpKey)}
-                                        className="shrink-0 text-[11px] font-black text-blue-400 hover:text-blue-700"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
-                                    {field.link && (
-                                      <a
-                                        href={field.link}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="inline-block mt-1.5 text-[10px] font-black text-blue-600 hover:underline"
-                                      >
-                                        🔗 발급 사이트 바로가기 ↗
-                                      </a>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (
-                        <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
-                          ⚠️ 네이버 블로그는 공식 포스팅 API가 없습니다 — 수동 업로드 또는 브라우저 자동화로만 가능합니다.
-                        </p>
-                      )}
-                      <input
-                        value={accountForm.setting_note}
-                        onChange={(e) => setAccountForm((f) => ({ ...f, setting_note: e.target.value }))}
-                        placeholder="그 외 메모 (선택)"
-                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
-                      />
-                      <div className="flex justify-end gap-1.5">
-                        <button onClick={cancelAccountForm} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
-                          취소
-                        </button>
-                        <button
-                          onClick={() => saveAccount(l.platform)}
-                          disabled={savingAccount || !accountForm.account_name.trim()}
-                          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
-                        >
-                          {savingAccount ? '저장 중...' : '저장'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  {isFormOpen && !editingAccountId && renderAccountForm(l.platform)}
                 </div>
               );
             })}
