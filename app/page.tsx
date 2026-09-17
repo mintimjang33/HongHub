@@ -546,6 +546,7 @@ export default function Home() {
     setAddingPlatform(platform);
     setEditingAccountId(null);
     setAccountForm({ account_name: '', setting_note: '', admin_email: '', admin_phone: '', credentials: {} });
+    setVerifyResult(null);
   }
 
   function startEditAccount(a: SocialAccount) {
@@ -558,6 +559,7 @@ export default function Home() {
       admin_phone: a.admin_phone || '',
       credentials: a.credentials || {},
     });
+    setVerifyResult(null);
   }
 
   function cancelAccountForm() {
