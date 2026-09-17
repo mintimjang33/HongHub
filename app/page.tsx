@@ -62,6 +62,25 @@ type SocialAccount = {
   credentials: Record<string, string> | null;
 };
 
+// 2026-09-17(6차) 추가 — 사용자 지적: "관리메일 아래로 추가 등록되는게 아니잖아". 같은
+// 관리 이메일로 채널을 여러 개 등록해도 화면엔 그냥 낱개 카드로 평평하게 나열돼서, "이메일
+// 아래에 채널들이 묶인다"는 말과 실제 화면이 안 맞았다. admin_email 기준으로 묶어서 이메일을
+// 소제목처럼 보여주고 그 밑에 채널들을 들여쓰기해서 실제로 그룹처럼 보이게 한다. 이메일이
+// 없는 계정들은 그룹 헤더 없이 원래대로 낱개 표시(email: '').
+function groupAccountsByEmail(accounts: SocialAccount[]): { email: string; accounts: SocialAccount[] }[] {
+  const order: string[] = [];
+  const map = new Map<string, SocialAccount[]>();
+  for (const a of accounts) {
+    const key = a.admin_email || '';
+    if (!map.has(key)) {
+      map.set(key, []);
+      order.push(key);
+    }
+    map.get(key)!.push(a);
+  }
+  return order.map((email) => ({ email, accounts: map.get(email)! }));
+}
+
 // 2026-09-17 신설 — 사용자 지적: "계정 채널명 이런걸 니가 다 셋팅을 해줘야해" /
 // "그걸 셋팅하려면 뭐가 필요한지를 만들어야 정보를 입력해두지". 플랫폼마다 실제 API 연동에
 // 필요한 자격증명 종류가 다르다(/docs/API_SETUP_GUIDE.md 실전 기록 기반) — 유튜브는 구글
@@ -594,22 +613,33 @@ export default function Home() {
                   </div>
                   {platformAccounts.length === 0 && !isFormOpen && <p className="text-[11px] text-neutral-300">등록된 계정 없음</p>}
                   {platformAccounts.length > 0 && (
-                    <div className="space-y-1.5">
-                      {platformAccounts.map((a) => (
-                        <div key={a.id} className="flex items-start justify-between gap-2 bg-neutral-50 rounded-lg px-2 py-1.5">
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-bold truncate">{a.account_name}</p>
-                            {a.admin_email && <p className="text-[10px] text-neutral-400 truncate">✉️ {a.admin_email}</p>}
-                            {a.admin_phone && <p className="text-[10px] text-neutral-400 truncate">📞 {a.admin_phone}</p>}
-                            {a.setting_note && <p className="text-[10px] text-neutral-400 truncate">{a.setting_note}</p>}
-                          </div>
-                          <div className="flex gap-1.5 shrink-0">
-                            <button onClick={() => startEditAccount(a)} className="text-[10px] font-bold text-blue-600 hover:underline">
-                              수정
-                            </button>
-                            <button onClick={() => deleteAccount(a.id)} className="text-[10px] font-bold text-red-500 hover:underline">
-                              삭제
-                            </button>
+                    <div className="space-y-2">
+                      {groupAccountsByEmail(platformAccounts).map((group) => (
+                        <div key={group.email || '__none__'} className={group.email ? 'border border-neutral-100 rounded-lg p-1.5' : ''}>
+                          {group.email && (
+                            <p className="text-[10px] font-black text-neutral-400 px-1 mb-1">✉️ {group.email}</p>
+                          )}
+                          <div className="space-y-1.5">
+                            {group.accounts.map((a) => (
+                              <div key={a.id} className="flex items-start justify-between gap-2 bg-neutral-50 rounded-lg px-2 py-1.5">
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-bold truncate">{a.account_name}</p>
+                                  {!group.email && a.admin_email && (
+                                    <p className="text-[10px] text-neutral-400 truncate">✉️ {a.admin_email}</p>
+                                  )}
+                                  {a.admin_phone && <p className="text-[10px] text-neutral-400 truncate">📞 {a.admin_phone}</p>}
+                                  {a.setting_note && <p className="text-[10px] text-neutral-400 truncate">{a.setting_note}</p>}
+                                </div>
+                                <div className="flex gap-1.5 shrink-0">
+                                  <button onClick={() => startEditAccount(a)} className="text-[10px] font-bold text-blue-600 hover:underline">
+                                    수정
+                                  </button>
+                                  <button onClick={() => deleteAccount(a.id)} className="text-[10px] font-bold text-red-500 hover:underline">
+                                    삭제
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       ))}
