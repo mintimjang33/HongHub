@@ -19,7 +19,26 @@ type Account = {
   platform: string;
   account_name: string;
   setting_note: string | null;
+  admin_email: string | null;
 };
+
+// 2026-09-17(2차) 추가 — 사용자 요청: "여기에 있는것도 이메일 단위로 묶어줘". 메인화면
+// "🔐 플랫폼 계정 관리"에서 이미 관리 이메일별로 묶어서 보여주고 있는데, 이 배포 대상
+// 체크박스 목록은 아직 낱개로 평평하게 나열돼있어서 계정이 많아지니 어디 소속인지 안
+// 보였다. 같은 그룹핑 로직을 여기도 적용한다.
+function groupAccountsByEmail(accounts: Account[]): { email: string; accounts: Account[] }[] {
+  const order: string[] = [];
+  const map = new Map<string, Account[]>();
+  for (const a of accounts) {
+    const key = a.admin_email || '';
+    if (!map.has(key)) {
+      map.set(key, []);
+      order.push(key);
+    }
+    map.get(key)!.push(a);
+  }
+  return order.map((email) => ({ email, accounts: map.get(email)! }));
+}
 
 const PLATFORM_LABELS: Record<string, string> = {
   youtube: '▶️ 유튜브',
@@ -139,25 +158,36 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
                 <div className="px-3 pb-3 pt-1 border-t border-neutral-50 space-y-3">
                   <div>
                     <p className="text-[10px] font-black text-neutral-400 mb-1.5">올릴 계정 선택</p>
-                    <div className="grid sm:grid-cols-2 gap-1.5">
-                      {accounts.map((a) => (
-                        <label
-                          key={a.id}
-                          className="flex items-start gap-1.5 bg-neutral-50 border border-neutral-100 rounded-lg px-2 py-1.5 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={draft.selected.has(a.id)}
-                            onChange={() => toggleAccount(u.id, a.id)}
-                            className="mt-0.5 w-3.5 h-3.5 shrink-0"
-                          />
-                          <span className="min-w-0">
-                            <span className="block text-[11px] font-bold truncate">
-                              {PLATFORM_LABELS[a.platform] || a.platform} · {a.account_name}
-                            </span>
-                            {a.setting_note && <span className="block text-[10px] text-neutral-400 truncate">{a.setting_note}</span>}
-                          </span>
-                        </label>
+                    <div className="space-y-2">
+                      {groupAccountsByEmail(accounts).map((group) => (
+                        <div key={group.email || '__none__'} className={group.email ? 'border border-neutral-200 rounded-lg p-1.5' : ''}>
+                          {group.email && (
+                            <p className="inline-block text-[10px] font-black text-neutral-700 bg-neutral-100 rounded px-1.5 py-0.5 mb-1.5">
+                              ✉️ {group.email}
+                            </p>
+                          )}
+                          <div className="grid sm:grid-cols-2 gap-1.5">
+                            {group.accounts.map((a) => (
+                              <label
+                                key={a.id}
+                                className="flex items-start gap-1.5 bg-neutral-50 border border-neutral-100 rounded-lg px-2 py-1.5 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={draft.selected.has(a.id)}
+                                  onChange={() => toggleAccount(u.id, a.id)}
+                                  className="mt-0.5 w-3.5 h-3.5 shrink-0"
+                                />
+                                <span className="min-w-0">
+                                  <span className="block text-[11px] font-bold truncate">
+                                    {PLATFORM_LABELS[a.platform] || a.platform} · {a.account_name}
+                                  </span>
+                                  {a.setting_note && <span className="block text-[10px] text-neutral-400 truncate">{a.setting_note}</span>}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
