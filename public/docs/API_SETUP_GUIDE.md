@@ -122,6 +122,67 @@ GET https://graph.threads.net/debug_token?input_token={토큰}&access_token={토
 
 ---
 
+## 유튜브 데이터 API (OAuth) — Client ID/Secret, Refresh Token, 채널 ID
+
+> 이 섹션은 실제로 홍허브에서 유튜브 계정 하나를 처음부터 끝까지 연동해본 기록이다. 중간에 겪은 삽질(잘못된 클라이언트로 토큰 발급, 브라우저 자동번역이 API 호출을 깨뜨림)까지 그대로 남긴다 — 다음에 또 겪지 않기 위해서다.
+
+### 전체 절차
+
+1. **Google Cloud Console → API 및 서비스 → 라이브러리**에서 "YouTube Data API v3" 사용 설정
+2. **Google 인증 플랫폼 → 대상**에서 게시 상태 "테스트 중" 확인 + **테스트 사용자**에 이 채널을 실제로 운영하는 구글 계정 이메일 등록 (안 하면 로그인 시도 시 차단됨)
+3. **클라이언트 → + 클라이언트 만들기** → 유형 "웹 애플리케이션" → **승인된 리디렉션 URI**에 `https://developers.google.com/oauthplayground` 추가 → 만들기 → 그 자리에서 뜨는 Client ID/Secret 즉시 복사(다시 못 봄)
+4. **OAuth Playground**(`developers.google.com/oauthplayground`)에서 Refresh Token 발급 → ⚙ 설정에서 "Use your own OAuth credentials" 체크 + 방금 만든 Client ID/Secret 입력 → 아래 "실전에서 겪은 문제" 참고
+5. **채널 ID**는 `GET https://www.googleapis.com/youtube/v3/channels?part=id&mine=true`를 방금 발급받은 access token으로 호출해서 `items[0].id` 값으로 확인
+
+### ⚠️ 기존 OAuth 클라이언트를 재사용하려 하면 막힐 수 있음
+
+한 프로젝트 안에 다른 앱(예: Supabase 로그인용으로 만든 클라이언트)이 이미 있어도, **클라이언트 보안 비밀번호(secret)는 클라이언트당 최대 2개까지만** 만들 수 있다. 이미 2개가 다 활성 상태고 어느 쪽이 실제로 다른 앱(Supabase 등)에 물려있는지 모르면, 함부로 삭제/교체하지 말 것 — 대신 **완전히 새로운 OAuth 클라이언트를 하나 더 만들면** 기존 앱을 전혀 안 건드리고 깨끗하게 분리된다(프로젝트당 클라이언트 개수 제한은 없음).
+
+### ⚠️ "Use your own OAuth credentials" 체크가 중간에 풀릴 수 있음 — 반드시 client_id로 확인
+
+OAuth Playground에서 이 체크를 해뒀다고 안심하면 안 된다. 실제로 이 세션에서 두 번째 "Authorize APIs" 시도 때 이 설정이 리셋되면서, 발급된 토큰이 **구글 공용 Playground 클라이언트(`client_id=407408718192.apps.googleusercontent.com`)**로 나온 적이 있다 — 이 토큰은 자기 앱(자기 Client ID/Secret)으로는 쓸 수 없다.
+
+**검증 방법**: Step 2 "Exchange authorization code for tokens"를 누르기 전, Request 패널에 찍히는 요청 본문의 `client_id=`가 **본인이 만든 클라이언트 ID로 시작하는지** 반드시 확인할 것. `407408718192...`가 보이면 잘못된 것이니 ⚙ 설정에서 자기 자격증명을 다시 입력하고 처음부터(Authorize APIs부터) 다시 진행해야 한다.
+
+### 인증 코드(authorization code)는 1회용, 재사용하면 `invalid_grant`
+
+Step 1에서 받은 code로 Step 2 "Exchange"를 한 번 성공시키면 그 code는 소진된다. 같은 code로 다시 누르거나, 딴짓하다 시간이 지난 code를 쓰면 `{"error": "invalid_grant"}` 400 에러가 난다 — 처음부터(Authorize APIs) 다시 받아야 한다.
+
+### 추천 스코프 (업로드 + 댓글 관리용)
+
+```
+https://www.googleapis.com/auth/youtube
+https://www.googleapis.com/auth/youtube.upload
+https://www.googleapis.com/auth/youtube.force-ssl   ← 댓글 답글/삭제/모더레이션에 필요
+```
+
+`youtubepartner`/`youtubepartner-channel-audit`는 방송사·음반사·MCN이 여러 채널의 저작권 클레임을 관리하는 별개 API용이다 — 일반 채널 운영(업로드, 댓글 관리, 수익화 포함)과 무관하니 체크하지 말 것.
+
+### 테스트 중(Testing) 상태면 Refresh Token이 7일마다 만료
+
+실제 응답에서 `"refresh_token_expires_in": 604799` (정확히 7일, 초 단위)를 확인했다. 앱을 "게시(Production)"로 전환 + 심사를 통과하기 전까지는, 이 자동화를 계속 쓰려면 **7일마다 OAuth Playground의 Authorize→Exchange 두 단계만 다시 해서** Refresh Token을 재발급받아야 한다(클라이언트를 다시 만들 필요는 없음).
+
+### 채널 ID — YouTube Studio "고급 설정"에 더 이상 안 보일 수 있음
+
+과거엔 YouTube Studio → 설정 → 채널 → 고급 설정 탭에 채널 ID가 표시됐는데, UI 개편으로 이 세션에서는 그 항목 자체가 없어진 걸 확인했다. **가장 확실한 방법은 API로 직접 조회**하는 것:
+
+```
+GET https://www.googleapis.com/youtube/v3/channels?part=id&mine=true
+Authorization: Bearer {access_token}
+```
+
+응답의 `items[0].id`가 채널 ID(`UC`로 시작).
+
+### OAuth Playground Step 3(API 요청 테스트)가 브라우저 번역 때문에 깨질 수 있음
+
+크롬 자동 번역이 켜져 있으면 "HTTP Method" 드롭다운의 "GET"이 "얻다"로 번역되어 실제 전송값이 깨지고 `{"error": "Disallowed Method '얻다'"}` 400 에러가 난다. Step 3의 드롭다운/버튼이 클릭해도 반응 없을 때는 번역 문제로 DOM이 꼬였을 가능성이 있다 — 이때는 Step 3를 쓰지 말고, 그냥 새 탭 주소창에 아래처럼 **access_token을 쿼리 파라미터로 붙여서 GET 요청을 직접 열면** 우회된다:
+
+```
+https://www.googleapis.com/youtube/v3/channels?part=id&mine=true&access_token={access_token}
+```
+
+---
+
 ## 예약/반복 실행(크론)
 
 별도 문서 참고: **[크론/예약작업 가이드](/docs/CRON_GUIDE.md)** — cron-job.org를 쓰는 이유, 실제 겪은 실수 2건(푸시 누락으로 404, 헤더 누락으로 401) 기록돼있음.
