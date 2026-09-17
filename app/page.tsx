@@ -36,14 +36,29 @@ const KNOWN_EMAILS = [
   'helpfulfood365@gmail.com',
 ];
 
+// 2026-09-17 수정 — 사용자 지적: "이 탭들에 링크만 있는데 수정해서 계정 채널 셋팅들을
+// 하게 해두자". 기존 6개 버튼(외부 사이트로 바로 이동)은 그대로 두고, platform 키를 붙여서
+// 아래 "🔐 플랫폼 계정 관리" 섹션(hub_social_accounts)에서 같은 목록을 그대로 재사용한다 —
+// 라벨을 두 군데서 따로 관리하면 어긋날 수 있어서 하나의 배열로 통일.
 const QUICK_LINKS = [
-  { label: '유튜브', icon: '▶️', url: 'https://studio.youtube.com' },
-  { label: '인스타그램', icon: '📸', url: 'https://www.instagram.com' },
-  { label: '쓰레드', icon: '🧵', url: 'https://www.threads.com' },
-  { label: '페이스북', icon: '📘', url: 'https://www.facebook.com' },
-  { label: '틱톡', icon: '🎵', url: 'https://www.tiktok.com/upload' },
-  { label: '네이버 블로그', icon: 'N', url: 'https://blog.naver.com' },
+  { label: '유튜브', icon: '▶️', url: 'https://studio.youtube.com', platform: 'youtube' },
+  { label: '인스타그램', icon: '📸', url: 'https://www.instagram.com', platform: 'instagram' },
+  { label: '쓰레드', icon: '🧵', url: 'https://www.threads.com', platform: 'threads' },
+  { label: '페이스북', icon: '📘', url: 'https://www.facebook.com', platform: 'facebook' },
+  { label: '틱톡', icon: '🎵', url: 'https://www.tiktok.com/upload', platform: 'tiktok' },
+  { label: '네이버 블로그', icon: 'N', url: 'https://blog.naver.com', platform: 'naver_blog' },
 ];
+
+// 위 QUICK_LINKS와 같은 순서/플랫폼 키를 쓰는 계정 레코드 — hub_social_accounts 테이블과
+// 1:1 대응(_migration_16_social_accounts.sql, app/api/social-accounts 참고).
+type SocialAccount = {
+  id: string;
+  platform: string;
+  account_name: string;
+  setting_note: string | null;
+  admin_email: string | null;
+  site_id: string | null;
+};
 
 const GUIDE_DOCS = [
   { label: '클론 진행 프로세스', desc: '사이트를 클론할 때 거치는 표준 절차', icon: '🧭', url: '/docs/CLONE_PROCESS.md' },
@@ -91,6 +106,15 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // 2026-09-17 신설 — 플랫폼 계정 관리 섹션 상태. addingPlatform은 지금 계정 추가/수정 폼이
+  // 열려있는 플랫폼 키(예: 'youtube') — null이면 아무 폼도 안 열려있음. editingAccountId가
+  // 있으면 수정 모드, 없으면 새 계정 추가 모드로 같은 폼을 재사용한다.
+  const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  const [addingPlatform, setAddingPlatform] = useState<string | null>(null);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [accountForm, setAccountForm] = useState({ account_name: '', setting_note: '', admin_email: '' });
+  const [savingAccount, setSavingAccount] = useState(false);
+
   function load() {
     fetch('/api/sites')
       .then((r) => r.json())
@@ -101,9 +125,63 @@ export default function Home() {
       .finally(() => setLoading(false));
   }
 
+  function loadAccounts() {
+    fetch('/api/social-accounts')
+      .then((r) => r.json())
+      .then((d) => setAccounts(d.accounts || []));
+  }
+
   useEffect(() => {
     load();
+    loadAccounts();
   }, []);
+
+  function startAddAccount(platform: string) {
+    setAddingPlatform(platform);
+    setEditingAccountId(null);
+    setAccountForm({ account_name: '', setting_note: '', admin_email: '' });
+  }
+
+  function startEditAccount(a: SocialAccount) {
+    setAddingPlatform(a.platform);
+    setEditingAccountId(a.id);
+    setAccountForm({ account_name: a.account_name, setting_note: a.setting_note || '', admin_email: a.admin_email || '' });
+  }
+
+  function cancelAccountForm() {
+    setAddingPlatform(null);
+    setEditingAccountId(null);
+  }
+
+  async function saveAccount(platform: string) {
+    if (!accountForm.account_name.trim()) return;
+    setSavingAccount(true);
+    try {
+      if (editingAccountId) {
+        await fetch(`/api/social-accounts/${editingAccountId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(accountForm),
+        });
+      } else {
+        await fetch('/api/social-accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ platform, ...accountForm }),
+        });
+      }
+      cancelAccountForm();
+      loadAccounts();
+    } finally {
+      setSavingAccount(false);
+    }
+  }
+
+  async function deleteAccount(id: string) {
+    if (!confirm('이 계정을 삭제할까요?')) return;
+    await fetch(`/api/social-accounts/${id}`, { method: 'DELETE' });
+    loadAccounts();
+  }
 
   function openAdd() {
     setEditingId(null);
@@ -278,6 +356,89 @@ export default function Home() {
               <span>{l.icon}</span> {l.label}
             </a>
           ))}
+        </div>
+
+        {/* 2026-09-17 신설 — 사용자 요청: "이 탭들에 링크만 있는데 수정해서 계정 채널
+            셋팅들을 하게 해두자". 위 버튼들은 그대로 외부 링크로 두고, 그 아래에 플랫폼별
+            계정(채널명/API·설정 메모)을 등록·관리하는 섹션을 별도로 추가한다. */}
+        <div className="mb-8">
+          <h2 className="text-xs font-black text-neutral-400 mb-3">🔐 플랫폼 계정 관리</h2>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {QUICK_LINKS.map((l) => {
+              const platformAccounts = accounts.filter((a) => a.platform === l.platform);
+              const isFormOpen = addingPlatform === l.platform;
+              return (
+                <div key={l.platform} className="bg-white border border-neutral-200 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-black flex items-center gap-1.5">
+                      <span>{l.icon}</span>
+                      {l.label}
+                    </span>
+                    {!isFormOpen && (
+                      <button onClick={() => startAddAccount(l.platform)} className="text-[11px] font-bold text-blue-600 hover:underline">
+                        + 계정 추가
+                      </button>
+                    )}
+                  </div>
+                  {platformAccounts.length === 0 && !isFormOpen && <p className="text-[11px] text-neutral-300">등록된 계정 없음</p>}
+                  {platformAccounts.length > 0 && (
+                    <div className="space-y-1.5">
+                      {platformAccounts.map((a) => (
+                        <div key={a.id} className="flex items-start justify-between gap-2 bg-neutral-50 rounded-lg px-2 py-1.5">
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-bold truncate">{a.account_name}</p>
+                            {a.setting_note && <p className="text-[10px] text-neutral-400 truncate">{a.setting_note}</p>}
+                          </div>
+                          <div className="flex gap-1.5 shrink-0">
+                            <button onClick={() => startEditAccount(a)} className="text-[10px] font-bold text-blue-600 hover:underline">
+                              수정
+                            </button>
+                            <button onClick={() => deleteAccount(a.id)} className="text-[10px] font-bold text-red-500 hover:underline">
+                              삭제
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {isFormOpen && (
+                    <div className="mt-2 space-y-1.5 border-t border-neutral-100 pt-2">
+                      <input
+                        value={accountForm.account_name}
+                        onChange={(e) => setAccountForm((f) => ({ ...f, account_name: e.target.value }))}
+                        placeholder="계정/채널명"
+                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                      />
+                      <input
+                        value={accountForm.setting_note}
+                        onChange={(e) => setAccountForm((f) => ({ ...f, setting_note: e.target.value }))}
+                        placeholder="API 연동 상태·설정 문구 등 메모 (선택)"
+                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                      />
+                      <input
+                        value={accountForm.admin_email}
+                        onChange={(e) => setAccountForm((f) => ({ ...f, admin_email: e.target.value }))}
+                        placeholder="관리 이메일 (선택)"
+                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                      />
+                      <div className="flex justify-end gap-1.5">
+                        <button onClick={cancelAccountForm} className="text-[11px] font-bold text-neutral-400 hover:text-black px-2">
+                          취소
+                        </button>
+                        <button
+                          onClick={() => saveAccount(l.platform)}
+                          disabled={savingAccount || !accountForm.account_name.trim()}
+                          className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-black text-white disabled:opacity-40"
+                        >
+                          {savingAccount ? '저장 중...' : '저장'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="mb-8">
