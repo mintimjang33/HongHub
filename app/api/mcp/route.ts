@@ -1358,6 +1358,7 @@ ${PLATFORM_GUIDE[target_platform]}
           account_name: z.string().describe('계정/채널명(예: "경제학 똑똑", "@mintimjang33")'),
           setting_note: z.string().optional().describe('그 외 자유 메모(선택) — 실제 API 자격증명은 credentials 필드에 넣을 것'),
           admin_email: z.string().optional().describe('이 계정을 관리하는 구글 계정(선택) — 같은 이메일로 채널 여러 개 등록 가능(예: 유튜브 브랜드 계정)'),
+          admin_phone: z.string().optional().describe('이 채널 담당자 연락처(선택)'),
           site_id: z.string().optional().describe('특정 파이프라인 전용 계정이면 그 사이트 id(선택, list_sites로 확인)'),
           // 2026-09-17 신설 — 사용자 지적: "그걸 셋팅하려면 뭐가 필요한지를 만들어야 정보를
           // 입력해두지". 플랫폼마다 실제 API 연동 자격증명 종류가 다르다(/docs/API_SETUP_GUIDE.md
@@ -1380,6 +1381,7 @@ ${PLATFORM_GUIDE[target_platform]}
             account_name: args.account_name,
             setting_note: args.setting_note || null,
             admin_email: args.admin_email || null,
+            admin_phone: args.admin_phone || null,
             site_id: args.site_id || null,
             credentials: args.credentials || null,
           })
@@ -1400,6 +1402,7 @@ ${PLATFORM_GUIDE[target_platform]}
           account_name: z.string().optional(),
           setting_note: z.string().optional(),
           admin_email: z.string().optional(),
+          admin_phone: z.string().optional(),
           site_id: z.string().optional(),
           credentials: z.record(z.string(), z.string()).optional().describe('통째로 교체됨 — 부분 수정이면 기존 값을 읽어 합쳐서 넘길 것'),
         }),
