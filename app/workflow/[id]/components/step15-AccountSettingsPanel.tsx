@@ -94,6 +94,10 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [savingAccounts, setSavingAccounts] = useState(false);
+  // 2026-09-18(3차) 추가 — 사용자 요청: "평소에 선택된것만 표시해주고 접어놔줘". 채널이 늘어날수록
+  // 위 그리드가 한 화면을 가득 채워서, 이미 다 골라둔 뒤에는 매번 열어볼 필요가 없다. 기본은
+  // 접어두고 선택된 계정만 요약으로 보여주며, 바꾸고 싶을 때만 펼쳐서 전체 목록을 연다.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [draftByUnit, setDraftByUnit] = useState<
@@ -209,14 +213,50 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
   return (
     <div className="border-t border-black/5 pt-3 space-y-4">
       <div>
-        <p className="text-xs font-black text-neutral-500 mb-1">🎯 업로드 채널 선택 (파이프라인 전체 공유)</p>
-        <p className="text-[10px] text-neutral-400 mb-2">
-          여기서 고른 계정들에 이 워크플로우({site.name})에서 만들어지는 모든 콘텐츠가 업로드됩니다. 콘텐츠마다 다시 고를 필요 없어요.
-        </p>
-        {accountsLoading ? (
-          <p className="text-[11px] text-neutral-300">계정 목록 불러오는 중...</p>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <p className="text-xs font-black text-neutral-500">🎯 업로드 채널 선택 (파이프라인 전체 공유)</p>
+          <button
+            onClick={() => setPickerOpen((cur) => !cur)}
+            className="shrink-0 text-[10px] font-bold text-blue-600 hover:underline"
+          >
+            {pickerOpen ? '접기 ▲' : '채널 변경 ▼'}
+          </button>
+        </div>
+        {!pickerOpen ? (
+          <div className="flex flex-wrap gap-1.5">
+            {accountsLoading ? (
+              <p className="text-[11px] text-neutral-300">계정 목록 불러오는 중...</p>
+            ) : selectedAccountIds.size === 0 ? (
+              <p className="text-[11px] text-amber-600">선택된 업로드 채널이 없어요 — &quot;채널 변경&quot;을 눌러 골라주세요.</p>
+            ) : (
+              connectedAccounts
+                .filter((a) => selectedAccountIds.has(a.id))
+                .map((a) => {
+                  const avatarUrl = a.credentials?._avatar_url;
+                  return (
+                    <span
+                      key={a.id}
+                      className="flex items-center gap-1 text-[11px] font-bold bg-emerald-50 text-emerald-700 rounded-full px-2 py-1"
+                    >
+                      {avatarUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={avatarUrl} alt="" className="w-4 h-4 rounded-full" />
+                      )}
+                      {PLATFORM_LABELS[a.platform] || a.platform} · {a.account_name}
+                    </span>
+                  );
+                })
+            )}
+          </div>
         ) : (
-          <div className="space-y-2">
+          <>
+            <p className="text-[10px] text-neutral-400 mb-2">
+              여기서 고른 계정들에 이 워크플로우({site.name})에서 만들어지는 모든 콘텐츠가 업로드됩니다. 콘텐츠마다 다시 고를 필요 없어요.
+            </p>
+            {accountsLoading ? (
+              <p className="text-[11px] text-neutral-300">계정 목록 불러오는 중...</p>
+            ) : (
+              <div className="space-y-2">
             {sortGroupsByProgress(groupAccountsByEmail(connectedAccounts)).map((group) => (
               <div key={group.email || '__none__'} className={group.email ? 'border border-neutral-200 rounded-lg p-1.5' : ''}>
                 {group.email && (
@@ -276,7 +316,9 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
                 </div>
               </div>
             ))}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
