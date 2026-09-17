@@ -711,6 +711,27 @@ export default function Home() {
     loadAccounts();
   }
 
+  // 2026-09-17(11차) 추가 — 사용자 요청: "업데이트 버튼을 하나 만들어줘~ 업데이트 버튼
+  // 클릭하면 채널이름과 핸들 로고 가져와서 저장해". 유튜브에서 채널명/핸들을 바꿔도
+  // account_name(등록 당시 직접 입력한 이름표)은 자동으로 안 바뀌는 걸 겪어서(Down_Tools→
+  // 반전경제학 개명 후 목록엔 여전히 @Down_Tools로 남아있었음), 저장된 자격증명으로 실제
+  // 채널 정보를 다시 조회해 동기화하는 버튼.
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  async function syncFromYoutube(id: string) {
+    setSyncingId(id);
+    try {
+      const res = await fetch(`/api/social-accounts/${id}/sync`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || '업데이트 실패');
+        return;
+      }
+      loadAccounts();
+    } finally {
+      setSyncingId(null);
+    }
+  }
+
   function openAdd() {
     setEditingId(null);
     setForm(EMPTY_FORM);
@@ -931,23 +952,41 @@ export default function Home() {
                           <div className="space-y-1.5">
                             {group.accounts.map((a) => {
                               const badge = getYoutubeConnectionBadge(a);
+                              const avatarUrl = a.credentials?._avatar_url;
+                              const canSync = a.platform === 'youtube' && !!a.credentials?.refresh_token;
                               return (
                               <div key={a.id}>
                                 <div className="flex items-start justify-between gap-2 bg-neutral-50 rounded-lg px-2 py-1.5">
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <p className="text-[11px] font-bold truncate">{a.account_name}</p>
-                                      {badge && (
-                                        <span className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full ${badge.className}`}>{badge.label}</span>
-                                      )}
-                                    </div>
-                                    {!group.email && a.admin_email && (
-                                      <p className="text-[10px] text-neutral-400 truncate">✉️ {a.admin_email}</p>
+                                  <div className="flex items-start gap-2 min-w-0">
+                                    {avatarUrl && (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={avatarUrl} alt="" className="w-6 h-6 rounded-full shrink-0 mt-0.5" />
                                     )}
-                                    {a.admin_phone && <p className="text-[10px] text-neutral-400 truncate">📞 {a.admin_phone}</p>}
-                                    {a.setting_note && <p className="text-[10px] text-neutral-400 truncate">{a.setting_note}</p>}
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <p className="text-[11px] font-bold truncate">{a.account_name}</p>
+                                        {badge && (
+                                          <span className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full ${badge.className}`}>{badge.label}</span>
+                                        )}
+                                      </div>
+                                      {!group.email && a.admin_email && (
+                                        <p className="text-[10px] text-neutral-400 truncate">✉️ {a.admin_email}</p>
+                                      )}
+                                      {a.admin_phone && <p className="text-[10px] text-neutral-400 truncate">📞 {a.admin_phone}</p>}
+                                      {a.setting_note && <p className="text-[10px] text-neutral-400 truncate">{a.setting_note}</p>}
+                                    </div>
                                   </div>
                                   <div className="flex gap-1.5 shrink-0">
+                                    {canSync && (
+                                      <button
+                                        onClick={() => syncFromYoutube(a.id)}
+                                        disabled={syncingId === a.id}
+                                        title="유튜브에서 채널명·핸들·프로필 사진 다시 가져오기"
+                                        className="text-[10px] font-bold text-neutral-500 hover:underline disabled:opacity-40"
+                                      >
+                                        {syncingId === a.id ? '업데이트 중...' : '🔄 업데이트'}
+                                      </button>
+                                    )}
                                     <button onClick={() => startEditAccount(a)} className="text-[10px] font-bold text-blue-600 hover:underline">
                                       수정
                                     </button>
