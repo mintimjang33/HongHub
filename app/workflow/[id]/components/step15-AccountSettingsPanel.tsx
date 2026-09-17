@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Site, DeployTarget } from '../types';
+import type { ContentUnit, Site, DeployTarget } from '../types';
+import { normalizeLabeledItems } from '../utils';
 
 // 16번(계정/콘텐츠 설정) 단계 전용.
 //
@@ -88,6 +89,20 @@ const VISIBILITY_OPTIONS: { id: 'public' | 'unlisted' | 'private'; label: string
   { id: 'private', label: '비공개' },
 ];
 
+// 2026-09-18(2차) 추가 — 사용자 지적: "업로드할때 필요한 정보가 이게 다야???". YouTube Data
+// API videos.insert가 실제로 요구하는 snippet.categoryId 값 — 흔히 쓰는 것만 추린 목록(전체
+// 카테고리는 훨씬 많지만, 이 파이프라인들이 실제로 쓸 만한 것만).
+const CATEGORY_OPTIONS: { id: string; label: string }[] = [
+  { id: '27', label: '교육' },
+  { id: '25', label: '뉴스/정치' },
+  { id: '22', label: '인물/블로그' },
+  { id: '24', label: '엔터테인먼트' },
+  { id: '23', label: '코미디' },
+  { id: '28', label: '과학/기술' },
+  { id: '26', label: '노하우/스타일' },
+  { id: '1', label: '영화/애니메이션' },
+];
+
 export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefresh: () => void }) {
   const units = site.script_draft?.units || [];
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -101,7 +116,19 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
   const [openUnitId, setOpenUnitId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [draftByUnit, setDraftByUnit] = useState<
-    Record<string, { title: string; body: string; tags: string; visibility: 'public' | 'unlisted' | 'private' }>
+    Record<
+      string,
+      {
+        title: string;
+        body: string;
+        tags: string;
+        visibility: 'public' | 'unlisted' | 'private';
+        categoryId: string;
+        madeForKids: boolean | null;
+        timeline: string;
+        containsAltered: boolean | null;
+      }
+    >
   >({});
 
   function reloadAccounts() {
@@ -160,6 +187,10 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
           body: first?.body || '',
           tags: (first?.tags || []).join(', '),
           visibility: first?.visibility || 'public',
+          categoryId: first?.categoryId || '',
+          madeForKids: first?.madeForKids ?? null,
+          timeline: first?.timeline || '',
+          containsAltered: first?.containsAltered ?? null,
         },
       };
     });
@@ -178,6 +209,10 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
       body: draft.body,
       tags,
       visibility: draft.visibility,
+      categoryId: draft.categoryId || undefined,
+      madeForKids: draft.madeForKids ?? undefined,
+      timeline: draft.timeline || undefined,
+      containsAltered: draft.containsAltered ?? undefined,
     }));
     setSaving(true);
     try {
@@ -350,6 +385,32 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
                     {selectedAccountIds.size === 0 && (
                       <p className="text-[10px] text-amber-600">위에서 업로드 채널을 먼저 선택해주세요 — 지금 저장하면 어느 계정에도 등록되지 않습니다.</p>
                     )}
+                    <FinalOutputCheck unit={u} />
+                    {u.sources && u.sources.length > 0 && (
+                      <div className="border border-neutral-200 rounded-lg p-2 bg-neutral-50">
+                        <p className="text-[10px] font-black text-neutral-500 mb-1">📚 자료 출처 (7번 자료조사에서 등록됨)</p>
+                        <ul className="text-[10px] text-neutral-500 list-disc list-inside space-y-0.5 mb-1.5">
+                          {u.sources.map((s, i) => (
+                            <li key={i} className="break-words">{s}</li>
+                          ))}
+                        </ul>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDraftByUnit((cur) => ({
+                              ...cur,
+                              [u.id]: {
+                                ...cur[u.id],
+                                body: `${cur[u.id].body}${cur[u.id].body ? '\n\n' : ''}📚 자료 출처\n${u.sources!.map((s) => `· ${s}`).join('\n')}`,
+                              },
+                            }))
+                          }
+                          className="text-[10px] font-bold text-blue-600 hover:underline"
+                        >
+                          ↓ 설명에 추가
+                        </button>
+                      </div>
+                    )}
                     <input
                       value={draft.title}
                       onChange={(e) => setDraftByUnit((cur) => ({ ...cur, [u.id]: { ...cur[u.id], title: e.target.value } }))}
@@ -369,6 +430,13 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
                       placeholder="태그 (쉼표로 구분, 예: 경제,반전,코카콜라)"
                       className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
                     />
+                    <textarea
+                      value={draft.timeline}
+                      onChange={(e) => setDraftByUnit((cur) => ({ ...cur, [u.id]: { ...cur[u.id], timeline: e.target.value } }))}
+                      rows={4}
+                      placeholder={'타임라인/챕터 (실제 벤치마크 채널 형식 그대로 — 한 줄에 하나씩)\n00:00 챕터 제목\n01:15 챕터 제목'}
+                      className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
+                    />
                     <div>
                       <p className="text-[10px] font-black text-neutral-400 mb-1">공개 범위</p>
                       <div className="flex gap-1.5">
@@ -386,6 +454,73 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
                         ))}
                       </div>
                     </div>
+                    <div>
+                      <p className="text-[10px] font-black text-neutral-400 mb-1">카테고리 (유튜브 업로드 필수 항목)</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {CATEGORY_OPTIONS.map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setDraftByUnit((cur) => ({ ...cur, [u.id]: { ...cur[u.id], categoryId: c.id } }))}
+                            className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                              draft.categoryId === c.id ? 'bg-black text-white border-black' : 'bg-white text-neutral-500 border-neutral-200'
+                            }`}
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-neutral-400 mb-1">
+                        아동용 콘텐츠 여부 (필수 — 유튜브 업로드 화면에서 답변을 건너뛸 수 없음)
+                      </p>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setDraftByUnit((cur) => ({ ...cur, [u.id]: { ...cur[u.id], madeForKids: false } }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                            draft.madeForKids === false ? 'bg-black text-white border-black' : 'bg-white text-neutral-500 border-neutral-200'
+                          }`}
+                        >
+                          아니요, 아동용 아님
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDraftByUnit((cur) => ({ ...cur, [u.id]: { ...cur[u.id], madeForKids: true } }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                            draft.madeForKids === true ? 'bg-black text-white border-black' : 'bg-white text-neutral-500 border-neutral-200'
+                          }`}
+                        >
+                          예, 아동용
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-black text-neutral-400 mb-1">
+                        AI로 변경·생성된 콘텐츠 고지 (유튜브 스튜디오 업로드 화면의 실제 체크박스 — 이 파이프라인 영상은 전부 AI로 만들어지므로 사실상 항상 &quot;예&quot;)
+                      </p>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setDraftByUnit((cur) => ({ ...cur, [u.id]: { ...cur[u.id], containsAltered: true } }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                            draft.containsAltered === true ? 'bg-black text-white border-black' : 'bg-white text-neutral-500 border-neutral-200'
+                          }`}
+                        >
+                          예, AI로 생성/변경됨
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDraftByUnit((cur) => ({ ...cur, [u.id]: { ...cur[u.id], containsAltered: false } }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${
+                            draft.containsAltered === false ? 'bg-black text-white border-black' : 'bg-white text-neutral-500 border-neutral-200'
+                          }`}
+                        >
+                          아니요
+                        </button>
+                      </div>
+                    </div>
                     <div className="flex justify-end">
                       <button
                         onClick={() => saveUnit(u.id)}
@@ -401,6 +536,38 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
             );
           })}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 2026-09-18(2차) 추가 — 이 등록 화면에서 제목/설명 등만 적을 수 있고, 정작 실제로 업로드될
+// "무엇"(최종 영상 파일·최종 썸네일)이 정해져 있는지는 전혀 보여주지 않았다. 14번(renderFiles)·
+// 15번(thumbnailFiles) 각각에서 selected:true로 표시해둔 항목을 그대로 읽어와 여기서 확인만
+// 시켜준다(수정은 각 단계 화면에서) — 아직 최종 선택이 안 돼 있으면 경고를 띄운다.
+function FinalOutputCheck({ unit }: { unit: ContentUnit }) {
+  const renderItems = normalizeLabeledItems(unit.renderFiles);
+  const thumbItems = normalizeLabeledItems(unit.thumbnailFiles);
+  const finalRender = renderItems.find((r) => r.selected) || (renderItems.length === 1 ? renderItems[0] : undefined);
+  const finalThumb = thumbItems.find((t) => t.selected) || (thumbItems.length === 1 ? thumbItems[0] : undefined);
+
+  return (
+    <div className="border border-neutral-200 rounded-lg p-2 bg-neutral-50 flex items-center gap-3">
+      {finalThumb ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={finalThumb.url} alt="" className="w-16 aspect-video object-cover rounded shrink-0" />
+      ) : (
+        <div className="w-16 aspect-video bg-neutral-200 rounded shrink-0 flex items-center justify-center text-[9px] text-neutral-400">
+          썸네일 없음
+        </div>
+      )}
+      <div className="min-w-0 text-[10px]">
+        <p className={finalRender ? 'text-emerald-600 font-bold' : 'text-amber-600 font-bold'}>
+          {finalRender ? '✅ 최종 영상 파일 준비됨' : '⚠️ 14번(렌더링)에서 최종 영상 파일이 아직 없어요'}
+        </p>
+        <p className={finalThumb ? 'text-emerald-600 font-bold' : 'text-amber-600 font-bold'}>
+          {finalThumb ? '✅ 최종 썸네일 준비됨' : '⚠️ 15번(썸네일)에서 최종 이미지가 아직 없어요'}
+        </p>
       </div>
     </div>
   );
