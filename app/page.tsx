@@ -57,6 +57,7 @@ type SocialAccount = {
   account_name: string;
   setting_note: string | null;
   admin_email: string | null;
+  admin_phone: string | null;
   site_id: string | null;
   credentials: Record<string, string> | null;
 };
@@ -159,10 +160,11 @@ export default function Home() {
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [addingPlatform, setAddingPlatform] = useState<string | null>(null);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
-  const [accountForm, setAccountForm] = useState<{ account_name: string; setting_note: string; admin_email: string; credentials: Record<string, string> }>({
+  const [accountForm, setAccountForm] = useState<{ account_name: string; setting_note: string; admin_email: string; admin_phone: string; credentials: Record<string, string> }>({
     account_name: '',
     setting_note: '',
     admin_email: '',
+    admin_phone: '',
     credentials: {},
   });
   const [savingAccount, setSavingAccount] = useState(false);
@@ -205,7 +207,7 @@ export default function Home() {
   function startAddAccount(platform: string) {
     setAddingPlatform(platform);
     setEditingAccountId(null);
-    setAccountForm({ account_name: '', setting_note: '', admin_email: '', credentials: {} });
+    setAccountForm({ account_name: '', setting_note: '', admin_email: '', admin_phone: '', credentials: {} });
   }
 
   function startEditAccount(a: SocialAccount) {
@@ -215,6 +217,7 @@ export default function Home() {
       account_name: a.account_name,
       setting_note: a.setting_note || '',
       admin_email: a.admin_email || '',
+      admin_phone: a.admin_phone || '',
       credentials: a.credentials || {},
     });
   }
@@ -462,6 +465,8 @@ export default function Home() {
                         <div key={a.id} className="flex items-start justify-between gap-2 bg-neutral-50 rounded-lg px-2 py-1.5">
                           <div className="min-w-0">
                             <p className="text-[11px] font-bold truncate">{a.account_name}</p>
+                            {a.admin_email && <p className="text-[10px] text-neutral-400 truncate">✉️ {a.admin_email}</p>}
+                            {a.admin_phone && <p className="text-[10px] text-neutral-400 truncate">📞 {a.admin_phone}</p>}
                             {a.setting_note && <p className="text-[10px] text-neutral-400 truncate">{a.setting_note}</p>}
                           </div>
                           <div className="flex gap-1.5 shrink-0">
@@ -479,15 +484,21 @@ export default function Home() {
                   {isFormOpen && (
                     <div className="mt-2 space-y-1.5 border-t border-neutral-100 pt-2">
                       <input
-                        value={accountForm.account_name}
-                        onChange={(e) => setAccountForm((f) => ({ ...f, account_name: e.target.value }))}
-                        placeholder="계정/채널명 (같은 관리 이메일 아래 채널을 여러 개 등록해도 됩니다)"
+                        value={accountForm.admin_email}
+                        onChange={(e) => setAccountForm((f) => ({ ...f, admin_email: e.target.value }))}
+                        placeholder="관리 이메일 (선택 — 같은 이메일로 채널을 여러 개 등록할 수 있습니다)"
                         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
                       />
                       <input
-                        value={accountForm.admin_email}
-                        onChange={(e) => setAccountForm((f) => ({ ...f, admin_email: e.target.value }))}
-                        placeholder="관리 이메일 (선택)"
+                        value={accountForm.account_name}
+                        onChange={(e) => setAccountForm((f) => ({ ...f, account_name: e.target.value }))}
+                        placeholder="계정/채널명 (채널 하나당 여기서 한 건씩 등록)"
+                        className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
+                      />
+                      <input
+                        value={accountForm.admin_phone}
+                        onChange={(e) => setAccountForm((f) => ({ ...f, admin_phone: e.target.value }))}
+                        placeholder="관리 전화번호 (선택 — 이 채널 담당자 연락처)"
                         className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]"
                       />
                       {/* 2026-09-17 신설 — 사용자 지적: "그걸 셋팅하려면 뭐가 필요한지를 만들어야
