@@ -104,7 +104,7 @@ const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; help: stri
     {
       key: 'client_id',
       label: 'OAuth Client ID',
-      help: 'Google Cloud Console → 좌측 "클라이언트" → "+ 클라이언트 만들기" → 유형 "웹 애플리케이션" → "승인된 리디렉션 URI"에 https://developers.google.com/oauthplayground 추가 → 만들기. 뜨는 즉시 복사(나중에 다시 못 봅니다). ⚠️ 이 프로젝트에 다른 앱용 클라이언트가 이미 있어도 재사용하지 말고 새로 만들 것 — 그 클라이언트를 건드리면 다른 앱 로그인이 깨질 수 있고, secret은 클라이언트당 최대 2개까지만 만들 수 있어 막힐 수도 있음',
+      help: '⚠️ 0단계(빠뜨리기 쉬움, 꼭 먼저 할 것): "API 및 서비스 → 라이브러리"에서 "YouTube Data API v3" 검색 → 사용 설정(Enable). 이거 안 하면 나중에 채널 확인·업로드가 전부 403 에러(SERVICE_DISABLED)로 실패합니다. 그다음: Google Cloud Console → 좌측 "클라이언트" → "+ 클라이언트 만들기" → 유형 "웹 애플리케이션" → "승인된 리디렉션 URI"에 https://developers.google.com/oauthplayground 추가 → 만들기. 뜨는 즉시 복사(나중에 다시 못 봅니다). ⚠️ 이 프로젝트에 다른 앱용 클라이언트가 이미 있어도 재사용하지 말고 새로 만들 것 — 그 클라이언트를 건드리면 다른 앱 로그인이 깨질 수 있고, secret은 클라이언트당 최대 2개까지만 만들 수 있어 막힐 수도 있음',
       link: 'https://console.cloud.google.com/auth/clients',
     },
     {
