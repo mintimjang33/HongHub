@@ -20,6 +20,7 @@ type Account = {
   account_name: string;
   setting_note: string | null;
   admin_email: string | null;
+  credentials: Record<string, string> | null;
 };
 
 // 2026-09-17(2차) 추가 — 사용자 요청: "여기에 있는것도 이메일 단위로 묶어줘". 메인화면
@@ -120,11 +121,17 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
     );
   }
 
-  if (!accountsLoading && accounts.length === 0) {
+  // 2026-09-17(3차) 추가 — 사용자 지적: "이건 연결도 안된게 왜 15단계 리스트에 있는거야??".
+  // 자격증명을 하나도 안 채운 자리표시자 계정(credentials: {})까지 배포 대상으로 체크할 수
+  // 있게 보여줬더니, 실제로 발행이 안 될 계정을 고를 수 있어서 헷갈렸다. 자격증명이 하나라도
+  // 채워진 계정만 선택 목록에 남긴다.
+  const connectedAccounts = accounts.filter((a) => a.credentials && Object.keys(a.credentials).length > 0);
+
+  if (!accountsLoading && connectedAccounts.length === 0) {
     return (
       <div className="border-t border-black/5 pt-3">
         <p className="text-xs text-neutral-300">
-          아직 등록된 플랫폼 계정이 없어요 — HongHub 메인화면의 &quot;🔐 플랫폼 계정 관리&quot; 섹션에서 계정을 먼저 등록해주세요.
+          아직 연결 완료된 플랫폼 계정이 없어요 — HongHub 메인화면의 &quot;🔐 플랫폼 계정 관리&quot; 섹션에서 계정을 먼저 등록·연결해주세요.
         </p>
       </div>
     );
@@ -159,7 +166,7 @@ export function AccountSettingsPanel({ site, onRefresh }: { site: Site; onRefres
                   <div>
                     <p className="text-[10px] font-black text-neutral-400 mb-1.5">올릴 계정 선택</p>
                     <div className="space-y-2">
-                      {groupAccountsByEmail(accounts).map((group) => (
+                      {groupAccountsByEmail(connectedAccounts).map((group) => (
                         <div key={group.email || '__none__'} className={group.email ? 'border border-neutral-200 rounded-lg p-1.5' : ''}>
                           {group.email && (
                             <p className="inline-block text-[10px] font-black text-neutral-700 bg-neutral-100 rounded px-1.5 py-0.5 mb-1.5">
