@@ -149,6 +149,57 @@ const baseHandler = createMcpHandler(
       }
     );
 
+    // 2026-09-17 신설 — 사용자 지적: "15단계 설명서등록이 안된다고? ... db로 직접 수정했나?".
+    // 워크플로우 페이지 StepDocSection(app/workflow/[id]/components/shared.tsx)의 "+ 설명서
+    // 등록" 기능이 analysis_result.stepDocs[단계번호]를 PATCH /api/sites/[id]로 저장하는데,
+    // 이건 로그인 쿠키가 있어야 하는 일반 웹 API라 MCP(로그인 세션 없음)로는 못 건드렸다.
+    // [[feedback_add_mcp_with_feature]] 원칙대로 새 기능엔 항상 MCP 짝을 만들어야 하는데
+    // 이 기능만 빠져있었던 것 — 이제 채워넣는다. 클라이언트가 하듯 기존 stepDocs를 먼저 읽어와
+    // 병합한 뒤 analysis_result 전체를 다시 쓴다(PATCH 라우트가 analysis_result를 부분 병합이
+    // 아니라 통째로 교체하기 때문).
+    server.registerTool(
+      'save_step_doc',
+      {
+        description:
+          '워크플로우 페이지의 특정 단계에 등록되는 "설명서"(analysis_result.stepDocs[단계번호])를 저장하거나 삭제한다. FlowChart의 각 단계 카드 안 StepDocSection에 그대로 표시됨 — 웹 UI의 "+ 설명서 등록" 버튼과 동일한 동작.',
+        inputSchema: z.object({
+          site_id: z.string().describe('사이트(파이프라인)의 hub_sites id (list_sites로 확인)'),
+          step: z.union([z.string(), z.number()]).describe('설명서를 등록/삭제할 단계 번호(그 파이프라인 workflow_content의 번호, 예: 15)'),
+          content: z.string().optional().describe('설명서 본문(마크다운 가능). delete:true가 아니면 필수.'),
+          delete: z.boolean().optional().describe('true면 해당 단계의 설명서를 삭제한다(content는 무시)'),
+        }),
+      },
+      async ({ site_id, step, content, delete: doDelete }) => {
+        const supabase = getSupabaseServerClient();
+        const { data: existing, error: fetchError } = await supabase
+          .from('hub_sites')
+          .select('analysis_result')
+          .eq('id', site_id)
+          .maybeSingle();
+        if (fetchError) return { content: [{ type: 'text', text: `에러: ${fetchError.message}` }] };
+        if (!existing) return { content: [{ type: 'text', text: '해당 site_id를 찾을 수 없습니다.' }] };
+
+        const stepKey = String(step);
+        const stepDocs: Record<string, string> = { ...(existing.analysis_result?.stepDocs || {}) };
+        if (doDelete) {
+          delete stepDocs[stepKey];
+        } else {
+          if (!content) return { content: [{ type: 'text', text: 'content가 필요합니다(삭제하려면 delete:true를 넘길 것).' }] };
+          stepDocs[stepKey] = content;
+        }
+        const nextAnalysisResult = { ...(existing.analysis_result || {}), stepDocs };
+
+        const { data, error } = await supabase
+          .from('hub_sites')
+          .update({ analysis_result: nextAnalysisResult, updated_at: new Date().toISOString() })
+          .eq('id', site_id)
+          .select('id, analysis_result')
+          .single();
+        if (error) return { content: [{ type: 'text', text: `에러: ${error.message}` }] };
+        return { content: [{ type: 'text', text: JSON.stringify({ id: data.id, stepDocs: data.analysis_result?.stepDocs }, null, 2) }] };
+      }
+    );
+
     server.registerTool(
       'update_script_draft',
       {
