@@ -746,9 +746,11 @@ export default function Home() {
                   {platformAccounts.length > 0 && (
                     <div className="space-y-2">
                       {groupAccountsByEmail(platformAccounts).map((group) => (
-                        <div key={group.email || '__none__'} className={group.email ? 'border border-neutral-100 rounded-lg p-1.5' : ''}>
+                        <div key={group.email || '__none__'} className={group.email ? 'border border-neutral-200 rounded-lg p-1.5' : ''}>
                           {group.email && (
-                            <p className="text-[10px] font-black text-neutral-400 px-1 mb-1">✉️ {group.email}</p>
+                            <p className="inline-block text-[11px] font-black text-neutral-700 bg-neutral-100 rounded px-1.5 py-0.5 mb-1.5">
+                              ✉️ {group.email}
+                            </p>
                           )}
                           <div className="space-y-1.5">
                             {group.accounts.map((a) => (
