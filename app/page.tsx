@@ -453,9 +453,19 @@ export default function Home() {
                       {l.label}
                     </span>
                     {!isFormOpen && (
-                      <button onClick={() => startAddAccount(l.platform)} className="text-[11px] font-bold text-blue-600 hover:underline">
-                        + 계정 추가
-                      </button>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <a
+                          href={l.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] font-bold text-neutral-400 hover:text-black hover:underline"
+                        >
+                          바로가기 ↗
+                        </a>
+                        <button onClick={() => startAddAccount(l.platform)} className="text-[11px] font-bold text-blue-600 hover:underline">
+                          + 계정 추가
+                        </button>
+                      </span>
                     )}
                   </div>
                   {platformAccounts.length === 0 && !isFormOpen && <p className="text-[11px] text-neutral-300">등록된 계정 없음</p>}
