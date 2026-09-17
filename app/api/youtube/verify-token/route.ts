@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: tokenData?.error_description || tokenData?.error || '토큰 갱신 실패 — 값을 다시 확인해주세요.' }, { status: 400 });
   }
 
-  const chRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true', {
+  const chRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true&maxResults=50', {
     headers: { Authorization: `Bearer ${tokenData.access_token}` },
   });
   const chData = await chRes.json().catch(() => null);
@@ -35,6 +35,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: chData?.error?.message || '이 토큰에 연결된 채널을 찾을 수 없습니다.' }, { status: 400 });
   }
 
-  const channel = chData.items[0];
-  return NextResponse.json({ channelId: channel.id, channelTitle: channel.snippet?.title || null });
+  // 2026-09-17(2차) 수정 — mine=true가 "활성 채널" 하나만 주는 게 아니라, 이 구글 계정이
+  // 관리하는 채널 전부를 배열로 줄 수 있다(브랜드 계정 포함). items[0]만 보고 판단했더니
+  // 실제로는 목록에 여러 채널이 있는데 항상 첫 번째(원래 계정 채널)만 보고 "다른 채널로
+  // 인증됐다"고 잘못 판단한 사례가 있었다 — 전체 목록을 돌려주고 클라이언트에서 원하는
+  // channel_id가 그 안에 있는지 찾게 한다.
+  const channels = chData.items.map((c: { id: string; snippet?: { title?: string } }) => ({
+    id: c.id,
+    title: c.snippet?.title || null,
+  }));
+  return NextResponse.json({ channels });
 }
