@@ -81,6 +81,17 @@ function groupAccountsByEmail(accounts: SocialAccount[]): { email: string; accou
   return order.map((email) => ({ email, accounts: map.get(email)! }));
 }
 
+// 2026-09-17(11차) 추가 — 사용자 요청: "등록된것들을 상단으로 모아줘". 계정/채널명만
+// "1"로 임시 등록해두고 자격증명은 하나도 안 채운 그룹(poohssam79 등)이 실제로 다 채워
+// 연결까지 확인된 그룹(mintimjang33, minsiljjang 등) 사이에 생성 순서 그대로 끼어있어서
+// 눈에 잘 안 띄었다. 그룹 안에 credentials.refresh_token이 하나라도 있는 계정이 있으면
+// "등록 진행됨" 그룹으로 보고 앞으로, 하나도 없으면(완전 빈 자리표시자) 뒤로 보낸다 —
+// Array.sort는 안정 정렬이라 같은 등급 안에서는 원래(생성) 순서가 유지된다.
+function sortGroupsByProgress(groups: { email: string; accounts: SocialAccount[] }[]): { email: string; accounts: SocialAccount[] }[] {
+  const score = (g: { accounts: SocialAccount[] }) => (g.accounts.some((a) => a.credentials?.refresh_token) ? 0 : 1);
+  return [...groups].sort((a, b) => score(a) - score(b));
+}
+
 // 2026-09-17 신설 — 사용자 지적: "계정 채널명 이런걸 니가 다 셋팅을 해줘야해" /
 // "그걸 셋팅하려면 뭐가 필요한지를 만들어야 정보를 입력해두지". 플랫폼마다 실제 API 연동에
 // 필요한 자격증명 종류가 다르다(/docs/API_SETUP_GUIDE.md 실전 기록 기반) — 유튜브는 구글
@@ -910,7 +921,7 @@ export default function Home() {
                   {platformAccounts.length === 0 && !isFormOpen && <p className="text-[11px] text-neutral-300">등록된 계정 없음</p>}
                   {platformAccounts.length > 0 && (
                     <div className="space-y-2">
-                      {groupAccountsByEmail(platformAccounts).map((group) => (
+                      {sortGroupsByProgress(groupAccountsByEmail(platformAccounts)).map((group) => (
                         <div key={group.email || '__none__'} className={group.email ? 'border border-neutral-200 rounded-lg p-1.5' : ''}>
                           {group.email && (
                             <p className="inline-block text-[11px] font-black text-neutral-700 bg-neutral-100 rounded px-1.5 py-0.5 mb-1.5">
