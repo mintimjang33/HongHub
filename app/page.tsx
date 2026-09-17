@@ -336,6 +336,22 @@ export default function Home() {
     }
   }
 
+  // 2026-09-17(10차) 추가 — 사용자 요청: "연결이 완료 된것은 다르게 표시를 해줘". 폼을 열어야만
+  // 보이던 "채널 확인" 결과를 계정 목록 카드 자체에도 뱃지로 보여준다 — Down_Tools/KARAMAVERSE
+  // 사태처럼 리프레시 토큰이 실제로는 다른 채널을 가리키는 채로 저장돼있는 경우를 목록만 보고도
+  // 바로 알아챌 수 있게 하기 위함.
+  function getYoutubeConnectionBadge(a: SocialAccount): { label: string; className: string } | null {
+    if (a.platform !== 'youtube') return null;
+    const creds = a.credentials || {};
+    if (!creds.refresh_token) return null;
+    const verifiedChannels = safeParseChannels(creds._verified_channels);
+    if (verifiedChannels.length === 0) return { label: '❔ 확인 안 됨', className: 'bg-neutral-100 text-neutral-400' };
+    const isMatch = !!creds.channel_id && verifiedChannels.some((c) => c.id === creds.channel_id);
+    return isMatch
+      ? { label: '✅ 연결 확인됨', className: 'bg-green-100 text-green-700' }
+      : { label: '⚠️ 채널 불일치', className: 'bg-amber-100 text-amber-700' };
+  }
+
   // 2026-09-17(8차) 추가 — 사용자 지적: "해당 리프레시 토큰이 해당 채널의 업로드에 맞는건지
   // 알수가 있어?" — 지금까지는 새 탭 열어서 access_token을 URL에 직접 붙여 수동으로
   // 확인했는데, 이걸 화면 안에서 버튼 하나로 할 수 있게 한다. client_secret이 필요해서
@@ -889,11 +905,18 @@ export default function Home() {
                             </p>
                           )}
                           <div className="space-y-1.5">
-                            {group.accounts.map((a) => (
+                            {group.accounts.map((a) => {
+                              const badge = getYoutubeConnectionBadge(a);
+                              return (
                               <div key={a.id}>
                                 <div className="flex items-start justify-between gap-2 bg-neutral-50 rounded-lg px-2 py-1.5">
                                   <div className="min-w-0">
-                                    <p className="text-[11px] font-bold truncate">{a.account_name}</p>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <p className="text-[11px] font-bold truncate">{a.account_name}</p>
+                                      {badge && (
+                                        <span className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full ${badge.className}`}>{badge.label}</span>
+                                      )}
+                                    </div>
                                     {!group.email && a.admin_email && (
                                       <p className="text-[10px] text-neutral-400 truncate">✉️ {a.admin_email}</p>
                                     )}
@@ -911,7 +934,8 @@ export default function Home() {
                                 </div>
                                 {editingAccountId === a.id && renderAccountForm(l.platform)}
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       ))}
