@@ -326,6 +326,39 @@ export default function Home() {
     }
   }
 
+  // 2026-09-17(8차) 추가 — 사용자 지적: "해당 리프레시 토큰이 해당 채널의 업로드에 맞는건지
+  // 알수가 있어?" — 지금까지는 새 탭 열어서 access_token을 URL에 직접 붙여 수동으로
+  // 확인했는데, 이걸 화면 안에서 버튼 하나로 할 수 있게 한다. client_secret이 필요해서
+  // 브라우저에서 구글 토큰 엔드포인트로 직접 호출하지 않고(CORS·보안), 서버 라우트
+  // (/api/youtube/verify-token)를 거쳐 refresh_token → access_token 교환 → channels.list
+  // 조회까지 한 번에 하고, 결과 채널 ID를 이미 입력해둔 channel_id와 비교해서 일치 여부까지
+  // 보여준다.
+  const [verifyingToken, setVerifyingToken] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{ channelId: string; channelTitle: string | null } | { error: string } | null>(null);
+  async function verifyYoutubeRefreshToken() {
+    const { client_id, client_secret, refresh_token } = accountForm.credentials;
+    if (!client_id || !client_secret || !refresh_token) {
+      setVerifyResult({ error: 'Client ID / Client Secret / Refresh Token을 먼저 다 입력해주세요.' });
+      return;
+    }
+    setVerifyingToken(true);
+    setVerifyResult(null);
+    try {
+      const res = await fetch('/api/youtube/verify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id, client_secret, refresh_token }),
+      });
+      const data = await res.json();
+      if (!res.ok) setVerifyResult({ error: data.error || '확인 실패' });
+      else setVerifyResult({ channelId: data.channelId, channelTitle: data.channelTitle });
+    } catch {
+      setVerifyResult({ error: '요청 중 오류가 발생했습니다.' });
+    } finally {
+      setVerifyingToken(false);
+    }
+  }
+
   // 2026-09-17(7차) 추출 — 사용자 지적: "수정을 클릭하면 가장 아래에 표시가 되는데~ 해당
   // 계정 정보 바로 아래에 표시 되었으면 좋겠어". 원래는 폼 하나를 플랫폼 카드 맨 밑에 고정
   // 렌더링해서, 계정이 여러 개 쌓인 카드에서 "수정"을 누르면 화면 밑까지 스크롤해야 폼이
@@ -363,6 +396,7 @@ export default function Home() {
               const credValue = accountForm.credentials[field.key] || '';
               return (
                 <div key={field.key}>
+                  <p className="text-[9px] font-black text-neutral-400 px-0.5 mb-0.5">{field.label}</p>
                   <div className="flex items-center gap-1">
                     <input
                       type={isCredVisible ? 'text' : 'password'}
@@ -423,6 +457,36 @@ export default function Home() {
                         >
                           🔗 발급 사이트 바로가기 ↗
                         </a>
+                      )}
+                    </div>
+                  )}
+                  {platform === 'youtube' && field.key === 'refresh_token' && (
+                    <div className="mt-1">
+                      <button
+                        type="button"
+                        onClick={verifyYoutubeRefreshToken}
+                        disabled={verifyingToken}
+                        className="text-[10px] font-bold text-blue-600 hover:underline disabled:opacity-40"
+                      >
+                        {verifyingToken ? '확인 중...' : '🔍 이 토큰으로 연결되는 채널 확인'}
+                      </button>
+                      {verifyResult && (
+                        'error' in verifyResult ? (
+                          <p className="text-[10px] text-red-600 mt-1">❌ {verifyResult.error}</p>
+                        ) : (
+                          <p
+                            className={`text-[10px] mt-1 ${
+                              accountForm.credentials.channel_id && verifyResult.channelId !== accountForm.credentials.channel_id
+                                ? 'text-amber-600'
+                                : 'text-green-600'
+                            }`}
+                          >
+                            {accountForm.credentials.channel_id && verifyResult.channelId !== accountForm.credentials.channel_id
+                              ? '⚠️ 입력된 채널 ID와 다릅니다 — '
+                              : '✅ '}
+                            확인된 채널: {verifyResult.channelTitle || '(이름 없음)'} ({verifyResult.channelId})
+                          </p>
+                        )
                       )}
                     </div>
                   )}
