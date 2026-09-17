@@ -21,6 +21,7 @@ import {
   isNarrationStep,
   isRenderStep,
   isAccountSettingsStep,
+  isThumbnailStep,
 } from '../utils';
 import { ChannelPanel } from './step01-ChannelPanel';
 import { MaterialPanel } from './step02-MaterialPanel';
@@ -37,6 +38,7 @@ import { NarrationSubtitlePanel } from './step13-14-LabeledLinksPanel';
 import { ImageVideoPanel } from './step16-17-ImageVideoPanel';
 import { RenderPanel } from './step14-RenderPanel';
 import { AccountSettingsPanel } from './step15-AccountSettingsPanel';
+import { ThumbnailPanel } from './step15-ThumbnailPanel';
 import { StepDocSection } from './shared';
 
 export function FlowChart({
@@ -164,6 +166,7 @@ export function FlowChart({
           {isNarrationStep(active) && <NarrationSubtitlePanel site={site} onRefresh={onRefreshSite} />}
           {isRenderStep(active) && <RenderPanel site={site} onRefresh={onRefreshSite} />}
           {isAccountSettingsStep(active) && <AccountSettingsPanel site={site} onRefresh={onRefreshSite} />}
+          {isThumbnailStep(active) && <ThumbnailPanel site={site} onRefresh={onRefreshSite} />}
           {link && (
             <Link
               href={link.href}
