@@ -69,36 +69,40 @@ type SocialAccount = {
 // 계정별로는 Access Token+계정 고유 ID(IG 비즈니스ID/쓰레드 유저ID/페이지ID)만 다르다,
 // 틱톡은 Client Key/Secret+Access Token. 네이버 블로그는 공식 포스팅 API가 없어서(검색·
 // 쇼핑 API만 있음, 위 가이드 문서 참고) 자격증명 칸 자체를 안 보여주고 안내 문구만 띄운다.
-// key는 credentials jsonb에 그대로 저장되는 필드명이다.
-const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; placeholder: string }[]> = {
+// key는 credentials jsonb에 그대로 저장되는 필드명이다. help는 입력칸 placeholder가 아니라
+// 그 아래 항상 보이는 고정 설명 문구로 렌더링한다(2026-09-17(2차) 수정 — 사용자 지적: "각
+// 입력 설명 적어놨어?" — placeholder 안에 설명을 욱여넣었더니 칸이 좁아 잘리고, 클릭해서
+// 타이핑을 시작하면 아예 사라져서 설명 역할을 못 했다. label은 짧게 placeholder로 쓰고,
+// 자세한 설명(어디서 발급받는지 등)은 입력칸 밑에 별도 문구로 항상 보이게 한다).
+const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; help: string }[]> = {
   youtube: [
-    { key: 'client_id', label: 'OAuth Client ID', placeholder: '구글 클라우드 콘솔에서 발급' },
-    { key: 'client_secret', label: 'OAuth Client Secret', placeholder: '' },
-    { key: 'refresh_token', label: 'Refresh Token', placeholder: '이 채널로 최초 1회 로그인 동의 후 발급' },
-    { key: 'channel_id', label: '채널 ID', placeholder: '예: UCxxxxxxxxxxxxxxxx' },
+    { key: 'client_id', label: 'OAuth Client ID', help: '구글 클라우드 콘솔(console.cloud.google.com) → API 및 서비스 → 사용자 인증 정보에서 발급' },
+    { key: 'client_secret', label: 'OAuth Client Secret', help: '위 Client ID와 같은 화면에서 같이 발급됩니다' },
+    { key: 'refresh_token', label: 'Refresh Token', help: '이 채널 계정으로 최초 1회 로그인·동의(OAuth 승인)를 거쳐야 발급됩니다 — 자동화가 대신 로그인할 수 없어 직접 하셔야 합니다' },
+    { key: 'channel_id', label: '채널 ID', help: 'YouTube Studio → 설정 → 채널 → 고급 설정에서 확인. 예: UCxxxxxxxxxxxxxxxx' },
   ],
   instagram: [
-    { key: 'app_id', label: 'Meta App ID', placeholder: 'developers.facebook.com — 인스타/쓰레드/페북 공용' },
-    { key: 'app_secret', label: 'Meta App Secret', placeholder: '' },
-    { key: 'ig_business_id', label: 'Instagram 비즈니스 계정 ID', placeholder: '' },
-    { key: 'access_token', label: 'Access Token', placeholder: '이 계정 전용 장기 토큰' },
+    { key: 'app_id', label: 'Meta App ID', help: 'developers.facebook.com/apps 에서 앱 생성 후 발급 — 인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다' },
+    { key: 'app_secret', label: 'Meta App Secret', help: '위 App ID와 같은 앱 대시보드의 "설정 → 기본 설정"에서 확인' },
+    { key: 'ig_business_id', label: 'Instagram 비즈니스 계정 ID', help: '인스타그램 계정을 비즈니스/크리에이터 계정으로 전환하고 페이스북 페이지와 연결해야 발급됩니다' },
+    { key: 'access_token', label: 'Access Token', help: '이 계정 전용 장기 액세스 토큰 — 앱 대시보드에서 이 계정으로 로그인 승인 후 발급' },
   ],
   threads: [
-    { key: 'app_id', label: 'Meta App ID', placeholder: 'developers.facebook.com — 인스타/쓰레드/페북 공용' },
-    { key: 'app_secret', label: 'Meta App Secret', placeholder: '' },
-    { key: 'threads_user_id', label: 'Threads 사용자 ID', placeholder: '' },
-    { key: 'access_token', label: 'Access Token', placeholder: '이 계정 전용 토큰' },
+    { key: 'app_id', label: 'Meta App ID', help: 'developers.facebook.com/apps 에서 앱 생성 후 발급 — 인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다' },
+    { key: 'app_secret', label: 'Meta App Secret', help: '위 App ID와 같은 앱 대시보드의 "설정 → 기본 설정"에서 확인' },
+    { key: 'threads_user_id', label: 'Threads 사용자 ID', help: '이 계정으로 앱에 로그인 승인한 뒤 발급되는 사용자 ID' },
+    { key: 'access_token', label: 'Access Token', help: '이 계정 전용 토큰 — threads_content_publish 등 필요한 권한(scope)을 승인받아야 함' },
   ],
   facebook: [
-    { key: 'app_id', label: 'Meta App ID', placeholder: 'developers.facebook.com — 인스타/쓰레드/페북 공용' },
-    { key: 'app_secret', label: 'Meta App Secret', placeholder: '' },
-    { key: 'page_id', label: '페이지 ID', placeholder: '' },
-    { key: 'page_access_token', label: 'Page Access Token', placeholder: '' },
+    { key: 'app_id', label: 'Meta App ID', help: 'developers.facebook.com/apps 에서 앱 생성 후 발급 — 인스타·쓰레드·페이스북이 앱 하나를 같이 씁니다' },
+    { key: 'app_secret', label: 'Meta App Secret', help: '위 App ID와 같은 앱 대시보드의 "설정 → 기본 설정"에서 확인' },
+    { key: 'page_id', label: '페이지 ID', help: '올릴 페이스북 페이지의 "페이지 정보 → 페이지 투명성"에서 확인' },
+    { key: 'page_access_token', label: 'Page Access Token', help: '이 페이지 전용 액세스 토큰 — Graph API 탐색기 등에서 발급' },
   ],
   tiktok: [
-    { key: 'client_key', label: 'Client Key', placeholder: '' },
-    { key: 'client_secret', label: 'Client Secret', placeholder: '' },
-    { key: 'access_token', label: 'Access Token', placeholder: '' },
+    { key: 'client_key', label: 'Client Key', help: 'developers.tiktok.com에서 앱 등록 후 발급(Content Posting API는 별도 승인 필요)' },
+    { key: 'client_secret', label: 'Client Secret', help: '위 Client Key와 같은 화면에서 같이 발급' },
+    { key: 'access_token', label: 'Access Token', help: '이 계정으로 로그인 승인 후 발급되는 토큰' },
   ],
   naver_blog: [], // 공식 포스팅 API 없음 — 아래 UI에서 안내 문구만 표시
 };
@@ -162,6 +166,20 @@ export default function Home() {
     credentials: {},
   });
   const [savingAccount, setSavingAccount] = useState(false);
+  // 2026-09-17(3차) 추가 — 사용자 요청: "클릭해서 띄어놓고 볼수있게 해줘" + "x 박스로 닫게끔".
+  // 처음엔 각 자격증명 입력칸 밑에 설명을 항상 띄우려 했는데(2차), 그러면 폼이 길어지고
+  // 안 궁금한 설명까지 계속 차지하고 있으니 — 필드마다 "ⓘ" 버튼을 눌러야만 설명 박스가
+  // 열리고, ✕를 눌러야 닫히게(호버 아님, 클릭 토글) 바꿨다. 키는 "platform:fieldKey"로 —
+  // 폼이 플랫폼별로 각자 열리므로 겹칠 일은 없지만 명확하게 구분해둔다.
+  const [openHelpKeys, setOpenHelpKeys] = useState<Set<string>>(new Set());
+  function toggleHelp(key: string) {
+    setOpenHelpKeys((cur) => {
+      const next = new Set(cur);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   function load() {
     fetch('/api/sites')
@@ -479,15 +497,46 @@ export default function Home() {
                       {CREDENTIAL_FIELDS[l.platform].length > 0 ? (
                         <div className="space-y-1.5 border border-dashed border-neutral-200 rounded-lg p-2">
                           <p className="text-[10px] font-black text-neutral-400">🔑 API 연동 정보</p>
-                          {CREDENTIAL_FIELDS[l.platform].map((field) => (
-                            <input
-                              key={field.key}
-                              value={accountForm.credentials[field.key] || ''}
-                              onChange={(e) => setCredentialField(field.key, e.target.value)}
-                              placeholder={`${field.label}${field.placeholder ? ` — ${field.placeholder}` : ''}`}
-                              className="w-full border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
-                            />
-                          ))}
+                          {CREDENTIAL_FIELDS[l.platform].map((field) => {
+                            const helpKey = `${l.platform}:${field.key}`;
+                            const isHelpOpen = openHelpKeys.has(helpKey);
+                            return (
+                              <div key={field.key}>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    value={accountForm.credentials[field.key] || ''}
+                                    onChange={(e) => setCredentialField(field.key, e.target.value)}
+                                    placeholder={field.label}
+                                    className="flex-1 min-w-0 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px] font-mono"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleHelp(helpKey)}
+                                    title="이 항목 설명 보기"
+                                    className={`shrink-0 w-6 h-6 rounded-full text-[11px] font-black flex items-center justify-center ${
+                                      isHelpOpen ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-400 hover:bg-neutral-200'
+                                    }`}
+                                  >
+                                    ⓘ
+                                  </button>
+                                </div>
+                                {isHelpOpen && (
+                                  <div className="flex items-start justify-between gap-2 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1.5 mt-1">
+                                    <p className="text-[10px] text-blue-700 leading-relaxed">
+                                      <span className="font-black">{field.label}</span> — {field.help}
+                                    </p>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleHelp(helpKey)}
+                                      className="shrink-0 text-[11px] font-black text-blue-400 hover:text-blue-700"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
