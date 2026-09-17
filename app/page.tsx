@@ -99,13 +99,14 @@ function groupAccountsByEmail(accounts: SocialAccount[]): { email: string; accou
 // 했다. 실제로 화면을 같이 보며 진행해본 순서(유튜브는 이 세션에서 실증 완료)를 그대로
 // 단계별로 적고, 그 발급 사이트로 바로 이동하는 link를 추가해서 help 박스 안에 "바로가기"
 // 버튼이 뜨게 한다.
-const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; help: string; link?: string }[]> = {
+const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; help: string; link?: string; extraLink?: { url: string; label: string } }[]> = {
   youtube: [
     {
       key: 'client_id',
       label: 'OAuth Client ID',
-      help: '⚠️ 0단계(빠뜨리기 쉬움, 꼭 먼저 할 것): "API 및 서비스 → 라이브러리"에서 "YouTube Data API v3" 검색 → 사용 설정(Enable). 이거 안 하면 나중에 채널 확인·업로드가 전부 403 에러(SERVICE_DISABLED)로 실패합니다. 그다음: Google Cloud Console → 좌측 "클라이언트" → "+ 클라이언트 만들기" → 유형 "웹 애플리케이션" → "승인된 리디렉션 URI"에 https://developers.google.com/oauthplayground 추가 → 만들기. 뜨는 즉시 복사(나중에 다시 못 봅니다). ⚠️ 이 프로젝트에 다른 앱용 클라이언트가 이미 있어도 재사용하지 말고 새로 만들 것 — 그 클라이언트를 건드리면 다른 앱 로그인이 깨질 수 있고, secret은 클라이언트당 최대 2개까지만 만들 수 있어 막힐 수도 있음',
+      help: '⚠️ 0단계(빠뜨리기 쉬움, 꼭 먼저 할 것): "YouTube Data API v3" 사용 설정(Enable) — 아래 "0단계" 링크로 바로가기. 이거 안 하면 나중에 채널 확인·업로드가 전부 403 에러(SERVICE_DISABLED)로 실패합니다. 그다음: Google Cloud Console → 좌측 "클라이언트" → "+ 클라이언트 만들기" → 유형 "웹 애플리케이션" → "승인된 리디렉션 URI"에 https://developers.google.com/oauthplayground 추가 → 만들기. 뜨는 즉시 복사(나중에 다시 못 봅니다). ⚠️ 이 프로젝트에 다른 앱용 클라이언트가 이미 있어도 재사용하지 말고 새로 만들 것 — 그 클라이언트를 건드리면 다른 앱 로그인이 깨질 수 있고, secret은 클라이언트당 최대 2개까지만 만들 수 있어 막힐 수도 있음',
       link: 'https://console.cloud.google.com/auth/clients',
+      extraLink: { url: 'https://console.cloud.google.com/apis/library/youtube.googleapis.com', label: '0단계: YouTube Data API v3 활성화 바로가기' },
     },
     {
       key: 'client_secret',
@@ -499,16 +500,28 @@ export default function Home() {
                           ✕
                         </button>
                       </div>
-                      {field.link && (
-                        <a
-                          href={field.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-block mt-1.5 text-[10px] font-black text-blue-600 hover:underline"
-                        >
-                          🔗 발급 사이트 바로가기 ↗
-                        </a>
-                      )}
+                      <div className="flex flex-wrap gap-x-3 mt-1.5">
+                        {field.extraLink && (
+                          <a
+                            href={field.extraLink.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block text-[10px] font-black text-amber-600 hover:underline"
+                          >
+                            ⚡ {field.extraLink.label} ↗
+                          </a>
+                        )}
+                        {field.link && (
+                          <a
+                            href={field.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block text-[10px] font-black text-blue-600 hover:underline"
+                          >
+                            🔗 발급 사이트 바로가기 ↗
+                          </a>
+                        )}
+                      </div>
                     </div>
                   )}
                   {platform === 'youtube' && field.key === 'refresh_token' && (
