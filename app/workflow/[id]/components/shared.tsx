@@ -2204,7 +2204,14 @@ function renderStepDoc(text: string) {
     const imageMatch = lines.length === 1 ? lines[0].trim().match(IMAGE_LINE_RE) : null;
     if (imageMatch) {
       // eslint-disable-next-line @next/next/no-img-element
-      return <img key={pi} src={imageMatch[2]} alt={imageMatch[1]} className="max-w-full rounded-lg border border-neutral-200 mb-3" />;
+      return (
+        <img
+          key={pi}
+          src={imageMatch[2]}
+          alt={imageMatch[1]}
+          className="max-w-full max-h-64 w-auto rounded-lg border border-neutral-200 mb-3 object-contain"
+        />
+      );
     }
     const isList = lines.every((l) => /^\s*([-•]|\d+\.)\s/.test(l));
     if (isList) {
