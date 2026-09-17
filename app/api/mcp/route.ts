@@ -1356,9 +1356,19 @@ ${PLATFORM_GUIDE[target_platform]}
         inputSchema: z.object({
           platform: z.string().describe('예: youtube, instagram, threads, facebook, tiktok, naver_blog'),
           account_name: z.string().describe('계정/채널명(예: "경제학 똑똑", "@mintimjang33")'),
-          setting_note: z.string().optional().describe('API 연동 상태, 설정 문구 등 자유 메모 — 실제 비밀키/토큰은 여기 쓰지 말 것(app_config 사용)'),
-          admin_email: z.string().optional().describe('이 계정을 관리하는 구글 계정(선택)'),
+          setting_note: z.string().optional().describe('그 외 자유 메모(선택) — 실제 API 자격증명은 credentials 필드에 넣을 것'),
+          admin_email: z.string().optional().describe('이 계정을 관리하는 구글 계정(선택) — 같은 이메일로 채널 여러 개 등록 가능(예: 유튜브 브랜드 계정)'),
           site_id: z.string().optional().describe('특정 파이프라인 전용 계정이면 그 사이트 id(선택, list_sites로 확인)'),
+          // 2026-09-17 신설 — 사용자 지적: "그걸 셋팅하려면 뭐가 필요한지를 만들어야 정보를
+          // 입력해두지". 플랫폼마다 실제 API 연동 자격증명 종류가 다르다(/docs/API_SETUP_GUIDE.md
+          // 참고): youtube={client_id,client_secret,refresh_token,channel_id}, instagram/
+          // threads/facebook(메타 앱 공유)={app_id,app_secret,+계정별 access_token과 고유id
+          // (ig_business_id/threads_user_id/page_id)}, tiktok={client_key,client_secret,
+          // access_token}. naver_blog는 공식 포스팅 API가 없어 비워둔다.
+          credentials: z
+            .record(z.string(), z.string())
+            .optional()
+            .describe('플랫폼별 API 자격증명 키-값(예: {"client_id":"...","client_secret":"...","refresh_token":"..."})'),
         }),
       },
       async (args) => {
@@ -1371,6 +1381,7 @@ ${PLATFORM_GUIDE[target_platform]}
             setting_note: args.setting_note || null,
             admin_email: args.admin_email || null,
             site_id: args.site_id || null,
+            credentials: args.credentials || null,
           })
           .select()
           .single();
@@ -1382,7 +1393,7 @@ ${PLATFORM_GUIDE[target_platform]}
     server.registerTool(
       'update_social_account',
       {
-        description: '등록된 플랫폼 계정을 수정한다(id 기준, 넘긴 필드만 갱신).',
+        description: '등록된 플랫폼 계정을 수정한다(id 기준, 넘긴 필드만 갱신). credentials를 넘기면 기존 credentials 전체를 교체한다(부분 병합 아님) — 일부만 바꾸려면 먼저 list_social_accounts로 현재 값을 읽고 합쳐서 넘길 것.',
         inputSchema: z.object({
           id: z.string().describe('수정할 계정의 id (list_social_accounts로 확인)'),
           platform: z.string().optional(),
@@ -1390,6 +1401,7 @@ ${PLATFORM_GUIDE[target_platform]}
           setting_note: z.string().optional(),
           admin_email: z.string().optional(),
           site_id: z.string().optional(),
+          credentials: z.record(z.string(), z.string()).optional().describe('통째로 교체됨 — 부분 수정이면 기존 값을 읽어 합쳐서 넘길 것'),
         }),
       },
       async ({ id, ...fields }) => {
