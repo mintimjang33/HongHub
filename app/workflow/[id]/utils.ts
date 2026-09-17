@@ -375,7 +375,8 @@ export function stepLink(step: Step): { href: string; label: string } | null {
     isSubtitleStep(step) ||
     isImageVideoStep(step) ||
     isRenderStep(step) ||
-    isAccountSettingsStep(step)
+    isAccountSettingsStep(step) ||
+    isThumbnailStep(step)
   )
     return null;
   if (/생성|콘텐츠/.test(text)) return { href: '/sources?tab=generate', label: '🎯 소스 발굴 → 콘텐츠 생성 탭' };
