@@ -194,6 +194,25 @@ export default function PlanPage() {
     }
   }
 
+  // 본문에서 해당 이미지의 마크다운 태그를 지우고(업로드 때 넣은 `\n![alt](url)\n` 형태를
+  // 우선 통째로 지우고, 혹시 사용자가 줄바꿈을 손댔을 경우를 대비해 태그만 남았으면 그것도 지움),
+  // Storage의 실제 파일도 함께 삭제한다.
+  async function handleDeleteImage(img: { alt: string; url: string }) {
+    if (!confirm(`"${img.alt || '이 이미지'}"를 삭제할까요? 저장소 파일도 함께 지워집니다.`)) return;
+    const escapedUrl = img.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tagPattern = new RegExp(`\\n?!\\[${img.alt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\(${escapedUrl}\\)\\n?`);
+    setContent((prev) => prev.replace(tagPattern, '\n'));
+    try {
+      await fetch('/api/upload', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: img.url }),
+      });
+    } catch {
+      // 본문에서는 이미 지워졌으니 저장소 정리가 실패해도 사용자 작업 흐름은 막지 않는다.
+    }
+  }
+
   if (!site) return <div className="min-h-screen bg-neutral-50 p-10 text-sm text-neutral-400">불러오는 중...</div>;
 
   const images = extractImages(content);
@@ -282,8 +301,15 @@ export default function PlanPage() {
                     e.dataTransfer.effectAllowed = 'copy';
                   }}
                   title="드래그해서 편집창의 원하는 위치에 놓으세요"
-                  className="border border-neutral-200 rounded-lg overflow-hidden bg-white cursor-grab active:cursor-grabbing"
+                  className="relative border border-neutral-200 rounded-lg overflow-hidden bg-white cursor-grab active:cursor-grabbing"
                 >
+                  <button
+                    onClick={() => handleDeleteImage(img)}
+                    title="삭제"
+                    className="absolute top-1 right-1 z-10 w-5 h-5 flex items-center justify-center rounded-full bg-black/60 text-white text-xs hover:bg-red-600"
+                  >
+                    ✕
+                  </button>
                   <a href={img.url} target="_blank" rel="noopener noreferrer">
                     <img src={img.url} alt={img.alt} className="w-full aspect-square object-cover" />
                   </a>
