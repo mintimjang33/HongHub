@@ -111,6 +111,19 @@ function renderMarkdownLite(src: string): string {
   return `<p style="margin:10px 0;">${html}</p>`;
 }
 
+// 본문 안에 있는 ![alt](url) 마크다운 이미지를 전부 찾아서 갤러리로 보여주기 위한 파서.
+// 별도 state로 안 두고 content에서 직접 뽑는 이유: 텍스트를 직접 지우거나 고쳐도
+// 갤러리가 항상 실제 본문과 일치하게 하기 위함(따로 관리하면 어긋날 수 있음).
+function extractImages(src: string): { alt: string; url: string }[] {
+  const results: { alt: string; url: string }[] = [];
+  const re = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    results.push({ alt: m[1], url: m[2] });
+  }
+  return results;
+}
+
 export default function PlanPage() {
   const params = useParams();
   const id = params.id as string;
@@ -193,6 +206,8 @@ export default function PlanPage() {
 
   if (!site) return <div className="min-h-screen bg-neutral-50 p-10 text-sm text-neutral-400">불러오는 중...</div>;
 
+  const images = extractImages(content);
+
   return (
     <div className="min-h-screen bg-neutral-50">
       <div className="max-w-4xl mx-auto px-6 py-10">
@@ -254,6 +269,36 @@ export default function PlanPage() {
             dangerouslySetInnerHTML={{ __html: renderMarkdownLite(content || '_아직 내용이 없습니다._') }}
           />
         )}
+
+        <div className="mt-6">
+          <h2 className="text-xs font-black text-neutral-500 mb-2">
+            🖼️ 등록된 이미지 {images.length > 0 && `(${images.length})`}
+          </h2>
+          {images.length === 0 ? (
+            <p className="text-xs text-neutral-400 border border-dashed border-neutral-200 rounded-lg p-4 text-center">
+              아직 등록된 이미지가 없습니다. 위의 &quot;🖼️ 이미지 등록&quot; 버튼으로 올려보세요.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {images.map((img, i) => (
+                <div key={i} className="border border-neutral-200 rounded-lg overflow-hidden bg-white">
+                  <a href={img.url} target="_blank" rel="noopener noreferrer">
+                    <img src={img.url} alt={img.alt} className="w-full aspect-square object-cover" />
+                  </a>
+                  <div className="p-2">
+                    <p className="text-[10px] text-neutral-500 truncate" title={img.alt}>{img.alt || '(이름 없음)'}</p>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(img.url)}
+                      className="text-[10px] text-blue-600 hover:underline mt-1"
+                    >
+                      🔗 링크 복사
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
