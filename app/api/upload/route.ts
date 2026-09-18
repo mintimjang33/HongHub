@@ -31,3 +31,26 @@ export async function POST(request: Request) {
   const { data } = supabase.storage.from('honghub-files').getPublicUrl(path);
   return NextResponse.json({ url: data.publicUrl, name: file.name });
 }
+
+// 계획서 페이지의 이미지 갤러리에서 "삭제" 눌렀을 때 실제 Storage 파일도 지우기 위한 핸들러.
+// path를 직접 받지 않고 공개 URL을 받아서 파싱하는 이유: 클라이언트는 업로드 응답으로 URL만
+// 받아서 갖고 있고 내부 저장 경로(랜덤 UUID)를 따로 기억할 필요가 없게 하기 위함.
+export async function DELETE(request: Request) {
+  const { url } = await request.json();
+  if (!url || typeof url !== 'string') {
+    return NextResponse.json({ error: 'url이 필요합니다.' }, { status: 400 });
+  }
+
+  const marker = '/object/public/honghub-files/';
+  const idx = url.indexOf(marker);
+  if (idx === -1) {
+    return NextResponse.json({ error: 'honghub-files 버킷의 URL이 아닙니다.' }, { status: 400 });
+  }
+  const path = decodeURIComponent(url.slice(idx + marker.length));
+
+  const supabase = getSupabaseServerClient();
+  const { error } = await supabase.storage.from('honghub-files').remove([path]);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  return NextResponse.json({ ok: true });
+}
