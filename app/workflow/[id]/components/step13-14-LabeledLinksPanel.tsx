@@ -151,6 +151,21 @@ function filenameForItem(item: LabeledItem): string {
 // 편집 화면을 닫지 않고 selectedCueIdx·오디오 재생 위치를 그대로 유지하도록 고친다(editSavedFlash로
 // 저장 완료를 잠깐 알려주기만 하고 화면은 그대로 둔다) — 이제 수정 → 저장 → 그 자리에서 바로
 // 이어서 재생/확인이 가능하다.
+//
+// 2026-09-19 수정 — 실사고 + 사용자 지적: "12번에서 난 분명 원본을 삭제 했는데 자꾸 다른게
+// 삭제되", "자꾸 다른게 삭제되는게 버그 아니야?" — 실제로 narrationUrls 3개 중 "원본"만 지우려
+// 했는데 "빠른 버전(10%)" 항목까지 같이 사라지고 다른 항목의 "최종 선택" 표시도 풀려서 딱 1개만
+// 남는 사고가 있었다(데이터는 복구함). 원인: removeItem/relabelItem/setFinalSelection이 모두
+// saveItems(items.filter/map(...))처럼 그 순간의 items(=unit[fieldKey], 부모 site prop에서
+// 파생) 스냅샷을 기준으로 새 배열 전체를 계산해 PATCH한다. 그런데 ✕ 버튼에 saving 중 disabled
+// 가드가 전혀 없었다 — 첫 삭제 저장이 아직 서버 왕복 중(onRefresh로 site가 갱신되기 전)인
+// 상태에서 사용자가 (연속 클릭이든 느린 네트워크에서 반응이 없어 보여서든) 한 번 더 클릭하면,
+// 두 번째 호출도 "삭제 전" 오래된(stale) items 스냅샷을 기준으로 다시 새 배열을 계산해서
+// PATCH한다 — 이 두 번째 PATCH가 나중에 도착해 먼저 저장된 결과를 통째로 덮어써 버리면, 두
+// 삭제가 각기 다른 항목을 기준으로 계산됐으므로 실제로는 2개가 사라지는 것처럼 보인다. 이
+// 컴포넌트의 모든 변경 액션(삭제/라벨/최종 체크/링크추가/업로드) 버튼에 `disabled={saving}`을
+// 걸어 이전 저장이 끝나고 items가 최신 상태로 갱신되기 전까지는 다음 변경을 아예 못 누르게
+// 막는다 — 그래야 항상 최신 상태 기준으로만 다음 변경이 계산된다.
 export function LabeledFieldSection({
   site,
   unit,
@@ -482,13 +497,20 @@ export function LabeledFieldSection({
       {items.length > 0 && (
         <div className="space-y-1">
           {items.map((item, idx) => (
-            <div key={idx} className="space-y-1">
+            // 2026-09-19 수정 — key를 idx(배열 위치)가 아니라 item.url(안정적인 식별자)로 바꿈.
+            // idx를 key로 쓰면 삭제로 배열이 한 칸씩 당겨질 때 React가 같은 자리(key)의 DOM을
+            // 재사용하면서, defaultValue(비제어 입력)인 라벨 입력창은 리렌더링에도 값을 안
+            // 갱신해서 삭제 전 항목의 라벨(예: "원본")이 화면에 그대로 남아있는 것처럼 보이는
+            // 버그가 있었다(실제 데이터는 정상이었는데도 화면만 헷갈리게 보임 — 사용자가 겪은
+            // "다른게 삭제되는" 혼란의 일부).
+            <div key={item.url} className="space-y-1">
               <div className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1">
                 <input
                   defaultValue={item.label}
+                  disabled={saving}
                   onBlur={(e) => e.target.value !== item.label && relabelItem(idx, e.target.value)}
                   placeholder="라벨(예: 원본, 1.3배속)"
-                  className="w-28 shrink-0 border border-neutral-200 rounded px-1.5 py-1 text-[10px] font-bold bg-white"
+                  className="w-28 shrink-0 border border-neutral-200 rounded px-1.5 py-1 text-[10px] font-bold bg-white disabled:opacity-50"
                 />
                 <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 truncate text-[11px] text-blue-600 hover:underline">
                   {item.url}
@@ -517,6 +539,7 @@ export function LabeledFieldSection({
                   <input
                     type="checkbox"
                     checked={!!item.selected}
+                    disabled={saving}
                     onChange={(e) => setFinalSelection(idx, e.target.checked)}
                     className="w-3.5 h-3.5"
                   />
@@ -525,13 +548,23 @@ export function LabeledFieldSection({
                 {textEditable && (
                   <button
                     onClick={() => (editingIdx === idx ? cancelEdit() : startEdit(idx))}
+                    disabled={saving}
                     title="편집"
-                    className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-blue-600"
+                    className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-blue-600 disabled:opacity-40"
                   >
                     ✏️
                   </button>
                 )}
-                <button onClick={() => removeItem(idx)} title="삭제" className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500">
+                {/* 2026-09-19 수정 — saving 중에는 삭제를 막는다(위 2026-09-19 주석 참고).
+                    이전 삭제/변경 저장이 서버 왕복을 마치고 items가 최신 상태로 갱신되기 전에
+                    또 삭제를 누르면, 그 두 번째 삭제도 삭제 전의 오래된 배열을 기준으로 계산돼
+                    먼저 저장한 결과를 덮어써 버려 의도하지 않은 다른 항목까지 같이 사라졌다. */}
+                <button
+                  onClick={() => removeItem(idx)}
+                  disabled={saving}
+                  title="삭제"
+                  className="shrink-0 text-[10px] font-black text-neutral-400 hover:text-red-500 disabled:opacity-40"
+                >
                   ✕
                 </button>
               </div>
