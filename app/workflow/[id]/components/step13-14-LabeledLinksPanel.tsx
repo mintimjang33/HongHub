@@ -76,7 +76,7 @@ const CARET_NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight
 // srt파일에 적용해줘". 화면 속 자막(contentEditable span)에서 Shift+Enter를 누르면 브라우저가
 // 보통 <br>(또는 블록 요소)을 DOM에 직접 넣어서 "보기엔" 줄이 나뉘지만, 바로 아래
 // updateSelectedCueText가 읽던 e.currentTarget.textContent는 <br>를 완전히 무시한다
-// (예: "가나<br>다라".textContent === "가나다라" — 공백조차 안 남고 그대로 붙어버림). 그 결과
+// (예: "가나<br>다라".textContent === "가나다라" — 공백조차 안 남고 그대로 붙어버린다). 그 결과
 // 화면에서 Shift+Enter로 줄을 나눠도 포커스를 벗어나 저장되는 순간 그 줄바꿈이 사라지고 두 줄이
 // 공백 없이 붙어버리는 버그가 있었다. <br>와 블록 요소 경계를 실제 개행문자(\n)로 바꾼 뒤 읽어서,
 // 화면에서 나눈 줄바꿈이 실제로 cue.text에 반영되고 serializeSrtCues를 거쳐 SRT 파일에도 그대로
@@ -142,6 +142,15 @@ function filenameForItem(item: LabeledItem): string {
 // 할수있게 해주고~")으로 14번(렌더링) 단계도 "콘텐츠 하나에 라벨 붙은 링크/파일 여러 개"라는
 // 완전히 같은 구조(narrationUrls/subtitleUrls와 동일)가 필요해져서, 이 조각을 새로 만든
 // step14-RenderPanel.tsx에서도 그대로 재사용할 수 있게 export한다.
+//
+// 2026-09-18 수정 — 사용자 지적: "12단계에서 플레이가 중간부터는 안되~ 수정을 한다음 수정한곳
+// 체크를 해야 하는데 처음부터 다시 플레이를 해야헤서 불편해". 원인: saveEdit이 저장 성공 후
+// editingIdx를 null로 돌려 편집 화면 자체를 닫아버렸다. 수정한 부분을 다시 들어보려면 ✏️를 새로
+// 눌러 편집을 재개해야 했는데, startEdit은 항상 selectedCueIdx/previewTime을 0으로 초기화하므로
+// 매번 처음(1번 자막)부터 다시 스크럽/재생해서 방금 고친 위치까지 되돌아가야 했다. 저장해도
+// 편집 화면을 닫지 않고 selectedCueIdx·오디오 재생 위치를 그대로 유지하도록 고친다(editSavedFlash로
+// 저장 완료를 잠깐 알려주기만 하고 화면은 그대로 둔다) — 이제 수정 → 저장 → 그 자리에서 바로
+// 이어서 재생/확인이 가능하다.
 export function LabeledFieldSection({
   site,
   unit,
@@ -174,6 +183,7 @@ export function LabeledFieldSection({
   const [editText, setEditText] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState('');
+  const [editSavedFlash, setEditSavedFlash] = useState(false);
   const [previewAspect, setPreviewAspect] = useState<'16:9' | '9:16'>('9:16');
   const [previewTime, setPreviewTime] = useState(0);
   const [previewNarrationUrl, setPreviewNarrationUrl] = useState('');
@@ -204,6 +214,13 @@ export function LabeledFieldSection({
     ta.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCueIdx, editingIdx]);
+
+  // 저장 완료 표시(editSavedFlash)는 2초 뒤 자동으로 사라진다.
+  useEffect(() => {
+    if (!editSavedFlash) return;
+    const t = setTimeout(() => setEditSavedFlash(false), 2000);
+    return () => clearTimeout(t);
+  }, [editSavedFlash]);
 
   // 마지막으로 골랐던 나레이션을 편집 화면을 다시 열 때마다 기억한다 — 사용자 지적: "이거
   // 마지막했던걸로 자동 저장하게 해줘~ 자꾸 바뀌고 있어서". 콘텐츠(유닛)별로 따로 기억하도록
@@ -438,6 +455,10 @@ export function LabeledFieldSection({
     setEditError('');
   }
 
+  // 2026-09-18 수정 — 저장해도 편집 화면을 닫지 않는다(위 2026-09-18 주석 참고). editingIdx/
+  // editText/selectedCueIdx/오디오 재생 위치를 그대로 유지해서, 저장 직후 같은 자리에서 바로
+  // 이어서 재생/확인할 수 있게 한다. items[idx].url은 onRefresh로 곧 새 URL로 갱신되지만
+  // editingIdx는 배열 인덱스라 그대로 같은 항목을 계속 가리킨다.
   async function saveEdit(idx: number) {
     setEditLoading(true);
     setEditError('');
@@ -447,8 +468,7 @@ export function LabeledFieldSection({
       const file = new File([blob], name, { type: 'text/plain' });
       const url = await uploadSceneMedia(file);
       await saveItems(items.map((item, i) => (i === idx ? { ...item, url } : item)));
-      setEditingIdx(null);
-      setEditText('');
+      setEditSavedFlash(true);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -477,7 +497,7 @@ export function LabeledFieldSection({
                 {/* 2026-09-16(22차) 추가 — 사용자 지적: "클릭해도 다운로드가 안되는데?" — 위
                     링크는 target="_blank"라 새 탭에서 열릴 뿐, 파일 형식(.mlt 등 XML)에 따라
                     브라우저가 그대로 표시해버려 실제 저장은 안 되는 경우가 있었다. 모달의
-                    이미지·영상 다운로드와 같은 방식(fetch → blob → 강제 저장)을 여기도 적용. */}
+                    이미지·영상 다운로드와 같은 방식(fetch → blob → 강제 저장)을 여기 파일 목록에도 적용. */}
                 <button
                   onClick={() => downloadFile(item.url, filenameForItem(item))}
                   title="다운로드"
@@ -570,7 +590,7 @@ export function LabeledFieldSection({
                           )}
                           {/* 줄마다 배경이 따로 붙는 실제 자막 느낌을 내려면 배경이 있는 요소가
                               inline이어야 한다(block/-webkit-box는 여러 줄을 하나의 사각형으로
-                              뭉쳐버림). 바깥 div로 정렬/줄바꿈 폭을 잡고, 실제 편집 가능한 span은
+                              뭉쳐버린다). 바깥 div로 정렬/줄바꿈 폭을 잡고, 실제 편집 가능한 span은
                               inline + box-decoration-break: clone으로 줄마다 독립된 배경 박스가
                               나오게 한다. */}
                           <div
@@ -740,7 +760,7 @@ export function LabeledFieldSection({
                     </div>
                   )}
                   {editError && <p className="text-[10px] text-red-500 font-bold">{editError}</p>}
-                  <div className="flex gap-1.5">
+                  <div className="flex gap-1.5 items-center">
                     <button
                       onClick={() => saveEdit(idx)}
                       disabled={editLoading}
@@ -749,8 +769,9 @@ export function LabeledFieldSection({
                       {editLoading ? '저장 중...' : '저장 (새 파일로 교체)'}
                     </button>
                     <button onClick={cancelEdit} className="text-[11px] font-bold px-3 py-1.5 rounded-lg border border-neutral-200">
-                      취소
+                      닫기
                     </button>
+                    {editSavedFlash && <span className="text-[11px] font-black text-emerald-600">✓ 저장됨 — 이어서 확인하세요</span>}
                   </div>
                 </div>
               )}
