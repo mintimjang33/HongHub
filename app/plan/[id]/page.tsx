@@ -166,27 +166,16 @@ export default function PlanPage() {
     setContent(TEMPLATE.replace('{{프로젝트명}}', site?.name || '').replace('{{YYYY-MM-DD}}', new Date().toISOString().slice(0, 10)));
   }
 
-  function insertAtCursor(text: string) {
-    const el = textareaRef.current;
-    if (!el) {
-      setContent((prev) => (prev ? prev + '\n\n' + text : text));
-      return;
-    }
-    const start = el.selectionStart ?? content.length;
-    const end = el.selectionEnd ?? content.length;
-    const next = content.slice(0, start) + text + content.slice(end);
-    setContent(next);
-    requestAnimationFrame(() => {
-      el.focus();
-      const pos = start + text.length;
-      el.setSelectionRange(pos, pos);
-    });
-  }
-
+  // 여러 장을 한 번에 올릴 때 각 업로드가 비동기(await)로 순차 진행되는데,
+  // 그때마다 state의 content를 클로저로 읽어 커서 위치에 끼워 넣으면 매번 "직전 setContent
+  // 이전" 값을 기준으로 계산하게 되어 앞서 넣은 이미지가 덮어써진다(실측 확인 — 여러 장
+  // 업로드 시 마지막 한 장만 남는 버그). 그래서 반복문 안에서는 로컬 변수(working)에만
+  // 누적하고, 끝나면 setContent를 한 번만 호출한다.
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
     setUploading(true);
     setUploadError(null);
+    let working = content;
     try {
       for (const file of Array.from(files)) {
         const formData = new FormData();
@@ -194,11 +183,12 @@ export default function PlanPage() {
         const res = await fetch('/api/upload', { method: 'POST', body: formData });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '업로드 실패');
-        insertAtCursor(`\n![${data.name || 'image'}](${data.url})\n`);
+        working = `${working}\n![${data.name || 'image'}](${data.url})\n`;
       }
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : String(e));
     } finally {
+      setContent(working);
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
@@ -248,7 +238,7 @@ export default function PlanPage() {
         </div>
         <p className="text-xs text-neutral-400 mb-4">
           이 프로젝트를 Claude가 처음 보는 세션에서도 이어갈 수 있도록 자기완결적으로 적어두는 곳이에요. 파일 업로드 대신 여기서 직접 쓰고, Claude가 MCP로 바로 갱신할 수 있어요.
-          {' '}이미지는 &quot;🖼️ 이미지 등록&quot;으로 올리면 커서 위치에 마크다운 링크가 자동으로 들어가고, &quot;👁️ 미리보기&quot;에서 실제로 렌더링된 모습을 볼 수 있어요.
+          {' '}이미지는 &quot;🖼️ 이미지 등록&quot;으로 올리면 아래 갤러리에 추가되고, 거기서 편집창의 원하는 줄로 드래그해서 위치를 정할 수 있어요. &quot;👁️ 미리보기&quot;에서 실제로 렌더링된 모습을 볼 수 있어요.
           {savedAt && <span className="text-green-600 font-bold"> · {savedAt} 저장됨</span>}
         </p>
         {uploadError && (
@@ -271,9 +261,12 @@ export default function PlanPage() {
         )}
 
         <div className="mt-6">
-          <h2 className="text-xs font-black text-neutral-500 mb-2">
+          <h2 className="text-xs font-black text-neutral-500 mb-1">
             🖼️ 등록된 이미지 {images.length > 0 && `(${images.length})`}
           </h2>
+          {images.length > 0 && mode === 'edit' && (
+            <p className="text-[11px] text-neutral-400 mb-2">썸네일을 편집창의 원하는 줄로 드래그해서 놓으면 그 자리에 삽입돼요 (PPT처럼 위치 지정 가능).</p>
+          )}
           {images.length === 0 ? (
             <p className="text-xs text-neutral-400 border border-dashed border-neutral-200 rounded-lg p-4 text-center">
               아직 등록된 이미지가 없습니다. 위의 &quot;🖼️ 이미지 등록&quot; 버튼으로 올려보세요.
@@ -281,7 +274,16 @@ export default function PlanPage() {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {images.map((img, i) => (
-                <div key={i} className="border border-neutral-200 rounded-lg overflow-hidden bg-white">
+                <div
+                  key={i}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', `\n![${img.alt}](${img.url})\n`);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
+                  title="드래그해서 편집창의 원하는 위치에 놓으세요"
+                  className="border border-neutral-200 rounded-lg overflow-hidden bg-white cursor-grab active:cursor-grabbing"
+                >
                   <a href={img.url} target="_blank" rel="noopener noreferrer">
                     <img src={img.url} alt={img.alt} className="w-full aspect-square object-cover" />
                   </a>
