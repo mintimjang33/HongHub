@@ -2371,7 +2371,7 @@ export function StepDocSection({
       {step.desc && (
         <details className="mb-1.5">
           <summary className="cursor-pointer text-xs text-neutral-400 font-bold">단계 설명 보기 (원문 — 아직 설명서 등록 전)</summary>
-          <p className="text-sm text-neutral-600 leading-relaxed mt-2 whitespace-pre-wrap">{step.desc}</p>
+          <div className="text-sm text-neutral-600 leading-relaxed mt-2 text-left">{renderStepDoc(step.desc)}</div>
         </details>
       )}
       <button onClick={startEdit} className="text-[11px] font-bold text-blue-600 hover:underline">
